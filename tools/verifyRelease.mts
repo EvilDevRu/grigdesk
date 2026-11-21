@@ -8,7 +8,7 @@ import { verifyDistributionArtifacts } from './releaseArtifactVerification.mts';
 import { verifyInstallation } from './verifyInstallation.mts';
 import { RELEASE_SIGNING_PUBLIC_KEY } from '../shared/runtime/releaseChannelContracts.ts';
 import { decodeReleaseChecks } from './releaseChecks.mts';
-import { decodeReleaseChannelIndex }
+import { parseReleaseChannelIndex }
   from '../shared/runtime/installedUpdateContracts.ts';
 import { extractReleaseArtifact }
   from '../shared/node/releaseArchive.ts';
@@ -18,6 +18,9 @@ import { decodeServerBinaryInfo }
   from '../shared/runtime/serverBinary.ts';
 import { decodeDeepSeekRuntimeInfo }
   from '../shared/chat/deepSeekBinary.ts';
+import { createReadStream, createWriteStream } from 'node:fs';
+import { createGunzip } from 'node:zlib';
+import { pipeline } from 'node:stream/promises';
 import { removePrivateTree }
   from '../shared/node/files.ts';
 
@@ -35,9 +38,9 @@ export async function verifyBuiltRelease(directory: string, expectedCommit: stri
 
   assert.equal(names.length, 1);
 
-  const index = decodeReleaseChannelIndex(JSON.parse(
+  const index = parseReleaseChannelIndex(
     await fs.readFile(path.join(directory, names[0]!), 'utf8'),
-  ));
+  );
 
   assert.ok(index.latest);
   assert.equal(index.latest.payload.commit, expectedCommit);
@@ -76,7 +79,7 @@ export async function verifyBuiltRelease(directory: string, expectedCommit: stri
     expectedCommit,
   };
 
-  await verifyDistributionArtifacts(directory, trust);
+  const distribution = await verifyDistributionArtifacts(directory, trust);
 
   const counts: Record<string, number> = {};
   const runtime: Record<string, unknown> = {};
@@ -99,8 +102,12 @@ export async function verifyBuiltRelease(directory: string, expectedCommit: stri
   const work = await fs.mkdtemp(path.join(directory, 'inventory-check-'));
 
   try {
-    for (const component of ['server', 'desktop'] as const) {
-      const artifact = index.latest.payload.artifacts[component];
+    if (index.format !== 3 || !index.latest.payload.artifacts.control) {
+      throw new Error('release_go_target_required');
+    }
+
+    for (const component of ['server', 'desktop', 'control'] as const) {
+      const artifact = index.latest.payload.artifacts[component]!;
 
       await extractReleaseArtifact(path.join(directory, `${component}.tar.gz`),
         path.join(work, component), artifact);
@@ -129,6 +136,43 @@ export async function verifyBuiltRelease(directory: string, expectedCommit: stri
       timeout: 180000,
       maxBuffer: 1024 * 1024,
     };
+
+    const helper = path.join(work, 'grigdesk-maintenance');
+
+    await pipeline(createReadStream(path.join(directory, 'grigdesk-maintenance.gz')),
+      createGunzip(), createWriteStream(helper, { flags: 'wx', mode: 0o500 }));
+
+    const utilities = {};
+    const expected = index.latest.payload.version;
+
+    assert.equal((await fs.stat(helper)).size, distribution.bootstrap.helperSize);
+
+    for (const [kind, binary] of Object.entries({
+      tracker: path.join(work, 'server/bin/tracker'),
+      routes: path.join(work, 'server/bin/routes'),
+      pipeline: path.join(work, 'server/bin/pipeline'),
+      voice: path.join(work, 'server/bin/voice'),
+      'grigdesk-relay': path.join(work, 'server/bin/grigdesk-relay'),
+      'grigdesk-ctl': path.join(work, 'control/bin/grigdesk-ctl'),
+      'grigdesk-maintenance': helper,
+    })) {
+      const observed = await execute(binary, ['--runtime-info', '--json'], options);
+      const info = JSON.parse(observed.stdout);
+
+      assert.equal(observed.stderr, '');
+      assert.deepEqual(info, {
+        schema: 1,
+        kind,
+        version: expected,
+        runtime: 'go',
+        go: 'go1.27.4',
+        os: 'linux',
+        arch: 'amd64',
+      });
+      Object.assign(utilities, { [kind]: info });
+    }
+
+    runtime.utilities = utilities;
 
     runtime.installation = await verifyInstallation(directory, expectedCommit, {
       trust,

@@ -16,7 +16,7 @@ import { releaseSignedBytes } from '../shared/node/releaseTrust.ts';
 import { sha256, sha256File } from '../shared/node/hash.ts';
 import { acquireDirectoryLock } from '../shared/node/directoryLock.ts';
 import { auditStage } from '../server/scripts/sea/stage.mts';
-import { buildMaintenance } from './build-maintenance.mts';
+import { buildReleaseUtility } from './goReleaseUtility.mts';
 import { renderBootstrap } from './installBootstrap.mts';
 import type { BundleOptions, BundleBuildInput } from './bundleSteps.mts';
 
@@ -57,7 +57,7 @@ interface InstalledBundleStage {
   files: Record<string, StageFile>;
 }
 
-const stagedNames = ['desktop.tar.gz', 'server.tar.gz', 'grigdesk-maintenance.gz',
+const stagedNames = ['desktop.tar.gz', 'server.tar.gz', 'control.tar.gz', 'grigdesk-maintenance.gz',
   'bootstrap-template.sh', 'installer-ru.json', 'installer-en.json'];
 
 const stageFile = 'unsigned-stage.json';
@@ -168,7 +168,7 @@ export async function stageInstalledBundle(options: BundleOptions, work: string)
       }
   }
 
-  for (const component of ['desktop', 'server']) {
+  for (const component of ['desktop', 'server', 'control']) {
     await fs.mkdir(path.join(work, component, 'bin'), { recursive: true, mode: 0o700 });
   }
 
@@ -206,9 +206,17 @@ export async function stageInstalledBundle(options: BundleOptions, work: string)
   await options.verifyDeepSeek(deepseek, env);
   await options.verifyDeepSeekCompatibility(deepseek, env);
 
+  await buildReleaseUtility('grigdesk-ctl', {
+    root,
+    version,
+    env,
+    output: path.join(work, 'control/bin/grigdesk-ctl'),
+    cache: path.join(work, 'cache/go'),
+  });
+
   const artifacts = {} as ReleasePayload['artifacts'];
 
-  for (const component of ['desktop', 'server'] as const) {
+  for (const component of ['desktop', 'server', 'control'] as const) {
     const directory = path.join(work, component);
     const entries = await auditStage(directory, { required: [] });
 
@@ -247,7 +255,7 @@ export async function stageInstalledBundle(options: BundleOptions, work: string)
       }
 
       artifact.packageId = metadata.packageId;
-    } else if (platform.os === 'darwin') {
+    } else if (component === 'desktop' && platform.os === 'darwin') {
       artifact.unpackedBundleBytes = await macDesktopTreeBytes(path.join(directory, MAC_APP_TREE));
     }
 
@@ -265,13 +273,16 @@ export async function stageInstalledBundle(options: BundleOptions, work: string)
     artifacts,
   };
 
-  await buildMaintenance({
+  const rawHelper = path.join(work, 'grigdesk-install');
+
+  await buildReleaseUtility('grigdesk-maintenance', {
     root,
-    outDir: work,
-    cacheDir: path.join(work, 'cache/maintenance')
+    version,
+    env,
+    output: rawHelper,
+    cache: path.join(work, 'cache/go'),
   });
 
-  const rawHelper = path.join(work, 'grigdesk-install');
   const helperFile = path.join(work, 'grigdesk-maintenance.gz');
   const gzipOutput = await fs.open(helperFile, 'wx', 0o644);
   const gzip = spawn('gzip', ['-n', '-c', rawHelper],
@@ -355,9 +366,13 @@ export async function sealInstalledBundle(
   const payload = description.payload;
   const { channel, artifacts } = payload;
   const identity = buildReleaseIdentity(channel, payload.version, payload.commit);
-  const envelope = { payload, signature: '' };
+  const envelope = {
+    format: 3 as const,
+    payload,
+    signature: '',
+  };
   const index = {
-    format: 2,
+    format: 3,
     channel,
     publishedAt: payload.publishedAt,
     latest: envelope,
@@ -372,9 +387,9 @@ export async function sealInstalledBundle(
     throw new Error('release_staging_identity_invalid');
   }
 
-  for (const component of ['desktop', 'server'] as const) {
+  for (const component of ['desktop', 'server', 'control'] as const) {
     const actual = description.files[component + '.tar.gz']!;
-    const expected = artifacts[component];
+    const expected = artifacts[component]!;
 
     if (actual.sha256 !== expected.sha256 || actual.size !== expected.size) {
       throw new Error('release_staging_file_changed');
@@ -388,6 +403,7 @@ export async function sealInstalledBundle(
   const indexBytes = Buffer.from(canonicalJson(index) + '\n', 'utf8');
   const manifestDigest = sha256(releaseSignedBytes(envelope));
   const compressed = description.files['grigdesk-maintenance.gz']!;
+  const downloadBase = indexBytes.length + compressed.size + artifacts.control!.size;
   const script = renderBootstrap({
     format: 1,
     version: payload.version,
@@ -403,9 +419,9 @@ export async function sealInstalledBundle(
     compressedSha256: compressed.sha256,
     compressedSize: compressed.size,
     downloadBytes: {
-      local: indexBytes.length + compressed.size + artifacts.desktop.size + artifacts.server.size,
-      remote: indexBytes.length + compressed.size + artifacts.desktop.size,
-      server: indexBytes.length + compressed.size + artifacts.server.size,
+      local: downloadBase + artifacts.desktop.size + artifacts.server.size,
+      remote: downloadBase + artifacts.desktop.size,
+      server: downloadBase + artifacts.server.size,
     },
   }, await fs.readFile(path.join(work, 'bootstrap-template.sh'), 'utf8'), {
     ru: JSON.parse(await fs.readFile(path.join(work, 'installer-ru.json'), 'utf8')),
@@ -434,7 +450,8 @@ export async function sealInstalledBundle(
 
   await fs.mkdir(target);
 
-  for (const name of ['desktop.tar.gz', 'server.tar.gz', 'grigdesk-maintenance.gz', 'grigdesk-install',
+  for (const name of ['desktop.tar.gz', 'server.tar.gz', 'control.tar.gz',
+    'grigdesk-maintenance.gz', 'grigdesk-install',
     'grigdesk-install.sha256',
     'grigdesk-install.sig', 'release-acceptance.json', `${channel}.json`]) {
     await fs.rename(path.join(work, name), path.join(target, name));

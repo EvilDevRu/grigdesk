@@ -1,0 +1,22 @@
+{
+  "manifest.json": {
+    "mode": 384,
+    "text": "{\"activeSegment\":\"active-0000000000000002.ndjson\",\"generation\":2,\"protocolVersion\":2,\"schemaVersion\":1,\"sealedSegments\":[{\"basePreviousEventHash\":null,\"byteLength\":879,\"contentSha256\":\"61efd1f9297021dbfff1a167e8f1cd8531279797dcb8a87d43974777cd6e7929\",\"eventCount\":1,\"firstEventHash\":\"01637541752d95d5e3375f7ec1aa8653a11273727e4899bf4b91abaf5b2f73d8\",\"firstSequence\":1,\"generation\":1,\"lastEventHash\":\"01637541752d95d5e3375f7ec1aa8653a11273727e4899bf4b91abaf5b2f73d8\",\"lastSequence\":1,\"name\":\"sealed-0000000000000001.ndjson\",\"previousSegmentSha256\":null}]}\n"
+  },
+  "segments/active-0000000000000001.ndjson": {
+    "mode": 384,
+    "text": "{\"at\":\"2026-08-19T01:02:03.004Z\",\"attemptId\":\"a_11111111111111111111111111111111\",\"clock\":{\"bootId\":\"00000000-0000-4000-8000-000000000001\",\"fidelity\":\"monotonic\",\"monotonicNs\":\"123456789\"},\"details\":{\"attemptRecordSha256\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"origin\":\"fresh\",\"previousAttemptId\":null,\"recoveryReasonSha256\":null},\"dispatchId\":null,\"epoch\":null,\"eventHash\":\"01637541752d95d5e3375f7ec1aa8653a11273727e4899bf4b91abaf5b2f73d8\",\"eventId\":\"ev_00000000000000000000000000000001\",\"kind\":\"attempt_started\",\"nodeExecutionId\":null,\"nodeId\":null,\"nodeVisitId\":null,\"orchestratorSessionId\":\"os_11111111111111111111111111111111\",\"previousEventHash\":null,\"profile\":\"demo-profile\",\"protocolVersion\":2,\"routeHash\":null,\"routeId\":null,\"runId\":null,\"runKey\":null,\"schemaVersion\":1,\"sequence\":1,\"spanId\":null,\"taskId\":\"t51\",\"writerVersion\":\"fixture-1\"}\n"
+  },
+  "segments/active-0000000000000002.ndjson": {
+    "mode": 384,
+    "text": "{\"at\":\"2026-08-19T01:02:03.004Z\",\"attemptId\":\"a_11111111111111111111111111111111\",\"clock\":{\"bootId\":\"00000000-0000-4000-8000-000000000001\",\"fidelity\":\"monotonic\",\"monotonicNs\":\"123456789\"},\"details\":{\"attemptRecordSha256\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"origin\":\"fresh\",\"previousAttemptId\":null,\"recoveryReasonSha256\":null},\"dispatchId\":null,\"epoch\":null,\"eventHash\":\"5a007e31d39023c70bbb6f768af1e236f061ccd62572714f0f2a0a3feafce6be\",\"eventId\":\"ev_00000000000000000000000000000002\",\"kind\":\"attempt_started\",\"nodeExecutionId\":null,\"nodeId\":null,\"nodeVisitId\":null,\"orchestratorSessionId\":\"os_11111111111111111111111111111111\",\"previousEventHash\":\"01637541752d95d5e3375f7ec1aa8653a11273727e4899bf4b91abaf5b2f73d8\",\"profile\":\"demo-profile\",\"protocolVersion\":2,\"routeHash\":null,\"routeId\":null,\"runId\":null,\"runKey\":null,\"schemaVersion\":1,\"sequence\":2,\"spanId\":null,\"taskId\":\"t51\",\"writerVersion\":\"fixture-1\"}\n"
+  },
+  "segments/sealed-0000000000000001.ndjson": {
+    "mode": 256,
+    "text": "{\"at\":\"2026-08-19T01:02:03.004Z\",\"attemptId\":\"a_11111111111111111111111111111111\",\"clock\":{\"bootId\":\"00000000-0000-4000-8000-000000000001\",\"fidelity\":\"monotonic\",\"monotonicNs\":\"123456789\"},\"details\":{\"attemptRecordSha256\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"origin\":\"fresh\",\"previousAttemptId\":null,\"recoveryReasonSha256\":null},\"dispatchId\":null,\"epoch\":null,\"eventHash\":\"01637541752d95d5e3375f7ec1aa8653a11273727e4899bf4b91abaf5b2f73d8\",\"eventId\":\"ev_00000000000000000000000000000001\",\"kind\":\"attempt_started\",\"nodeExecutionId\":null,\"nodeId\":null,\"nodeVisitId\":null,\"orchestratorSessionId\":\"os_11111111111111111111111111111111\",\"previousEventHash\":null,\"profile\":\"demo-profile\",\"protocolVersion\":2,\"routeHash\":null,\"routeId\":null,\"runId\":null,\"runKey\":null,\"schemaVersion\":1,\"sequence\":1,\"spanId\":null,\"taskId\":\"t51\",\"writerVersion\":\"fixture-1\"}\n"
+  },
+  "tail.json": {
+    "mode": 384,
+    "text": "{\"activeSegment\":\"active-0000000000000002.ndjson\",\"byteLength\":941,\"eventHash\":\"5a007e31d39023c70bbb6f768af1e236f061ccd62572714f0f2a0a3feafce6be\",\"generation\":2,\"protocolVersion\":2,\"schemaVersion\":1,\"sequence\":2}\n"
+  }
+}

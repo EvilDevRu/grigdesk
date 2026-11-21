@@ -2,12 +2,10 @@ import { execFile } from 'node:child_process';
 import path from 'node:path';
 import { promisify } from 'node:util';
 
-import { runtimeRoot } from '../runtimePaths.ts';
+import { factoryHelper, factoryStatusCommands } from '../factoryRuntime.ts';
+import type { FactoryCommands } from '../factoryRuntime.ts';
 
 const execFileAsync = promisify(execFile);
-const FACTORY_HOME = path.join(runtimeRoot(), 'engine');
-const STAGE_PROGRESS = path.join(FACTORY_HOME, 'lib/stage-progress.sh');
-const STAGE_RESULT = path.join(FACTORY_HOME, 'lib/stage-result.sh');
 
 interface RunContext {
   task: string;
@@ -17,6 +15,7 @@ interface RunContext {
   requestDir: string;
   stateDir: string;
   env: NodeJS.ProcessEnv;
+  engine: FactoryCommands;
 }
 
 /**
@@ -54,6 +53,7 @@ function runContext(env: NodeJS.ProcessEnv): RunContext {
     epoch,
     requestDir,
     stateDir,
+    engine: factoryStatusCommands(env),
     env
   };
 }
@@ -103,7 +103,8 @@ function childEnvironment(context: RunContext): NodeJS.ProcessEnv {
     LANG: context.env.LANG || 'C.UTF-8',
     LC_ALL: context.env.LC_ALL || '',
     TZ: context.env.TZ || '',
-    FACTORY_HOME,
+    FACTORY_HOME: context.engine.home,
+    FACTORY_RUN_ATTEMPT: context.env.FACTORY_RUN_ATTEMPT || '',
     FACTORY_STATE: context.stateDir,
     STATE_DIR: context.stateDir,
     FACTORY_RUN_TASK: context.task,
@@ -130,9 +131,11 @@ function childEnvironment(context: RunContext): NodeJS.ProcessEnv {
  * Штатный writer выполняется вне namespace с ограниченными временем и выводом.
  * Отказ возвращается инструменту, не подменяя результат стадии успешным JSON.
  */
-async function invoke(script: string, args: string[], context: RunContext) {
+async function invoke(verb: 'stage-progress' | 'stage-result', args: string[], context: RunContext) {
+  const helper = factoryHelper(context.engine, verb, args);
+
   try {
-    const { stdout, stderr } = await execFileAsync(script, args, {
+    const { stdout, stderr } = await execFileAsync(helper.command, helper.args, {
       cwd: context.stateDir,
       env: childEnvironment(context),
       encoding: 'utf8',
@@ -203,7 +206,7 @@ async function stageProgress(argumentsValue: unknown, context: RunContext) {
     pairs.push(key, value);
   }
 
-  return invoke(STAGE_PROGRESS, [
+  return invoke('stage-progress', [
     '--task', context.task,
     '--stage', context.stage,
     '--run-id', context.runId,
@@ -287,7 +290,7 @@ async function stageResult(argumentsValue: unknown, context: RunContext) {
 
   args.push(result, comment);
 
-  return invoke(STAGE_RESULT, args, context);
+  return invoke('stage-result', args, context);
 }
 
 /**

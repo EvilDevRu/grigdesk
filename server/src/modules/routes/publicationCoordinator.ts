@@ -1,5 +1,7 @@
 import { createHash } from 'node:crypto';
 
+import type { FactoryCommands } from '../../lib/factoryRuntime.ts';
+
 import type { RoutePublication } from '../../../../shared/pipeline/routesEditorContracts.ts';
 
 import { DraftStore, RoutesEditorStoreError } from './draftStore.ts';
@@ -34,11 +36,14 @@ export class RoutesPublicationCoordinator {
 
   readonly journal: PublicationJournal;
 
+  readonly runtime?: FactoryCommands;
+
   constructor(store: RoutesStore, draftStore: DraftStore | null = null,
-    profilesDir: string | null = null) {
+    profilesDir: string | null = null, runtime?: FactoryCommands) {
     this.store = store;
     this.draftStore = draftStore;
     this.profilesDir = profilesDir;
+    this.runtime = runtime;
     this.journal = new PublicationJournal(store);
   }
 
@@ -124,7 +129,10 @@ export class RoutesPublicationCoordinator {
         currentCatalogHash: current?.catalogHash ?? null,
       });
     }
-    const capabilities = await readEditorCapabilities(profile, { profilesDir: this.profilesDir });
+
+    const capabilities = await readEditorCapabilities(profile, {
+      profilesDir: this.profilesDir, runtime: this.runtime,
+    });
     if (!capabilities.capabilitiesHash) {
       throw new RoutesEditorStoreError('routes_profile_unavailable',
         'Невозможно проверить возможности профиля');
@@ -137,7 +145,8 @@ export class RoutesPublicationCoordinator {
       throw new RoutesEditorStoreError('routes_validation_failed',
         'Черновик не готов к публикации', { issues });
     }
-    const prepared = await prepareDraftCatalog(this.store, draft);
+
+    const prepared = await prepareDraftCatalog(this.store, draft, this.runtime);
     await beforeActivation?.();
 
     let newlyCommitted = false;

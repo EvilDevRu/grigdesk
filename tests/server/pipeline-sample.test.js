@@ -6,8 +6,9 @@ import { pathToFileURL } from 'node:url';
 
 import { RoutesStore } from '../../server/src/modules/routes/store.ts';
 import {
-  ROOT, ENGINE, SEQUENCES, TASK, fixture, published, context, put, run, ok, hook, requireSample,
+  ROOT, SEQUENCES, TASK, fixture, published, context, put, run, ok, hook, requireSample,
 } from '../fixtures/pipelineSample.mjs';
+import { testFactoryBinary } from '../helpers/factoryBinary.mjs';
 
 const OWNERS = ['plan', 'tests', 'build', 'human', 'environment'];
 
@@ -248,7 +249,7 @@ test('SAMPLE-PROMPTS-01/02/03: engine renders human-first work and task-wide acc
 test('SAMPLE-E2E-01: synthetic project passes complete offline chain', async (t) => {
   const f = await fixture(t);
 
-  ok(run('python3', [path.join(f.profile, 'configure.py'), '--factory', path.join(ENGINE, 'bin/factory')],
+  ok(run('python3', [path.join(f.profile, 'configure.py'), '--factory', testFactoryBinary()],
     { env: f.env }));
 
   const p = await published(f);
@@ -289,10 +290,10 @@ test('SAMPLE-E2E-01: synthetic project passes complete offline chain', async (t)
 
   graph.capabilities = ['route-v2'];
   await writeFile(graphFile, JSON.stringify(graph));
-  ok(run(path.join(ENGINE, 'bin/factory-check'), [f.project.id, '--quick'], { env: f.env }));
+  ok(run(testFactoryBinary(), ['profile-check', f.project.id, '--quick'], { env: f.env }));
 
   for (const route of Object.keys(SEQUENCES)) {
-    ok(run(path.join(ENGINE, 'bin/factory'), ['check', '--profile', f.project.id,
+    ok(run(testFactoryBinary(), ['check', '--profile', f.project.id,
       '--route', route, '--routes-dir', p.routes], { env: f.env }));
 
     const value = await context(f, route);
@@ -334,14 +335,6 @@ test('SAMPLE-E2E-01: synthetic project passes complete offline chain', async (t)
     assert.deepEqual(action, { stop: 'human' });
   }
 
-  await put(f.state, `t${TASK}.recon.md`,
-    '## Карта задачи\nСинтетическая карта\n### Как принято у нас\nПравила\n');
-
-  const map = ok(run('bash', ['-c',
-    'source "$FACTORY_HOME/lib/core.sh"; _stage_task_map_block "$1"', 'fixture',
-    path.join(f.state, `t${TASK}.recon.md`)], { env: f.env }));
-
-  assert.match(map, /Синтетическая карта/);
   assert.equal(hook(f, 'profile_workspace_mode').status, 0);
 });
 

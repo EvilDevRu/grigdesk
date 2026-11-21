@@ -63,6 +63,16 @@ To keep a run, create an empty `.keep` file in its directory or ask the agent to
 Placement follows the executor's write permissions. Turns that cannot use a run directory
 continue to use the previous layout.
 
+## Find what takes up space
+
+Run `grigdesk-ctl artifacts-cleanup --inventory` to see disk usage by category and the
+20 largest entries. Add `--topic <name>` to inspect one top-level directory, or
+`--json` for the full list in bytes.
+
+The inventory counts allocated disk blocks. It runs without deleting files or
+filtering by age. If some directories cannot be read, the report shows the measured
+size so far and the read errors. A large scan can take a few minutes. Press Ctrl+C for a partial report.
+
 ## Cleaning old artifacts
 
 1. Back up artifacts you need. Cleanup is irreversible and does not check conversation links;

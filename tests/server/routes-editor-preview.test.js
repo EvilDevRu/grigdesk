@@ -4,17 +4,18 @@ import { promises as fs } from 'node:fs';
 import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 
 import routesModule from '../../server/src/modules/routes/index.ts';
 import { renderDraftPreview } from '../../server/src/modules/routes/editorEngine.ts';
 import { RoutesStore } from '../../server/src/modules/routes/store.ts';
 import { makeDraft } from '../fixtures/routes-editor.mjs';
+import { testFactoryBinary } from '../helpers/factoryBinary.mjs';
 
 const requireFromServer = createRequire(new URL('../../server/package.json', import.meta.url));
 const Fastify = requireFromServer('fastify');
-const ROUTE_TOOL = fileURLToPath(new URL('../../engine/bin/factory-route', import.meta.url));
+
+const ROUTE_TOOL = testFactoryBinary();
 const DRAFT_BASE = '/api/routes/sample/drafts';
 
 async function fixture(t) {
@@ -75,7 +76,8 @@ async function publishedRender(config, draft, context, root) {
   }, { expectedCatalogHash: null });
   const contextFile = path.join(root, 'context.json');
   await fs.writeFile(contextFile, JSON.stringify(context));
-  const result = spawnSync(ROUTE_TOOL, [
+
+  const result = spawnSync(ROUTE_TOOL, ['route',
     '--routes-dir', config.routesDir,
     '--profile', 'sample',
     'render-route', '--catalog-hash', published.catalogHash,
@@ -86,7 +88,7 @@ async function publishedRender(config, draft, context, root) {
 }
 
 function editorRender(draft, context, scope = 'route', nodeId = 'build') {
-  const result = spawnSync(ROUTE_TOOL, ['--profile', draft.profile, 'editor-render'], {
+  const result = spawnSync(ROUTE_TOOL, ['route', '--profile', draft.profile, 'editor-render'], {
     input: JSON.stringify({
       catalogInput: {
         profile: draft.profile,

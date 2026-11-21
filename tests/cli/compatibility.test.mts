@@ -3,7 +3,7 @@ import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import test from 'node:test';
 
-import { HELP_TEXT } from '../../cli/args.ts';
+import { HELP_TEXT } from '../../tests/fixtures/legacy-ctl/cli/args.ts';
 import { fixture, expectedBuildCalls } from '../server/helpers/ctlBuildFixture.js';
 import { createSandbox } from './helpers/sandbox.mts';
 import { startPty, assertRestored } from './helpers/pty.mts';

@@ -1,11 +1,19 @@
 import net from 'node:net';
 import tls from 'node:tls';
 import https from 'node:https';
+import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 
 import { isolatedLookup } from '../../isolatedDns.ts';
 import { RelayLink, normalizeRelayIp } from '../relayLink.ts';
 import type { Relay } from '../store.ts';
-import { dialRelay, relayHello } from '../transport.ts';
+import { dialRelay, relayHello, relayLine } from '../transport.ts';
+
+export interface DeploymentProof {
+  relayId: string;
+  releaseId: string;
+  artifactSha: string;
+  secret: string;
+}
 
 export interface CandidateOptions {
   relay: Relay;
@@ -13,6 +21,8 @@ export interface CandidateOptions {
   vpnGate: (ip: string) => Promise<boolean>;
   clientTarget?: () => Promise<number>;
   existing?: boolean;
+  address?: string;
+  proof?: DeploymentProof;
 }
 
 /**
@@ -36,7 +46,12 @@ export async function candidateAddress(host: string, gate: CandidateOptions['vpn
 export async function verifyCandidate(
   options: CandidateOptions,
 ): Promise<{ verified: true; address: string }> {
-  const address = await candidateAddress(options.relay.host, options.vpnGate);
+  const address = options.address ?? await candidateAddress(options.relay.host, options.vpnGate);
+
+  if (options.proof) {
+    await probeDeployment(options.relay, address, options.proof);
+  }
+
   const link = options.existing ? null : new RelayLink({
     relay: { ...options.relay, host: address },
     mobilePort: 0,
@@ -68,6 +83,57 @@ export async function verifyCandidate(
     return { verified: true, address };
   } finally {
     link?.stop();
+  }
+}
+
+/**
+ * Запрашивает доказательство установленного поколения по тому же числовому адресу и TLS pin.
+ * Подписанные поля связывают ответ с этим запросом и проверенным архивом.
+ */
+async function probeDeployment(relay: Relay, address: string, proof: DeploymentProof): Promise<void> {
+  const socket = await dialRelay({
+    ip: address,
+    port: relay.port,
+    fp: relay.fp,
+  });
+  const challenge = randomBytes(32).toString('base64url');
+  const sign = (value: string) => createHmac('sha256', Buffer.from(proof.secret, 'base64url'))
+    .update(value).digest();
+
+  try {
+    const answer = relayLine(socket, 5000);
+    const mac = sign(`grigdesk relay check v1\n${challenge}`).toString('base64url');
+
+    socket.write(`${JSON.stringify({
+      v: 1,
+      role: 'health',
+      deploymentProof: {
+        schema: 1,
+        challenge,
+        mac,
+      },
+    })}\n`);
+
+    const reply = JSON.parse(await answer);
+    const value = reply?.deploymentProof;
+
+    if (reply?.ok !== true || value?.schema !== 1 || value.challenge !== challenge
+      || value.relayId !== proof.relayId || value.releaseId !== proof.releaseId
+      || value.artifactSha !== proof.artifactSha || typeof value.mac !== 'string'
+      || !/^[A-Za-z0-9_-]{43}$/.test(value.mac)) {
+      throw new Error('relay_proof_required');
+    }
+
+    const observed = Buffer.from(value.mac, 'base64url');
+    const expected = sign(['grigdesk relay proof v1', challenge,
+      proof.relayId, proof.releaseId, proof.artifactSha].join('\n'));
+
+    if (observed.length !== expected.length || observed.toString('base64url') !== value.mac
+      || !timingSafeEqual(observed, expected)) {
+      throw new Error('relay_proof_required');
+    }
+  } finally {
+    socket.destroy();
   }
 }
 

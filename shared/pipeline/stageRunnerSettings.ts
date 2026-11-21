@@ -280,6 +280,11 @@ export function stageRunnerSelectionError(
 
   const model = selection.model ?? options.inherited?.model ?? options.effective.model;
   const effort = selection.effort ?? options.inherited?.effort ?? options.effective.effort;
+
+  if (model === '' && selection.model === null && selection.effort === null) {
+    return null;
+  }
+
   const entry = options.models.find((item) => item.id === model || item.aliases?.includes(model));
 
   if (!entry) {

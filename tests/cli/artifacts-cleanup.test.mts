@@ -6,8 +6,8 @@ import path from 'node:path';
 import test from 'node:test';
 import type { TestContext } from 'node:test';
 
-import { parseArgs } from '../../cli/args.ts';
-import { runCli } from '../../cli/commands.ts';
+import { parseArgs } from '../../tests/fixtures/legacy-ctl/cli/args.ts';
+import { runCli } from '../../tests/fixtures/legacy-ctl/cli/commands.ts';
 import { acquireDirectoryLock, directoryCleanupLockPath } from '../../shared/node/directoryLock.ts';
 import { completed } from './helpers/sandbox.mts';
 import { sourceMenu } from './helpers/menuFixture.mts';

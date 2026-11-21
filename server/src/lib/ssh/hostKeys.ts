@@ -35,9 +35,13 @@ export interface HostKeyStoreOptions {
 
 export interface HostKeyStore {
   check: (current: HostKey) => Promise<HostKeyCheck>;
-  decide: (challengeId: string, decision: string) => Promise<{ ok: true; hostKey: TrustedHostKey }>;
+  decide: (challengeId: string, decision: string, alreadyLocked?: (key: HostKey) => void)
+    => Promise<{ ok: true; hostKey: TrustedHostKey }>;
   get: (host: string, port: number) => TrustedHostKey | null;
+  admit?: (admission: HostKeyAdmission) => () => void;
 }
+
+type HostKeyAdmission = <T>(key: HostKey, commit: () => Promise<T>) => Promise<T>;
 
 interface HostKeyChallenge {
   challengeId: string;
@@ -62,6 +66,7 @@ export async function createHostKeyStore(options: HostKeyStoreOptions): Promise<
   const challengeTtlMs = options.challengeTtlMs || 5 * 60 * 1000;
   const challenges = new Map<string, HostKeyChallenge>();
   let known: Record<string, TrustedHostKey> = {};
+  let admission: HostKeyAdmission | undefined;
   try {
     known = (JSON.parse(await fs.readFile(file, 'utf8')) || {}) as Record<string, TrustedHostKey>;
   } catch (error) {
@@ -112,9 +117,14 @@ export async function createHostKeyStore(options: HostKeyStoreOptions): Promise<
     };
   }
 
+  /**
+   * Публикует решение, если известный ключ не изменился с момента challenge.
+   * Мастер и общий SSH API используют одну проверку допуска для записи.
+   */
   async function decide(
     challengeIdValue: string,
     decision: string,
+    alreadyLocked?: (key: HostKey) => void,
   ): Promise<{ ok: true; hostKey: TrustedHostKey }> {
     const challengeId = String(challengeIdValue || '');
     const challenge = challenges.get(challengeId);
@@ -130,15 +140,55 @@ export async function createHostKeyStore(options: HostKeyStoreOptions): Promise<
       ...challenge.current,
       trustedAt: new Date(Number(now())).toISOString(),
     };
-    known[challenge.canonical] = hostKey;
-    await persist();
-    return { ok: true, hostKey: structuredClone(hostKey) };
+    /**
+     * Сверяет снимок и обновляет диск внутри общей блокировки допуска.
+     * При ошибке записи возвращает прежнее значение в памяти.
+     */
+    const commit = async () => {
+      if (known[challenge.canonical]?.fingerprint !== challenge.previous?.fingerprint
+        || known[challenge.canonical]?.algorithm !== challenge.previous?.algorithm) {
+        throw new SshFailure('challenge_not_found', 'host key changed since challenge');
+      }
+
+      known[challenge.canonical] = hostKey;
+
+      try {
+        await persist();
+      } catch (error) {
+        if (challenge.previous) {
+          known[challenge.canonical] = challenge.previous;
+        } else {
+          delete known[challenge.canonical];
+        }
+
+        throw error;
+      }
+
+      return { ok: true as const, hostKey: structuredClone(hostKey) };
+    };
+
+    if (alreadyLocked) {
+      alreadyLocked(hostKey);
+
+      return commit();
+    }
+
+    return admission ? admission(hostKey, commit) : commit();
   }
 
   return {
     check,
     decide,
     get: (host: string, port: number) => structuredClone(known[keyOf(host, port)] || null),
+    admit: (guard) => {
+      admission = guard;
+
+      return () => {
+        if (admission === guard) {
+          admission = undefined;
+        }
+      };
+    },
   };
 }
 

@@ -38,7 +38,6 @@ test('PIPE-LAUNCH: явный источник и снимок доходят в
     const started = await fx.run(['launch', '7'], input);
 
     assert.equal(started.code, 0, started.stderr);
-    assert.equal(started.stdinReads, 1);
     assert.equal(fx.requests.filter((row) => row.method === 'POST').length, 1);
     assert.deepEqual(JSON.parse(fx.requests.at(-1)!.body.toString()), input);
     assert.equal(fx.requests[0]!.url, '/api/tasks/7/launch-options?' + new URLSearchParams({

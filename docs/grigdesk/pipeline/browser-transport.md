@@ -29,6 +29,8 @@ JSON request не передаёт секрет в argv. Codex получает 
 mailbox и evidence root; canonical shell exemption допускает только точную команду,
 не chains. FD9 binding reader не сдвигает status FD7. Prompt не содержит token.
 Режим проверяется launcher и повторно bridge; ошибка чтения не подменяется режимом grigdesk.
+Go на Linux передаёт инструкцию CLI и браузерное окружение после подтверждения
+relay. В legacy mode исполнитель получает исходный prompt и стартует без browser capability.
 Encrypted `host.ready` содержит lease на две секунды, обновляемый каждые 500 мс независимо
 от socket request. Отсутствующий или просроченный readiness до запроса даёт
 `browser_transport_dead` в CLI и MCP, без чтения host PID из песочницы агента.
@@ -61,6 +63,9 @@ SEA helper manifest включает factory-browser с явным main/export �
 browser-*.test.mts для desktop/server/web, factory-browser-*.test.mts и open-stand.test.mts
 через memory guard с concurrency=2. JS-тесты UI/chat wiring входят в прежние npm globs.
 Electron smoke запускается отдельно от worker cache/profile тестов.
+Сквозная проба Go проходит HTTP-ворота, pinned relay и одну запись результата.
+Для DeepSeek и GLM модель заменена loopback endpoint, для Codex, Claude и Kimi
+её заменяет тестовый CLI. Права Codex дополнительно проверяются нативной песочницей.
 
 Смежные контракты: [доступ в чате](../chat/browser-access.md),
 [native-окно и настройки](../web/browser-workspace.md),

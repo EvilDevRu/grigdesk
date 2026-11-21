@@ -29,6 +29,7 @@
 - [Каталог общего кода: shared, готовность исполнителя, усилие и рабочие корни Qwen, архивы и границы сред](shared-code.md) — общий SEA-протокол отдельных CLI и граница аудиопакета voice.
 - [Общая формула допуска GLM для сервера и установщика ELF](glm-compatibility-formula.md)
 - [Общая конфигурация SEA, закреплённые Linux и Apple Silicon Node, подпись Mach-O](sea-build-assets.md)
+- [Общий Go-модуль, сборка семи CLI и отдельная цель фабрики](go-utilities-build.md)
 - [Учёт миграции на TypeScript: актуальная опись, снимок, совместимость и проверки](typescript-migration-state.md)
 - [Типы чистых модулей web и локальных сторов](typed-pure-web-modules.md)
 - [Типы и язык после объединения интерфейса](typed-web-i18n-integration.md)
@@ -38,7 +39,7 @@
 - [Типы чата и живого конвейера](typed-chat-pipeline-boundaries.md)
 - [Типы доски и карточки задачи: справочники, вложения и каталог запуска](typed-task-views.md)
 - [Модули сервера (server/src/modules/)](server-modules.md)
-- [Единая команда в bin/, нативная сборка и проверка владельца при отмене dist check](bin-directory.md)
+- [Единая команда в bin/, сборка фабрики и проверка владельца при отмене dist check](bin-directory.md)
 - [Слои](layers.md)
 
 ## Грабли
@@ -52,4 +53,4 @@
 - [История: Демо: удалено целиком](demo-removal.md)
 - [История: Браузерный VS Code был и ВЫПИЛЕН: serve-web не видит git в worktree](browser-vscode-removal.md)
 
-- [Общее ядро выпуска v2, установки и процессного обновления](../server/installed-release-updates.md)
+- [Подписанная опись, установка и процессное обновление](../server/installed-release-updates.md)

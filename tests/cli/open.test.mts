@@ -5,8 +5,8 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import { HELP_TEXT } from '../../cli/args.ts';
-import { parseLockTarget, readWindow, windowAppPath, windowDataDir } from '../../cli/window.ts';
+import { HELP_TEXT } from '../../tests/fixtures/legacy-ctl/cli/args.ts';
+import { parseLockTarget, readWindow, windowAppPath, windowDataDir } from '../../tests/fixtures/legacy-ctl/cli/window.ts';
 import { completed, createSandbox } from './helpers/sandbox.mts';
 
 test('PB-CTL-OPEN: portable open без descriptor не вызывает службу и не навязывает origin', async (t) => {

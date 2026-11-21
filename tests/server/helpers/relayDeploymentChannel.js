@@ -1,21 +1,21 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
+import { once } from 'node:events';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import tls from 'node:tls';
 import net from 'node:net';
 
-import { readConfig } from '../../../relay/src/config.ts';
-import { createRelayServer } from '../../../relay/src/relayServer.ts';
 import { createHostKeyStore } from '../../../server/src/lib/ssh/hostKeys.ts';
 import { normalizeRelayIp } from '../../../server/src/lib/mobile/relayLink.ts';
 import mobileModule from '../../../server/src/modules/mobile/index.ts';
-import { temporary } from '../../relay/helpers.js';
+import { managedRelayFixture, makeCert, temporary } from '../../relay/helpers.js';
 import { phoneFixture, phoneAdmin } from './phoneAccess.js';
 import { freePort } from './pluginBootFixture.js';
 import { relayRelease } from './relayDeploymentRelease.js';
 import { relayDeploymentSsh } from './relayDeploymentSsh.js';
 import { legacyRelay } from './legacyRelay.js';
-import { makeCert } from '../../relay/helpers.js';
+import { goCandidate } from '../../helpers/goCandidate.mts';
 
 /**
  * Публичный TEST-NET адрес сохраняется до production VPN-проверки.
@@ -46,8 +46,8 @@ export function publicRelayRoute(t) {
  */
 export async function channelFixture(t, options = {}) {
   const directory = options.directory ?? await temporary(t);
-  const ssh = await relayDeploymentSsh(t, options.ssh);
-  const release = relayRelease();
+  const ssh = options.sshFixture ?? await relayDeploymentSsh(t, options.ssh);
+  const release = options.native ? await nativeRelease() : relayRelease();
   const hostKeys = await createHostKeyStore({ file: path.join(directory, 'known-hosts.json') });
   const port = options.port ?? await freePort();
   const services = new Map();
@@ -111,7 +111,9 @@ export async function channelFixture(t, options = {}) {
         let relay;
         const servicePort = Number(env.RELAY_PORT);
 
-        if (options.peer === 'legacy') {
+        if (options.native) {
+          relay = nativeRelay(ssh, id, env);
+        } else if (options.peer === 'legacy') {
           const stored = (await f.mobile.relays.list()).find((item) => item.id === id);
 
           relay = legacyRelay({
@@ -125,7 +127,18 @@ export async function channelFixture(t, options = {}) {
 
           relay = failingPeer(env, options.peer, stranger);
         } else {
-          relay = createRelayServer({ ...readConfig(env), port: servicePort }, { log: () => { } });
+          const proof = path.join(ssh.root, 'opt/grigdesk-relay', id, 'proof.json');
+
+          relay = {
+            async listen(host, port) {
+              const fixture = await managedRelayFixture(t, env, host, port, proof);
+
+              this.close = async () => {
+                fixture.child.kill('SIGTERM');
+                await fixture.exited;
+              };
+            },
+          };
         }
 
         await relay.listen(options.listenHost ?? '127.0.0.1', servicePort);
@@ -163,6 +176,7 @@ export async function channelFixture(t, options = {}) {
   return {
     ...f,
     ssh,
+    hostKeys,
     release,
     port,
     services,
@@ -171,6 +185,57 @@ export async function channelFixture(t, options = {}) {
     publicHost: route?.host ?? '127.0.0.1',
     vpnChecks,
     dialCount: () => route?.dialCount() ?? 0,
+  };
+}
+
+/**
+ * Подписывает собранный ELF и точную версию из независимого Go runtime-info.
+ * Тот же файл будет запущен из физических /opt и /proc временного VPS.
+ */
+async function nativeRelease() {
+  const file = goCandidate('grigdesk-relay');
+  const info = JSON.parse(execFileSync(file, ['--runtime-info', '--json'], { encoding: 'utf8' }));
+
+  return relayRelease({
+    binary: await readFile(file),
+    version: info.version,
+  });
+}
+
+/**
+ * Запускает установленную службу по физическому пути в namespace фикстуры.
+ * Готовность наступает после открытия listener, teardown ждёт выхода bwrap.
+ */
+function nativeRelay(ssh, id, env) {
+  let process;
+  let exit;
+
+  return {
+    listen: async () => {
+      process = ssh.runService(id, env);
+      exit = once(process, 'exit');
+
+      let output = '';
+
+      process.stdout.on('data', (chunk) => output += chunk);
+
+      const deadline = Date.now() + 4000;
+
+      while (!output.includes('"ev":"listening"')) {
+        if (process.exitCode !== null || Date.now() >= deadline) {
+          process.kill('SIGKILL');
+          await exit;
+
+          throw new Error(`Fixture Go relay failed: ${output}`);
+        }
+
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+    },
+    close: async () => {
+      process.kill('SIGKILL');
+      await exit;
+    },
   };
 }
 

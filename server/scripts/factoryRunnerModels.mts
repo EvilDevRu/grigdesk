@@ -9,7 +9,7 @@ try {
 
   console.log(JSON.stringify({
     schema: 1,
-    models: await collectFactoryRunnerModels(provider, catalog, cli),
+    models: await collectFactoryRunnerModels(provider, catalog === '--native' ? null : catalog, cli),
   }));
 } catch (error) {
   console.error((error as Error).message);

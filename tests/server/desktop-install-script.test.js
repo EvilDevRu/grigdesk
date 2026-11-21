@@ -490,24 +490,24 @@ function serverInstaller(t, {
 
   writeFileSync(path.join(fakeBin, 'loginctl'),
     `#!/bin/bash\necho loginctl >> ${shellQuote(otherLog)}\nexit 0\n`, { mode: 0o755 });
-  // npm пишет полный argv; сборка tracker создаёт исполняемый результат, который проверяет helper.
-  writeFileSync(path.join(fakeBin, 'npm'), [
+  // Go-сборщик фиксирует путь и создаёт исполняемые заглушки всех агентских CLI.
+  // Helper проверяет их метаданные до публикации ссылок.
+  mkdirSync(path.join(root, 'tools'));
+  writeFileSync(path.join(root, 'tools/build-go-utilities.sh'), [
     '#!/bin/bash',
-    "printf 'npm %s\\n' \"$*\" >> " + shellQuote(otherLog),
-    'if [[ "$1" == --prefix && ( "$2" == */tracker || "$2" == */routes ) && "$3" == run ]]; then',
-    '  case "$4" in',
-    '    build) program=tracker ;;',
-    '    build:pipeline) program=pipeline ;;',
-    '    *) exit 0 ;;',
-    '  esac',
-    '  [[ "$2" != */routes ]] || program=routes',
-    trackerFails ? '  [[ "$program" != tracker ]] || exit 4' : '  :',
-    "  printf '#!/bin/sh\\n' > \"$2/../bin/$program\"",
-    '  chmod 755 "$2/../bin/$program"',
-    'fi',
-    'exit 0',
+    'set -e',
+    'printf "go-build %s\\n" "$1" >> ' + shellQuote(otherLog),
+    trackerFails ? 'exit 4' : 'mkdir -p "$1"',
+    'for program in tracker pipeline routes; do',
+    '  cat > "$1/$program" <<EOF',
+    '#!/bin/sh',
+    'printf \'{"kind":"%s","runtime":"go"}\\n\' "$program"',
+    'EOF',
+    '  chmod 755 "$1/$program"',
+    'done',
     '',
-  ].join('\n'), { mode: 0o755 });
+  ].join('\n'));
+  writeFileSync(path.join(fakeBin, 'npm'), '#!/bin/bash\nexit 0\n', { mode: 0o755 });
 
   if (previousLink) {
     mkdirSync(path.join(home, '.local/bin'), { recursive: true });
@@ -667,9 +667,8 @@ test('BL-05: --unit-only обходит сборку и ссылку', (t) => {
   assert.doesNotMatch(result.others, /tracker/);
   assert.equal(readlinkSync(path.join(result.home, '.local/bin/tracker')), previous);
   assert.equal(full.status, 0, full.stderr);
-  assert.match(full.others, /npm --prefix \S+\/tracker ci --include=dev --no-audit --no-fund\n/);
-  assert.match(full.others, /npm --prefix \S+\/tracker run build\n/);
-  assert.ok(readlinkSync(path.join(full.home, '.local/bin/tracker')).endsWith('/code/bin/tracker'));
+  assert.match(full.others, /go-build .+\/bin\/utilities\n/u);
+  assert.ok(readlinkSync(path.join(full.home, '.local/bin/tracker')).endsWith('/code/bin/utilities/tracker'));
 });
 
 test('BL-09: отказ сборки tracker предупреждает, но установку сервера не прерывает', (t) => {
@@ -797,12 +796,13 @@ test('BL-PIPELINE: full source install ставит три CLI, unit-only не �
   const full = serverInstaller(t);
 
   assert.equal(full.status, 0, full.stderr);
-  assert.match(full.others, /npm --prefix .+\/tracker run build:pipeline\n/u);
-  assert.match(full.others, /npm --prefix .+\/routes run build\n/u);
+  assert.deepEqual(full.others.split('\n').filter((line) => line.startsWith('go-build ')),
+    ['go-build ' + path.join(full.root, 'bin/utilities')]);
   assert.ok(readlinkSync(path.join(full.home, '.local/bin/routes'))
-    .endsWith('/code/bin/routes'));
-  assert.ok(readlinkSync(path.join(full.home, '.local/bin/tracker')).endsWith('/code/bin/tracker'));
-  assert.ok(readlinkSync(path.join(full.home, '.local/bin/pipeline')).endsWith('/code/bin/pipeline'));
+    .endsWith('/code/bin/utilities/routes'));
+  assert.ok(readlinkSync(path.join(full.home, '.local/bin/tracker')).endsWith('/code/bin/utilities/tracker'));
+  assert.ok(readlinkSync(path.join(full.home, '.local/bin/pipeline'))
+    .endsWith('/code/bin/utilities/pipeline'));
 
   const unit = serverInstaller(t, { unitOnly: true });
 

@@ -1,0 +1,404 @@
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import { spawn } from 'node:child_process';
+import { setTimeout as pause } from 'node:timers/promises';
+
+import {
+  readInstallation, readInstalledPointer, assertInstallationPath,
+} from '../../../../shared/node/installedLayout.ts';
+import { InstalledUpdateService } from '../../release-v2/installedUpdateService.ts';
+import { inspectInstalledServer, startInstalledServer, stopInstalledServerFromCli }
+  from '../../../../shared/node/installedServer.ts';
+import { installedServerUnit, INSTALLED_SERVER_UNIT } from '../../../../shared/node/installedServer.ts';
+import { readInstalledUpdate } from '../../../../shared/node/installedUpdateState.ts';
+import { runInstalledUpdateWorker } from '../../release-v2/installedUpdateWorker.ts';
+import { serverSettings } from '../../../../shared/node/installedServer.ts';
+import { relaySetup } from './relaySetup.ts';
+import { HELP_TEXT, parseArgs, CliArgumentError } from './args.ts';
+import { artifactsCleanupCommand } from './artifactsCleanup.ts';
+import { runArtifactsCleanupMenu } from './artifactsCleanupMenu.ts';
+import { runUpdateCommand } from './updates.ts';
+import { cliTranslator } from '../../../../cli/i18n.ts';
+import { TerminalSession, terminalText } from '../../../../cli/terminal.ts';
+import { assertOutsideDarwinOwner } from '../../../../shared/node/darwinInstalledOwner.ts';
+import { readDarwinServiceRegistration } from '../../../../shared/node/launchdInstalledService.ts';
+import { launchInstalledProcess } from '../../../../shared/node/installedProcess.ts';
+import { candidateNeedsInstaller } from '../../../../shared/runtime/applicationUpdateContracts.ts';
+
+const updateActions = ['check-updates', 'update', 'update-status', 'resume-update', 'update-channel'];
+
+/**
+ * Установленный ctl не загружает Fastify или source runtimePaths ради консольного меню.
+ * Первый кадр использует только receipt/journal; сеть обновляет уже открытый экран в фоне.
+ */
+async function runInstalledMenu(root: string): Promise<number> {
+  const receipt = await readInstallation(root);
+  const service = new InstalledUpdateService(root);
+  const session = new TerminalSession();
+  const { t } = cliTranslator();
+  const allItems = ['check-updates', 'update', 'update-status', 'resume-update',
+    'channel-release', 'channel-dev', 'start', 'stop', 'restart', 'relay-setup', 'relay-restore',
+    'artifactsCleanup', 'exit'];
+  let selected = 0;
+  let status = await service.status();
+  let closed = false;
+  let result = '';
+  let actionActive = false;
+  let cleanupFailure = 0;
+  const menuItems = () => allItems.filter((item) => status.source === 'channel'
+    || !['check-updates', 'update', 'channel-release', 'channel-dev'].includes(item)
+      && (item !== 'resume-update' || status.source !== 'local-test'
+        && !candidateNeedsInstaller(status.source, status.job?.stage)));
+
+  return session.run(async () => {
+    /**
+     * Текущий канал и новый номер видны вместе с локальной версией даже при ошибке сайта.
+     * Внешние данные очищаются общим рендером перед выводом в терминал.
+     */
+    const render = () => {
+      const width = Math.max(1, Math.min(80, session.columns - 1));
+      const items = menuItems();
+      const offline = status.source === 'local-test' ? 'localTestSource'
+        : candidateNeedsInstaller(status.source, status.job?.stage) ? 'candidateResume' : 'candidateSource';
+
+      selected = Math.min(selected, items.length - 1);
+
+      session.draw([
+        `GrigDesk ${status.installed.server ?? status.installed.desktop ?? '—'} · ${receipt.channel}`,
+        status.source === 'channel' ? t(`updates.${status.check.state}`)
+          + (status.check.state === 'available' ? `: ${status.check.envelope?.payload.version ?? ''}` : '')
+          : t(`updates.${offline}`),
+        ...items.flatMap((item, index) => [
+          ...item === 'artifactsCleanup' ? [t('menuGroups.developer')] : [],
+          {
+            spans: [{ text: t(item === 'artifactsCleanup' ? item : `updates.menu_${item}`) }],
+            selected: index === selected,
+          },
+        ]),
+        terminalText(result, width),
+      ], render, { theme: 'dark', width });
+    };
+
+    render();
+
+    if (status.source === 'channel') {
+      void service.checkUpdates().then(async () => {
+        status = await service.status();
+
+        if (!closed && !actionActive) {
+          render();
+        }
+      }).catch(() => {});
+    }
+
+    try {
+      while (true) {
+        const key = await session.nextKey();
+        const items = menuItems();
+
+        if (['escape', 'eof', 'interrupt', 'terminate'].includes(key.name)) {
+          return key.name === 'interrupt' ? 130 : key.name === 'terminate' ? 143 : cleanupFailure;
+        }
+
+        if (key.name === 'up' || key.name === 'down') {
+          selected = (selected + (key.name === 'up' ? -1 : 1) + items.length) % items.length;
+        } else if (key.name === 'return') {
+          const action = items[selected]!;
+
+          if (action === 'exit') {
+            return cleanupFailure;
+          }
+
+          if (action === 'artifactsCleanup') {
+            actionActive = true;
+
+            try {
+              const outcome = await runArtifactsCleanupMenu(session);
+
+              if (outcome?.exit) {
+                return outcome.code;
+              }
+
+              if (outcome?.code) {
+                cleanupFailure = outcome.code;
+              }
+            } finally {
+              actionActive = false;
+            }
+
+            render();
+
+            continue;
+          }
+
+          session.suspend();
+
+          try {
+            const command = action.startsWith('relay-') ? ['relay', action.slice(6)]
+              : action.startsWith('channel-')
+              ? ['server', 'update-channel', action.slice('channel-'.length)] : ['server', action];
+            const code = await runInstalledCli(root, command);
+
+            result = t('updates.commandResult', { code });
+            status = await service.status();
+          } finally {
+            session.resume();
+          }
+        }
+
+        render();
+      }
+    } finally {
+      closed = true;
+    }
+  });
+}
+
+/**
+ * Журнал своей службы читается штатным journalctl, manual-запуск — из собственного файла.
+ * Подключённый процесс получает терминал напрямую и завершает чтение без shell-подстановок.
+ */
+async function followInstalledCommand(command: string, args: string[]): Promise<number> {
+  const child = spawn(command, args, { stdio: 'inherit', shell: false });
+
+  return new Promise((resolve, reject) => {
+    child.once('error', reject);
+    child.once('close', (code) => resolve(code ?? 1));
+  });
+}
+
+/**
+ * Запускает только CLI выбранного server-поколения проверенной установки.
+ * Execve сохраняет stdio, сигналы и exit; отсутствие бинарника не разрешает другой источник.
+ */
+async function runInstalledPipeline(root: string, argv: string[]): Promise<never> {
+    const receipt = await readInstallation(root);
+    const current = await readInstalledPointer(receipt);
+
+    if (!current.server) {
+        throw new Error('pipeline_installed_server_missing');
+    }
+
+    let executable: string;
+
+    try {
+        executable = await assertInstallationPath(root, current.server + '/bin/pipeline');
+    }
+    catch (error) {
+        // Ошибки файловой системы (ENOENT и т.п.) не раскрывают локальный путь
+        // в stderr и получают устойчивый код, как остальные отказы входа.
+        if ((error as NodeJS.ErrnoException).code !== undefined) {
+            throw new Error('pipeline_installed_executable_invalid');
+        }
+
+        throw error;
+    }
+
+    const stat = await fs.lstat(executable).catch(() => null);
+
+    if (!stat || !stat.isFile() || (stat.mode & 0o100) === 0) {
+        throw new Error('pipeline_installed_executable_invalid');
+    }
+
+    const env = Object.fromEntries(Object.entries(process.env)
+        .filter((entry): entry is [string, string] => typeof entry[1] === 'string'));
+
+    env.GRIGDESK_HOME = receipt.dataHome;
+    env.GRIGDESK_DESKTOP_DATA_DIR = receipt.userData;
+    env.GRIGDESK_ENV_FILE = path.join(receipt.dataHome, '.env');
+
+    for (const key of ['APPIMAGE', 'APPDIR', 'NODE_OPTIONS', 'ELECTRON_RUN_AS_NODE']) {
+        delete env[key];
+    }
+
+    if (!process.execve) {
+        throw new Error('maintenance_runtime_incompatible');
+    }
+
+    process.execve(executable, [executable, ...argv], env);
+
+    throw new Error('maintenance_exec_failed');
+}
+
+/**
+ * Отдельный ctl управляет только проверенной установкой и известными каноническими launchers.
+ * Стоп из app/server cgroup требует явного --force, не обходящего trust или права.
+ */
+export async function runInstalledCli(root: string, argv: string[]): Promise<number> {
+  if (argv[0] === 'dist') {
+    const help = argv.includes('--help') || argv.includes('-h');
+
+    (help ? process.stdout : process.stderr).write(
+      'Команда dist доступна в установке из исходников.\n');
+
+    return help ? 0 : 2;
+  }
+
+  const { t } = cliTranslator();
+
+    if (argv[0] === 'pipeline') {
+        try {
+            return await runInstalledPipeline(root, argv.slice(1));
+        } catch (error) {
+            process.stderr.write(t('updates.failure', {
+                code: error instanceof Error ? error.message : 'pipeline_launch_failed',
+            }) + '\n');
+
+            return 1;
+        }
+    }
+
+  if (!argv.length && process.stdin.isTTY && process.stdout.isTTY) {
+    return runInstalledMenu(root);
+  }
+
+  let args;
+
+  try {
+    args = parseArgs(argv);
+  } catch (error) {
+    const message = error instanceof CliArgumentError ? t(error.message)
+      : error instanceof Error ? error.message : 'invalid_arguments';
+
+    process.stderr.write(message + '\n');
+
+    return 2;
+  }
+
+  try {
+    if (args.kind === 'artifacts-cleanup') {
+      return await artifactsCleanupCommand(args, {
+        write: (text) => process.stdout.write(text),
+      });
+    }
+
+    const receipt = await readInstallation(root);
+    const guarded = args.kind === 'open' || args.kind === 'server'
+      && (['stop', 'restart'].includes(args.action ?? '') || args.restart || args.rollback);
+
+    if (guarded && process.platform === 'darwin') {
+      await assertOutsideDarwinOwner(receipt);
+    } else if (guarded && !args.force) {
+      const cgroup = await fs.readFile('/proc/self/cgroup', 'utf8');
+
+      if (cgroup.split(/[\n/]/u).some((part) => part === 'grigdesk-server.service'
+        || /^app-grigdesk-\d+\.scope$/u.test(part))) {
+        throw new Error('release_command_inside_owner_use_force');
+      }
+    }
+
+    if (args.kind === 'relay' && ['setup', 'restore'].includes(args.action ?? '')) {
+      return await relaySetup(args, await serverSettings(receipt));
+    }
+
+    if (args.kind === 'help') {
+      process.stdout.write(HELP_TEXT);
+
+      return 0;
+    }
+
+    if (args.kind === 'version') {
+      const pointer = await readInstalledPointer(receipt);
+
+      process.stdout.write(`GrigDesk ${(pointer.desktop ?? pointer.server)?.split('/')[1] ?? ''}\n`);
+
+      return 0;
+    }
+
+    if (args.kind === 'server' && updateActions.includes(args.action ?? '')) {
+      return runUpdateCommand(args, root, {
+        write: (text) => process.stdout.write(text),
+        error: (text) => process.stderr.write(text),
+      });
+    }
+
+    if (args.kind === 'server' && args.action === 'logs') {
+      if (process.platform === 'darwin') {
+        await readDarwinServiceRegistration(receipt);
+
+        return followInstalledCommand('/usr/bin/tail', ['-n', String(args.lines),
+          ...args.follow ? ['-f'] : [], path.join(receipt.root, 'update/server.log')]);
+      }
+
+      if (await installedServerUnit(receipt)) {
+        return followInstalledCommand('journalctl', ['--user', '-u', INSTALLED_SERVER_UNIT,
+          '-n', String(args.lines), '--no-pager', ...args.follow ? ['-f'] : []]);
+      }
+
+      return followInstalledCommand('tail', ['-n', String(args.lines),
+        ...args.follow ? ['-f'] : [], path.join(receipt.root, 'update/server.log')]);
+    }
+
+    if (args.kind === 'status' || args.kind === 'server') {
+      let state = await inspectInstalledServer(receipt);
+
+      if (args.kind === 'server' && args.action !== 'status') {
+        if (args.action === 'stop' || args.action === 'restart') {
+          await stopInstalledServerFromCli(receipt, state);
+        }
+
+        if (args.action === 'start' || args.action === 'restart') {
+          await startInstalledServer(receipt);
+
+          if (args.wait) {
+            const deadline = Date.now() + 90000;
+
+            while (Date.now() < deadline) {
+              if ((await inspectInstalledServer(receipt)).running) {
+                break;
+              }
+
+              await pause(300);
+            }
+          }
+
+          const job = await readInstalledUpdate(receipt);
+
+          if (job?.stage === 'applied_not_started' && (await inspectInstalledServer(receipt)).running) {
+            await runInstalledUpdateWorker(root, job.id, 'recover');
+          }
+        }
+
+        state = await inspectInstalledServer(receipt);
+      }
+
+      const message = t('updates.serverState', {
+        state: state.running ? 'running' : 'stopped', owner: state.kind,
+      });
+
+      process.stdout.write(args.json ? JSON.stringify(state) + '\n' : message + '\n');
+
+      return 0;
+    }
+
+    if (args.kind === 'open' && receipt.mode !== 'server') {
+      if (process.platform === 'darwin') {
+        await launchInstalledProcess(receipt, ['launch', 'desktop'], 'open');
+
+        return 0;
+      }
+
+      const child = spawn(path.join(root, 'update/maintenance'), ['launch', 'desktop'], {
+        detached: true,
+        stdio: 'ignore',
+        env: process.env,
+      });
+
+      await new Promise<void>((resolve, reject) => {
+        child.once('spawn', resolve);
+        child.once('error', reject);
+      });
+      child.unref();
+
+      return 0;
+    }
+
+    throw new Error('maintenance_action_unavailable');
+  } catch (error) {
+    process.stderr.write(t('updates.failure', {
+      code: error instanceof Error ? error.message : 'release_command_failed',
+    }) + '\n');
+
+    return 1;
+  }
+}

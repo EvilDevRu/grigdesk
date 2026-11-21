@@ -20,7 +20,7 @@ async function fixture(t: TestContext, language = 'ru_RU.UTF-8', argv: string[] 
   const artifacts = path.join(box.temporary, 'artifacts');
   const old = await oldTree(artifacts, 'old', 4096);
   const entry = path.join(box.temporary, 'installed-cleanup.mjs');
-  const cliUrl = new URL('../../cli/installedCli.ts', import.meta.url).href;
+  const cliUrl = new URL('../../tests/fixtures/legacy-ctl/cli/installedCli.ts', import.meta.url).href;
 
   await fs.writeFile(entry, [
     'globalThis.fetch = async () => new Promise(() => {});',

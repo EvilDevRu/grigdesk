@@ -45,6 +45,13 @@ const tools = Object.fromEntries(Object.entries(process.env).filter(([key]) =>
   ['GRIGDESK_BUILD_PROCESS_HELPER', 'GRIGDESK_BUILD_PROCESS_HELPER_SHA256',
     'GRIGDESK_TEST_SETSID_BIN', 'GRIGDESK_BUILD_SETSID_SHA256'].includes(key)));
 const builtIn = [path.dirname(process.execPath), '/usr/bin', '/bin', '/usr/sbin', '/sbin'];
+
+if (!darwin) {
+  const { resolveReleaseGoDirectory } = await import('../releaseEnvironment.mts');
+
+  builtIn.splice(1, 0, await resolveReleaseGoDirectory());
+}
+
 const env: NodeJS.ProcessEnv = {
   ...tools,
   PATH: builtIn.join(':'),

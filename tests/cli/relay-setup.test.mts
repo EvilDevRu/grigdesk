@@ -4,7 +4,7 @@ import { writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import test from 'node:test';
 
-import { parseArgs } from '../../cli/args.ts';
+import { parseArgs } from '../../tests/fixtures/legacy-ctl/cli/args.ts';
 import { relayCliFixture } from './helpers/relayDeployment.mts';
 import { assertRestored } from './helpers/pty.mts';
 

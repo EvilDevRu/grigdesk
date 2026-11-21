@@ -3,15 +3,13 @@ import https from 'node:https';
 import test from 'node:test';
 import tls from 'node:tls';
 
-import { readConfig } from '../../relay/src/config.ts';
-import { createRelayServer } from '../../relay/src/relayServer.ts';
 import { ensureBrainIdentity } from '../../server/src/lib/mobile/identity.ts';
 import { startMobileServer } from '../../server/src/lib/mobile/mobileServer.ts';
 import { PairingCodes } from '../../server/src/lib/mobile/pairing.ts';
 import { nextDelay, normalizeRelayIp, RelayLink } from '../../server/src/lib/mobile/relayLink.ts';
 import { DeviceStore } from '../../server/src/lib/mobile/store.ts';
 import { dialRelay, relayHello } from '../../server/src/lib/mobile/transport.ts';
-import { makeCert, relayEnv, temporary } from '../relay/helpers.js';
+import { makeCert, relayFixture, temporary } from '../relay/helpers.js';
 
 /**
  * Ждёт наблюдаемое состояние вместо фиксированной задержки сети.
@@ -49,16 +47,7 @@ test('MB-15/MB-16: backoff и точная классификация IPv4, IPv6
 test('MB-13: внешний TLS → посредник → внутренний TLS → мобильный hello', async (t) => {
   const directory = await temporary(t);
   const cert = await makeCert(directory, 'relay');
-  const relay = createRelayServer(
-    {
-      ...readConfig(relayEnv({ cert })),
-      port: 0,
-    },
-    { log: () => {} },
-  );
-  const port = await relay.listen('127.0.0.1');
-
-  t.after(() => relay.close());
+  const { port } = await relayFixture(t, cert);
 
   const identity = await ensureBrainIdentity(directory);
   const devices = new DeviceStore(directory);

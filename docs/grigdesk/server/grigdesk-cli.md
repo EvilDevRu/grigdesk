@@ -7,11 +7,25 @@
 сервер ([сервер под приложением](desktop-owned-server.md)), и команда больше ничего не
 запрашивает. Без `runtime.json` (переходный режим до установки новой сборки) команда, как
 прежде, затем запрашивает запуск `grigdesk-server.service`.
-Команда требует Node ^22.19.0 либо >=24.0.0. `deploy/install.sh` ставит ссылку
-`~/.local/bin/grigdesk-ctl`; прежняя ссылка заменяется, чужой обычный файл сохраняется с предупреждением.
+Команда собирается с Go 1.27.4. `deploy/install.sh` для исходной установки направляет ссылку
+`~/.local/bin/grigdesk-ctl` на `bin/utilities/ctl`. Чужой обычный файл сохраняется с предупреждением.
 Ссылки прежних имён команды (`grigdesk` и имя до переименования продукта) в том же каталоге
 удаляются, только если ведут в `bin/` этой копии. Установленное окно команда ищет в
 `<корень копии>/bin/grigdesk-app`.
+
+## Запуск из checkout
+
+`grigdesk-ctl` из [сборки Go](../overview/go-utilities-build.md)
+можно запустить из любого рабочего каталога, задав абсолютный `GRIGDESK_CTL_CHECKOUT_ROOT`.
+Он разрешает физический корень по `VERSION` и трем маркерам исходников. Статус и
+управление сервером используют его службу, связи посредников читаются из API.
+Справка и метаданные работают без Node. Разработка и сборка сохраняют внешние Node/npm
+и назначенные скрипты. `tracker`, `pipeline` и `voice` делегируются готовым файлам
+из `bin/utilities/` выбранной копии. Для маршрутов используется отдельный `routes`.
+
+Сборка в PTY сохраняет полный вывод в `artifacts/ctl-build` и атомарно обновляет
+`latest.log`. При `GRIGDESK_CTL_BUILD_OBSERVED=1` сообщения `start`, `end` и `hint`
+идут через fd 3.
 
 ## Команды
 
@@ -19,21 +33,19 @@
 | --- | --- |
 | `grigdesk-ctl` | Меню в терминале, иначе справка |
 | `grigdesk-ctl open [--force]` | Окно; без `runtime.json` — ещё запрос запуска службы |
-| `grigdesk-ctl status [--json]` | Сервер, окно, локальный контейнер и связи |
+| `grigdesk-ctl status [--json]` | Сервер, окно и связи посредников |
 | `grigdesk-ctl server start [--wait]` | `start --no-block`; работающий сервер сохраняется |
 | `grigdesk-ctl server stop [--force]` | Остановка с ожиданием systemd |
 | `grigdesk-ctl server restart [--wait] [--force]` | Перезапуск с ожиданием systemd |
 | `grigdesk-ctl server status [--json]` | Только сервер |
 | `grigdesk-ctl server logs [-n N] [-f]` | Журнал службы без pager |
 | `grigdesk-ctl relay setup` / `relay restore` | Общий интерактивный мастер установки/восстановления VPS |
-| `grigdesk-ctl relay start \| stop \| restart` | Управление существующим контейнером Docker |
-| `grigdesk-ctl relay status [--json]` | Только локальный посредник и связи сервера |
-| `grigdesk-ctl relay logs [-n N] [-f]` | Журнал выбранного контейнера |
+| `grigdesk-ctl relay status [--json]` | Связи посредников по состоянию домашнего сервера |
 | `grigdesk-ctl device add <имя> [--address host:port] [--json]` | Строка и QR привязки полного приложения |
 | `grigdesk-ctl device list [--json]` | Привязанные устройства и их scope |
 | `grigdesk-ctl device revoke <id>` | Отзыв сертификата и разрыв соединений |
 | `grigdesk-ctl desktop …`, `mobile …`, `release …` | Передача прежним скриптам |
-| `grigdesk-ctl tracker …` | Собранный `bin/tracker`, без него — исходник `tracker/src/main.ts` ([команда tracker](../b24/binary-cli.md)) |
+| `grigdesk-ctl tracker …` | Собранный `bin/utilities/tracker` в рабочей копии ([команда tracker](../b24/binary-cli.md)) |
 | `grigdesk-ctl build [all\|server\|web\|window\|deepseek\|apk]` | Сборка и установка; без цели — сервер, веб, окно; `deepseek` — поставка исполнителя, `apk` — Android-приложение ([контракт](ctl-build.md)) |
 | `grigdesk-ctl dev`, `deps`, `run` | Прежние команды разработки |
 | `grigdesk-ctl --help`, `-h`, `help`; `--help` или `-h` в любой команде | Справка без внешних вызовов |
@@ -53,7 +65,6 @@ JSON-объект с boolean `configured` и `authenticated`. Redirect, чужо
 | --- | --- |
 | Сервер | ready — Работает; starting — Запускается; stopping — Останавливается; not_responding — Не отвечает; stopped — Остановлен; failed — Упал; conflict — Конфликт порта; not_installed — Не установлен; mismatch — Чужая служба; unknown — Неизвестно |
 | Окно | open — Открыто; closed — Закрыто; not_installed — Не установлено; unknown — Неизвестно |
-| Посредник | ready — Работает; starting — Запускается; unhealthy — Не проходит проверку; stopped — Остановлен; not_deployed — Не развёрнут; ambiguous — Несколько контейнеров; docker_unavailable — Docker недоступен |
 | Связь | online — на связи; connecting — подключается; waiting_vpn — ждёт VPN; offline — нет связи; error — ошибка; unknown — неизвестно |
 
 `managed: true` означает службу текущей копии; false — сервер вне службы (приложение GrigDesk
@@ -72,16 +83,9 @@ JSON-объект с boolean `configured` и `authenticated`. Redirect, чужо
 `--wait` опрашивает состояние раз в 500 мс, по умолчанию до 90 секунд. stop/restart сообщают,
 что systemd ждёт завершения идущих ходов до 45 секунд.
 
-Локальный посредник выбирается по метке service=relay и точному `config_files`, равному
-`<корень>/relay/compose.yaml`. Проверочный compose-проект с двумя файлами не подходит.
-`GRIGDESK_RELAY_PROJECT` выбирает по метке project вместо пути; несколько подходящих
-контейнеров дают ambiguous. running + healthy либо отсутствие healthcheck — ready;
-проверка starting или restarting — starting; unhealthy — unhealthy, остальное — stopped.
-Отсутствующий Docker даёт not_deployed, отказ daemon — docker_unavailable.
-
-Сервер, окно и контейнер читаются параллельно. Связи берутся из `/api/mobile/status` по
-CLI-токену лишь после готового ответа сервера. Печатаются только имена и состояния.
-Управляющие символы имён и причин заменяются на `?` и в тексте, и в JSON.
+Связи берутся из `/api/mobile/status` по CLI-токену после готового ответа сервера.
+Выводятся имена и состояния. Управляющие символы имён и причин заменяются на `?`
+в тексте и в JSON.
 
 ## JSON и коды
 
@@ -92,19 +96,19 @@ stdout содержит ровно один документ с конечным
   "server": { "state": "ready", "managed": true, "url": "http://127.0.0.1:8140/", "reason": null },
   "window": { "state": "closed" },
   "relay": {
-    "state": "ready", "container": "example-relay-1", "reason": null,
     "links": [{ "name": "Дом", "state": "online" }]
   }
 }
 ```
 
 У `server status --json` только ключ server, у `relay status --json` — relay.
-links равен null при недоступном сервере, токене либо неразобранном ответе mobile/status.
+`relay.links` равен `null` при недоступном сервере, отсутствии токена или ошибке ответа API.
+Пустой массив означает, что на сервере нет настроенных посредников.
 
 Коды: 0 — выполнено или запрос принят, включая status с неизвестными состояниями;
 1 — отказ действия; 2 — неверные аргументы, сообщение подсказывает `grigdesk-ctl --help` либо
 список действий группы; 3 — срок `--wait` истёк. logs возвращает
-код journalctl/docker, при сигнале — 128 + номер сигнала.
+код journalctl, при сигнале — 128 + номер сигнала.
 
 ## Сторож и окружение
 
@@ -132,8 +136,8 @@ Codex) не скрывает cgroup, поэтому сторож видит хо
 задать `GRIGDESK_CLI_CGROUP_FILE`: иначе тест из хода агента получит отказ сторожа.
 
 Обычные команды открывания и управления не убивают владельца порта, не собирают и не
-устанавливают приложение, не создают временный юнит, не выполняют `compose up` и не
-запускают посредник автоматически. Явные прежние dev/build/deps/run сохраняют свою подготовку.
+устанавливают приложение, не создают временный юнит и не запускают посредник автоматически.
+Явные прежние dev/build/deps/run сохраняют свою подготовку.
 При отсутствии службы нужен `deploy/install.sh --no-autostart`; при отсутствии окна —
 `grigdesk-ctl desktop install`. Ярлык показывает отказ уведомлением с причиной из stderr.
 
@@ -160,20 +164,19 @@ Codex) не скрывает cgroup, поэтому сторож видит хо
 
 В [переносимом комплекте](portable-bundle.md) `open` находит корневой `GrigDesk`,
 не передаёт forced origin и всегда поручает запуск сервера окну, даже без runtime.json.
-Библиотека ctl лежит в bin/lib; команды работают своим Node из payload без исходников.
+Нативный ctl делегирует команды соседним файлам в `bin/`.
 
 ## Подготовка обновления обычной установки
 
 Registered CLI принимает `server check-updates [--json]`, `server update-status [--json]`,
-`server update [--json]`, `server resume-update [--json] [--rollback]`
+`server update [--restart] [--json]`, `server resume-update [--restart] [--json]`
 и `server update-channel release|dev`.
 Check/status/prepare читают установку напрямую и не требуют работающего API.
 Server-only подготовка не запускает остановленный сервер; local-пара направляется в приложение.
-Installed maintenance содержит собственный Node, меню и server start/stop/restart/status/logs.
+Нативный maintenance выполняет операции над установленным сервером и журналом обновления.
 Сеть не задерживает первый render меню. --restart подтверждает применение; без TTY
 update оставляет ready. Stopped после применения остаётся stopped; start подтверждает runtime.
---rollback возвращает прежний выпуск из applied_not_started/manual-состояний по явному
-согласию; cgroup-сторож stop/restart действует и на применение из меню.
+Защита от остановки сервера из хода агента действует и при применении с `--restart`.
 Source-команды выше сохраняются. [Контракт обычной установки](installed-release-updates.md).
 
 ## Удалённый доступ через SSH

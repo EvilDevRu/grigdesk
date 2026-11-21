@@ -8,8 +8,8 @@ import test from 'node:test';
 import type { TestContext } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
-import { parseArgs } from '../../cli/args.ts';
-import { renderTerminalQr } from '../../cli/terminalQr.ts';
+import { parseArgs } from '../../tests/fixtures/legacy-ctl/cli/args.ts';
+import { renderTerminalQr } from '../../tests/fixtures/legacy-ctl/cli/terminalQr.ts';
 import { AuthStore } from '../../server/src/lib/authStore.ts';
 import authModule from '../../server/src/modules/auth/index.ts';
 import devicesModule from '../../server/src/modules/devices/index.ts';
@@ -20,7 +20,7 @@ import { completed } from './helpers/sandbox.mts';
 
 const requireFromServer = createRequire(new URL('../../server/package.json', import.meta.url));
 const Fastify = requireFromServer('fastify');
-const entry = fileURLToPath(new URL('../../cli/main.ts', import.meta.url));
+const entry = fileURLToPath(new URL('../../tests/fixtures/legacy-ctl/cli/main.ts', import.meta.url));
 
 /**
  * Отдельный Fastify выдаёт настоящую сессию по синтетическому ключу окна.

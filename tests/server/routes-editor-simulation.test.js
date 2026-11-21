@@ -2,7 +2,6 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import { createRequire } from 'node:module';
-import { fileURLToPath } from 'node:url';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -11,7 +10,9 @@ import { makeCatalogInput } from '../fixtures/routes-editor.mjs';
 import { makeDraft } from '../fixtures/routes-editor.mjs';
 import routesModule from '../../server/src/modules/routes/index.ts';
 
-const routeTool = fileURLToPath(new URL('../../engine/bin/factory-route', import.meta.url));
+import { testFactoryBinary } from '../helpers/factoryBinary.mjs';
+
+const routeTool = testFactoryBinary();
 const requireFromServer = createRequire(new URL('../../server/package.json', import.meta.url));
 const Fastify = requireFromServer('fastify');
 
@@ -21,7 +22,7 @@ function step(catalogInput, cursor, outcome, failureOwner = null,
   const input = { catalogInput, cursor, counters, outcome, failureOwner,
     selectedRouteId, pinned, stepIndex,
     ...(humanApproved ? { humanApproved: true } : {}) };
-  const run = spawnSync(routeTool, ['--profile', 'sample', 'editor-step'], {
+  const run = spawnSync(routeTool, ['route', '--profile', 'sample', 'editor-step'], {
     input: JSON.stringify(input), encoding: 'utf8', timeout: 5000,
   });
   return { status: run.status, stdout: run.stdout, stderr: run.stderr,
@@ -205,7 +206,7 @@ test('RE-G3-06: пробный шаг не создаёт runtime state и не 
       outcome: 'done', failureOwner: null, selectedRouteId: null,
       pinned: false, stepIndex: 1,
     };
-    const run = spawnSync(routeTool, ['--profile', 'sample', 'editor-step'], {
+    const run = spawnSync(routeTool, ['route', '--profile', 'sample', 'editor-step'], {
       input: JSON.stringify(request), encoding: 'utf8', timeout: 5000,
       env: { ...process.env, FACTORY_STATE: state, FACTORY_PROFILES_DIR: profiles },
     });

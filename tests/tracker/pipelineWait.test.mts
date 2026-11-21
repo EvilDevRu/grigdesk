@@ -16,14 +16,20 @@ const identity = {
 };
 
 test('PIPE-WAIT-HANDOFF: ready без PID не завершает ожидание', async (t) => {
-    let time = 0;
-    let sleeps = 0;
+    let mobileReads = 0;
     const fx = await pipelineFixture(t, (seen, response) => {
         response.setHeader('Content-Type', 'application/json');
-        response.end(JSON.stringify(seen.url.endsWith('/mobile-state')
+
+        const mobile = seen.url.endsWith('/mobile-state');
+
+        if (mobile) {
+            mobileReads += 1;
+        }
+
+        response.end(JSON.stringify(mobile
             ? {
                 identity: {
-                    ...identity, terminal: sleeps ? 'completed' : null
+                    ...identity, terminal: mobileReads > 1 ? 'completed' : null
                 }, running: false
             }
             : {
@@ -34,23 +40,15 @@ test('PIPE-WAIT-HANDOFF: ready без PID не завершает ожидани
                 registry: {}
             }));
     });
-    const result = await fx.run(['wait', '7', attempt, '100', '10'], undefined, {
-        now: () => time,
-            armDeadline: () => ({ signal: new AbortController().signal, dispose: () => undefined }),
-        sleep: async (ms) => {
-            time += ms;
-            sleeps += 1;
-        },
-    });
+    const result = await fx.run(['wait', '7', attempt, '2000', '10']);
 
     assert.equal(result.code, 0, result.stderr);
     assert.equal(JSON.parse(result.stdout).outcome, 'terminal');
     assert.equal(JSON.parse(result.stdout).identity.attempt, attempt);
-    assert.equal(sleeps, 1);
+    assert.equal(mobileReads, 2);
 });
 test('PIPE-WAIT: timeout, human, manual stop и новый attempt различаются', async (t) => {
     for (const scenario of ['timeout', 'human', 'stopped', 'replaced']) {
-        let time = 0;
         const fx = await pipelineFixture(t, (seen, response) => {
             response.setHeader('Content-Type', 'application/json');
             response.end(JSON.stringify(seen.url.endsWith('/mobile-state') ? {
@@ -71,13 +69,7 @@ test('PIPE-WAIT: timeout, human, manual stop и новый attempt различ�
                 },
             }));
         });
-        const result = await fx.run(['wait', '7', attempt, '20', '10'], undefined, {
-            now: () => time,
-            armDeadline: () => ({ signal: new AbortController().signal, dispose: () => undefined }),
-            sleep: async (ms) => {
-                time += ms;
-            },
-        });
+        const result = await fx.run(['wait', '7', attempt, '500', '10']);
 
         assert.equal(result.code, scenario === 'timeout' ? 124 : scenario === 'replaced' ? 22 : 0);
 
@@ -92,15 +84,19 @@ test('PIPE-WAIT: timeout, human, manual stop и новый attempt различ�
 
 test('PIPE-WAIT-PRELUDE: running без cursor ждёт cursor, human, timeout или замену attempt', async (t) => {
     for (const scenario of ['cursor', 'human', 'timeout', 'replaced']) {
-        let time = 0;
-        let sleeps = 0;
+        let mobileReads = 0;
         const fx = await pipelineFixture(t, (seen, response) => {
             response.setHeader('Content-Type', 'application/json');
 
-            const current = scenario === 'replaced' && sleeps ? 'a_' + 'c'.repeat(32) : attempt;
-            const entered = scenario === 'cursor' && sleeps > 0;
+            if (seen.url.endsWith('/mobile-state')) {
+                mobileReads += 1;
+            }
 
-            const bootstrapStop = scenario === 'human' && sleeps > 0 ? {
+            const advanced = mobileReads > 1;
+            const current = scenario === 'replaced' && advanced ? 'a_' + 'c'.repeat(32) : attempt;
+            const entered = scenario === 'cursor' && advanced;
+
+            const bootstrapStop = scenario === 'human' && advanced ? {
                 state: 'waiting',
                 visitId: 'b_' + 'b'.repeat(32),
                 recordHash: 'd'.repeat(64),
@@ -122,7 +118,7 @@ test('PIPE-WAIT-PRELUDE: running без cursor ждёт cursor, human, timeout �
                     attempt: current,
                     profile: 'demo',
                     terminal: null,
-                    running: !(scenario === 'human' && sleeps > 0),
+                    running: !(scenario === 'human' && advanced),
                 }));
 
                 return;
@@ -130,28 +126,21 @@ test('PIPE-WAIT-PRELUDE: running без cursor ждёт cursor, human, timeout �
 
             response.end(JSON.stringify(seen.url.endsWith('/mobile-state') ? {
                 identity: entered ? { ...identity, terminal: 'completed' } : null,
-                running: !entered && !(scenario === 'human' && sleeps > 0),
+                running: !entered && !(scenario === 'human' && advanced),
             } : {
                 attempt: current,
                 profile: 'demo',
-                daemonAlive: !(scenario === 'human' && sleeps > 0),
+                daemonAlive: !(scenario === 'human' && advanced),
                 readOnly: false,
                 registry: {},
                 bootstrapStop,
             }));
         });
-        const result = await fx.run(['wait', '7', attempt, '20', '10'], undefined, {
-            now: () => time,
-            sleep: async (ms) => {
-                time += ms;
-                sleeps += 1;
-            },
-            armDeadline: () => ({ signal: new AbortController().signal, dispose: () => undefined }),
-        });
+        const result = await fx.run(['wait', '7', attempt, '500', '10']);
 
         assert.equal(result.code, scenario === 'timeout' ? 124 : scenario === 'replaced' ? 22 : 0,
             result.stderr);
-        assert.ok(sleeps > 0, 'молодая работающая attempt должна действительно ждать');
+        assert.ok(mobileReads > 1, 'ожидание должно прочитать состояние повторно');
 
         if (scenario !== 'replaced') {
             assert.equal(JSON.parse(result.stdout).outcome, scenario === 'cursor' ? 'terminal' : scenario);
@@ -192,10 +181,7 @@ test('PIPE-WAIT-PRELUDE-TERMINAL: trusted terminal без cursor не замен
                 registry: { RESULT: 'completed' },
             }));
         });
-        const result = await fx.run(['wait', '7', attempt], undefined, {
-            sleep: async () => assert.fail('terminal или отказ не должны переходить к sleep'),
-            armDeadline: () => ({ signal: new AbortController().signal, dispose: () => undefined }),
-        });
+        const result = await fx.run(['wait', '7', attempt]);
 
         assert.equal(result.code, scenario === 'terminal' ? 0 : 22, result.stderr);
 
@@ -212,14 +198,14 @@ test('PIPE-WAIT-PRELUDE-TERMINAL: trusted terminal без cursor не замен
 
 test('PIPE-WAIT-PHASE-RACE: null prelude при переходе к cursor '
     + 'не выдаёт старую human остановку', async (t) => {
-    let sleeps = 0;
-    let time = 0;
+    let mobileReads = 0;
     const fx = await pipelineFixture(t, (seen, response) => {
         response.setHeader('Content-Type', 'application/json');
 
         if (seen.url.endsWith('/mobile-state')) {
+            mobileReads += 1;
             response.end(JSON.stringify({
-                identity: sleeps ? { ...identity, terminal: 'completed' } : null,
+                identity: mobileReads > 1 ? { ...identity, terminal: 'completed' } : null,
                 running: false,
             }));
 
@@ -247,17 +233,10 @@ test('PIPE-WAIT-PHASE-RACE: null prelude при переходе к cursor '
             stall: { kind: 'human', reason: 'Старый снимок стадии' },
         }));
     });
-    const result = await fx.run(['wait', '7', attempt, '100', '10'], undefined, {
-        now: () => time,
-        sleep: async (ms) => {
-                time += ms;
-                sleeps += 1;
-            },
-        armDeadline: () => ({ signal: new AbortController().signal, dispose: () => undefined }),
-    });
+    const result = await fx.run(['wait', '7', attempt, '2000', '10']);
 
     assert.equal(result.code, 0, result.stderr);
-    assert.equal(sleeps, 1);
+    assert.equal(mobileReads, 2);
     assert.equal(JSON.parse(result.stdout).outcome, 'terminal');
 });
 

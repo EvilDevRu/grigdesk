@@ -1,14 +1,133 @@
 import assert from 'node:assert/strict';
-import { randomUUID } from 'node:crypto';
+import { createHash, generateKeyPairSync, randomUUID } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import test from 'node:test';
 
 import {
-  deploymentRequest, fileSnapshot, prepareDeployment, setupInput, startDeployment, waitDeployment,
+  deploymentRequest, fileSnapshot, prepareDeployment, retrySetup, setupInput, startDeployment, waitDeployment,
 } from './helpers/relayDeployment.js';
 import { channelFixture } from './helpers/relayDeploymentChannel.js';
 import { issuePhone, phoneAdmin } from './helpers/phoneAccess.js';
 import { relayRequest } from './helpers/phoneRelay.js';
+import { relayRelease } from './helpers/relayDeploymentRelease.js';
+import { freePort } from './helpers/pluginBootFixture.js';
+
+test('RD-FORWARD-01: отказ после rename оставляет проверенный B и исходную identity', {
+  timeout: 60000,
+}, async (t) => {
+  const keys = generateKeyPairSync('ed25519');
+  let latest = relayRelease({ keys, version: '0.3.0' });
+  let rejectProof = false;
+  let f;
+  let latestReads = 0;
+  const deployment = {
+    release: {
+      publicKeyPem: latest.publicKeyPem,
+      fetch: (...args) => {
+        latestReads += 1;
+
+        return latest.release.fetch(...args);
+      },
+    },
+    verifyCandidate: async ({ relay }) => {
+      if (rejectProof) {
+        f.ssh.disconnect();
+
+        throw new Error('RD_PROOF_INTERRUPTED');
+      }
+
+      return {
+        verified: true,
+        address: relay.host,
+      };
+    },
+  };
+
+  f = await channelFixture(t, { deployment });
+
+  const { relay } = await deploy(f);
+  const ssh = {
+    host: '127.0.0.1',
+    port: f.ssh.port,
+    user: 'root',
+  };
+  const binary = path.join(f.ssh.root, 'opt/grigdesk-relay', relay.id, 'grigdesk-relay');
+  const installedDigest = async () => createHash('sha256').update(await readFile(binary)).digest('hex');
+
+  assert.equal(await installedDigest(), latest.artifact.files[1].sha256);
+
+  latest = relayRelease({ keys, version: '0.4.0' });
+  rejectProof = true;
+
+  const job = await prepareDeployment(f, setupInput(f, {
+    requestId: randomUUID(),
+    ssh,
+    mode: 'restore',
+    name: undefined,
+    relayId: relay.id,
+    public: { host: '127.0.0.1', port: await freePort() },
+  }), { password: f.ssh.password });
+
+  await startDeployment(f, job);
+
+  const suspended = await waitDeployment(f, job.id, ['recovery_required'], 20000);
+  const pinned = latest.artifact.files[1].sha256;
+  const writes = f.ssh.writes.length;
+  const cert = await f.mobile.relayEnv(relay.id);
+
+  assert.equal(await installedDigest(), pinned, 'После rename остаётся B');
+  assert.deepEqual(await f.mobile.relay(relay.id), relay);
+  assert.equal(suspended.error.code, 'relay_resume_required');
+  await assert.rejects(() => f.mobile.removeRelay(relay.id), { code: 'deployment_busy' });
+
+  const challenge = await f.hostKeys.check({
+    ...ssh,
+    algorithm: 'ssh-ed25519',
+    fingerprint: 'SHA256:replacement-fixture',
+  });
+
+  await assert.rejects(
+    () => f.hostKeys.decide(challenge.challengeId, 'replace'), { code: 'deployment_busy' },
+  );
+  await f.mobile.close();
+  await f.stopVps();
+
+  rejectProof = false;
+
+  const reads = latestReads;
+
+  latest = relayRelease({ keys, version: '0.5.0' });
+  f = await channelFixture(t, {
+    directory: f.directory,
+    sshFixture: f.ssh,
+    deployment,
+  });
+
+  const restored = await retrySetup(f, suspended);
+
+  assert.equal(restored.preview.artifact.digest, pinned);
+  await startDeployment(f, restored, randomUUID());
+  await waitDeployment(f, job.id, ['ready'], 20000);
+  assert.equal(latestReads, reads, 'Повтор не смотрит latest C');
+  assert.equal(f.ssh.writes.length, writes, 'Полный B не загружается повторно');
+  assert.equal(await installedDigest(), pinned);
+  assert.equal(await f.mobile.relayEnv(relay.id), cert);
+
+  latest = relayRelease({ keys, version: '0.3.0' });
+
+  const declined = await prepareDeployment(f, setupInput(f, {
+    requestId: randomUUID(),
+    ssh,
+    mode: 'restore',
+    name: undefined,
+    relayId: relay.id,
+  }), { password: f.ssh.password });
+
+  assert.equal(declined.state, 'failed');
+  assert.equal(declined.error.code, 'relay_release_floor');
+  assert.equal(f.ssh.writes.length, writes);
+});
 
 /**
  * Публичный маршрут и адрес кандидата ведут на один изолированный VPS теста.
@@ -160,6 +279,7 @@ test('RD-CHANNEL-04: VPN guard не публикует ready и сохраняе
       user: 'root'
     },
     public: { host: f.publicHost, port: f.port },
+    candidateHost: f.publicHost,
   }), { password: f.ssh.password });
 
   await startDeployment(f, job);
@@ -173,7 +293,46 @@ test('RD-CHANNEL-04: VPN guard не публикует ready и сохраняе
   assert.equal((await f.mobile.status()).relays[0].link.state, 'waiting_vpn');
   assert.ok(f.vpnChecks.includes(f.publicHost), 'Публичный адрес проверен настоящим VPN guard');
   assert.equal(f.dialCount(), 0, 'VPN guard проверяется до любого публичного TCP dial');
+
+  const writes = f.ssh.writes.length;
+
+  await f.mobile.close();
+  await f.stopVps();
+
+  const restarted = await channelFixture(t, {
+    directory: f.directory,
+    sshFixture: f.ssh,
+    port: f.port,
+    publicRoute: true,
+  });
+  const recovery = await waitDeployment(restarted, job.id, ['waiting_vpn']);
+
+  await waitListener(restarted);
+
+  const check = await deploymentRequest(restarted, 'POST', `/${job.id}/check`, {
+    requestId: randomUUID(),
+    revision: recovery.revision,
+  });
+
+  assert.equal(check.statusCode, 202, check.body);
+  await waitDeployment(restarted, job.id, ['ready'], 15000);
+  assert.equal(restarted.ssh.writes.length, writes);
+  assert.equal((await restarted.mobile.relay(relay.id)).fp, relay.fp);
 });
+
+/**
+ * Ждёт того же слушателя после создания нового владельца домашней части.
+ * Мастер не управляет запуском VPS на этой ветке.
+ */
+async function waitListener(fixture) {
+  const deadline = Date.now() + 5000;
+
+  while (fixture.services.size === 0 && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+
+  assert.ok(fixture.services.size > 0, fixture.serviceErrors.join('\n'));
+}
 
 for (const peer of ['health-only', 'no-data', 'wrong-pin', 'legacy']) {
   test(`RD-CHANNEL-01/04: ${peer} не заменяет доказательство канала`, {

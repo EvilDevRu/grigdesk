@@ -90,6 +90,7 @@ export async function relayDeploymentSsh(t, options = {}) {
   // TCP принадлежит фикстуре: обрыв не зависит от внутренних полей ssh2.
   // injectSocket передаёт настоящий сокет серверу, не подменяя SSH-протокол.
   const listener = createServer((socket) => {
+    socket.setNoDelay(true);
     sockets.add(socket);
     socket.once('close', () => sockets.delete(socket));
     server.injectSocket(socket);
@@ -281,6 +282,9 @@ export async function relayDeploymentSsh(t, options = {}) {
     writes,
     disconnect: () => sockets.forEach((socket) => socket.destroy()),
     release: () => fs.writeFile(path.join(root, 'release'), ''),
+    runService: (id, environment) => sandbox([
+      `/opt/grigdesk-relay/${id}/grigdesk-relay`,
+    ], environment),
     setPlatform: async (patch) => {
       Object.assign(platform, patch);
       await fs.writeFile(path.join(root, 'platform.json'), JSON.stringify(platform));
@@ -293,6 +297,24 @@ export async function relayDeploymentSsh(t, options = {}) {
    * Даже ошибка production script не может изменить системные файлы машины разработчика.
    */
   function run(command, channel) {
+    const child = sandbox(['/bin/sh', '-c', command]);
+
+    channel.pipe(child.stdin);
+    child.stdout.pipe(channel, { end: false });
+    child.stderr.pipe(channel.stderr, { end: false });
+    child.on('error', (error) => channel.destroy(error));
+    channel.once('close', () => child.kill('SIGKILL'));
+    child.on('close', (code) => {
+      channel.exit(code ?? 1);
+      channel.end();
+    });
+  }
+
+  /**
+   * Временный namespace одинаков для команд SSH и установленного Go-процесса.
+   * Порт доступен тесту через loopback, системные файлы принадлежат только фикстуре.
+   */
+  function sandbox(args, environment = {}) {
     // Отдельное дерево PID уничтожается вместе с bwrap даже при ошибке теста до release.
     // Иначе остановленный OS-адаптер держит stdio и не даёт завершиться node:test.
     const child = spawn('bwrap', [
@@ -306,19 +328,14 @@ export async function relayDeploymentSsh(t, options = {}) {
       '--ro-bind', process.execPath, '/fixture-node',
       '--setenv', 'PATH', '/fixture/stubs:/usr/sbin:/usr/bin:/bin',
       '--setenv', 'HOME', '/tmp', '--unshare-user', '--uid', '0', '--gid', '0',
-      '/bin/sh', '-c', command,
+      ...Object.entries(environment).flatMap(([key, value]) => ['--setenv', key, value]),
+      ...args,
     ], { env: { PATH: '/usr/bin:/bin' }, stdio: ['pipe', 'pipe', 'pipe'] });
 
     children.add(child);
-    channel.pipe(child.stdin);
-    child.stdout.pipe(channel, { end: false });
-    child.stderr.pipe(channel.stderr, { end: false });
-    child.on('error', (error) => channel.destroy(error));
-    child.on('close', (code) => {
-      children.delete(child);
-      channel.exit(code ?? 1);
-      channel.end();
-    });
+    child.once('close', () => children.delete(child));
+
+    return child;
   }
 }
 
@@ -438,10 +455,15 @@ const save = () => {
   fs.renameSync(pending, stateFile);
 };
 const fail = () => process.exit(1);
+const pause = (label) => {
+  fs.writeFileSync('/fixture/barrier', label);
+  while (!fs.existsSync('/fixture/release')) {
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
+  }
+};
 fs.appendFileSync('/fixture/commands.log', JSON.stringify({ command, args }) + '\\n');
 if (platform.pauseCommand && (platform.pauseCommand === command || args.includes(platform.pauseCommand))) {
-  fs.writeFileSync('/fixture/barrier', command);
-  while (!fs.existsSync('/fixture/release')) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
+  pause(command);
 }
 if (command === 'uname') console.log(args.includes('-s') ? 'Linux' : platform.arch);
 else if (command === 'getconf') console.log('glibc ' + platform.glibc);
@@ -481,7 +503,13 @@ else if (command === 'id') {
   process.exit(child.status || 0);
 } else if (command === 'mv' || command === 'install') {
   if (platform.failCommand === command) fail();
+  if (command === 'mv' && platform.pauseBeforeIntent && args.some(arg => arg.includes('/.prepare-'))) {
+    pause('before-intent');
+  }
   const child = require('node:child_process').spawnSync('/usr/bin/' + command, args, { stdio: 'inherit' });
+  if (command === 'mv' && platform.pauseAfterMove && args.at(-1).endsWith(platform.pauseAfterMove)) {
+    pause(args.at(-1));
+  }
   process.exit(child.status || 0);
 } else if (command === 'systemctl') {
   if (!platform.systemd) fail();
@@ -491,7 +519,18 @@ else if (command === 'id') {
   if (args.includes('--version')) { console.log('systemd 249'); process.exit(0); }
   if (unit === 'default') process.exit(0);
   if (args.includes('show')) {
-    console.log(state.units[unit]?.active ? '/system.slice/' + unit : '');
+    const name = unit.slice(0, -'.service'.length);
+    const id = name.slice('grigdesk-relay-'.length);
+    const binary = '/opt/grigdesk-relay/' + id + '/grigdesk-relay';
+    const properties = {
+      FragmentPath: '/etc/systemd/system/' + unit,
+      User: name,
+      Group: name,
+      EnvironmentFiles: '/etc/grigdesk-relay/' + id + '/relay.env (ignore_errors=no)',
+      ExecStart: '{ path=' + binary + ' ; argv[]=' + binary + ' ; }',
+      ControlGroup: state.units[unit]?.active ? '/system.slice/' + unit : '',
+    };
+    console.log(properties[args.find(arg => arg.startsWith('--property='))?.slice(11)] ?? '');
     process.exit(0);
   }
   state.units[unit] ||= { active: false, enabled: false };

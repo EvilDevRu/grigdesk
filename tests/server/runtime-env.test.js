@@ -6,6 +6,7 @@ import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
+import { grigDeskCliPath } from '../../server/src/lib/cliPath.ts';
 import { isNodeVersionSupported } from '../../server/src/lib/nodeVersion.ts';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
@@ -113,7 +114,23 @@ test('штатные launcher-ы добавляют CLI установки и п
     encoding: 'utf8',
   }).trim();
 
-  assert.equal(value, `${root}/bin:${home}/.local/bin:${home}/.kimi-code/bin:/usr/bin:/bin`);
+  assert.equal(value, [
+    `${root}/bin/utilities`, `${root}/bin`,
+    `${home}/.local/bin`, `${home}/.kimi-code/bin`, '/usr/bin', '/bin',
+  ].join(':'));
+});
+
+test('PATH агента различает bin/utilities рабочей копии и bin подписанного поколения', (t) => {
+  const tree = mkdtempSync(path.join(os.tmpdir(), 'grigdesk-cli-layout-'));
+  const signedBin = path.join(tree, 'generations', '0.2.0', 'server', 'bin');
+  const sourceBin = path.join(root, 'bin');
+  const utilities = path.join(sourceBin, 'utilities');
+
+  t.after(() => rmSync(tree, { recursive: true, force: true }));
+
+  assert.equal(grigDeskCliPath(root, utilities + ':/usr/bin', sourceBin),
+    [utilities, sourceBin, '/usr/bin'].join(':'));
+  assert.equal(grigDeskCliPath(root, '/usr/bin', signedBin), signedBin + ':/usr/bin');
 });
 
 test('существующий bin текущей установки сохраняет приоритет над старыми CLI-ссылками', (t) => {

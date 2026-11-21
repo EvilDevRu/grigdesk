@@ -2,12 +2,12 @@
 
 `voice` creates WAV audio from text using Qwen cloud synthesis through a regular API
 or QwenCloud Token Plan, or local Piper and Silero engines. Ask an agent to run it,
-or use `bin/voice` or `grigdesk-ctl voice`
+or use `bin/utilities/voice` or `grigdesk-ctl voice`
 in a source checkout. The compiled command is included in the server distribution.
 
 ## Before you begin
 
-In a checkout, build the command with `npm --prefix voice run build`. The “All” target
+In a checkout, build the command with `bash tools/build-go-utilities.sh "$PWD/bin/utilities"`. The “All” target
 of `grigdesk-ctl build` also builds it and installs other application components.
 Local engines need Python3 with venv, network access and space for models and dependencies.
 

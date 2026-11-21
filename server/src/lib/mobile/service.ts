@@ -227,11 +227,12 @@ export class MobileService {
   async removeRelay(id: string) {
     this.requireReady();
 
-    if (await this.deployments?.busy(id)) {
-      throw new MobileInputError('deployment_busy', 'Сначала завершите задание удалённого доступа.', 409);
+    if (this.deployments) {
+      await this.deployments.withRelayRemoval(id, () => this.relays.remove(id));
+    } else {
+      await this.relays.remove(id);
     }
 
-    await this.relays.remove(id);
     this.hub!.sync(await this.relays.list());
     this.options.changed?.();
   }

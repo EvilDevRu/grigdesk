@@ -4,6 +4,9 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
+import { stageFactoryCandidate } from '../../server/scripts/binary/factoryCandidate.mts';
+import { testFactoryBinary } from '../helpers/factoryBinary.mjs';
+
 import { auditPayload } from '../../server/scripts/binary/buildPayload.mts';
 import { bundleLauncher } from '../../server/scripts/binary/bundle.mts';
 import { copyProductionDependencies } from '../../server/scripts/binary/offlineDependencies.mts';
@@ -22,7 +25,6 @@ const required = [
   'server/worker-bootstrap.cjs', 'server/runtime/esmBridge.cjs',
   'server/runtime/helpers/helpers.json', 'server/runtime/helpers/fixture.mjs',
   'server/node_modules/fastify/package.json', ...options.native,
-  'engine/bin/factory', 'engine/lib/core.sh',
   'tools/skills/grigdesk-connect-project/SKILL.md',
   'schemas/analytics/lifecycle-event.schema.json',
   'schemas/analytics/provider-lineage.schema.json', 'schemas/analytics/usage-document.schema.json',
@@ -41,6 +43,16 @@ async function fixture(t) {
   for (const name of required) {
     await put(root, name);
   }
+
+  const source = path.resolve(import.meta.dirname, '../..');
+
+  await stageFactoryCandidate({
+    root,
+    binary: testFactoryBinary(),
+    profileAbi: path.join(source, 'engine/lib/delivery_contract.py'),
+    os: process.platform,
+    arch: process.arch,
+  });
 
   return root;
 }
@@ -68,11 +80,11 @@ test('SB19: пропавшие helper, license, npm, native, schemas и навы
 test('SB19: внешний ELF, UI, свой TS, посторонний tools, секрет и наружная ссылка запрещены', async (t) => {
   for (const name of ['bin/deepseek', 'bin/b24', 'bin/grigdesk-relay', 'web/dist/index.html',
     'deepseek/runtime/node', 'server/grigdesk-server', 'server/src/leak.ts',
-    'tools/maintenance.mts', '.env']) {
+    'tools/maintenance.mts', '.env', 'engine/lib/core.sh']) {
     const root = await fixture(t);
 
     await put(root, name);
-    await assert.rejects(auditPayload(root, options), /Запрещ|исходник|состав/);
+    await assert.rejects(auditPayload(root, options), /Запрещ|исходник|состав|лишний файл/);
     await rm(path.join(root, name));
   }
 

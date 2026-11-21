@@ -178,7 +178,7 @@
               role="status"
             >
               <p>{{ t('settings.saveRelayEnvInAPrivateDirectory') }}</p>
-              <pre>{{ t('settings.relayENVFILEPathOutsideProjectRelay') }}</pre>
+              <pre>{{ t('settings.runNativeRelay') }}</pre>
               <p>{{ t('settings.whenTheStatusBecomesOnlineClickConnect') }}</p>
             </div>
             <div class="mobile-relay-remove">

@@ -2,7 +2,7 @@
   "extends": "./tsconfig.tests.json",
   "include": [
     "src/lib/fastifyDecorations.ts",
-    "../cli/installedCli.ts",
+    "../tests/fixtures/legacy-ctl/cli/installedCli.ts",
     "../tests/cli/pipeline-installed.test.mts"
   ]
 }

@@ -8,6 +8,7 @@ grigdesk_link_cli() {
   local grigdesk_root=${1:?корень grigdesk обязателен}
   local target_bin=${2:?каталог bin обязателен}
   local link_file="$target_bin/grigdesk-ctl"
+  local executable="$grigdesk_root/bin/utilities/ctl"
   local legacy
 
   mkdir -p "$target_bin" || return 1
@@ -17,7 +18,10 @@ grigdesk_link_cli() {
     return 1
   fi
 
-  ln -sfn "$grigdesk_root/bin/grigdesk-ctl" "$link_file"
+  if [[ -f "$grigdesk_root/release.json" ]]; then
+    executable="$grigdesk_root/bin/grigdesk-ctl"
+  fi
+  ln -sfn "$executable" "$link_file" || return 1
 
   for legacy in grigdesk; do
     case "$(readlink -- "$target_bin/$legacy" 2>/dev/null)" in

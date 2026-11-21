@@ -8,6 +8,7 @@ import type { ChildProcess, SpawnOptions } from 'node:child_process';
 import { AcpRpcError, createAcpClient } from '../acp/client.ts';
 import { contextCacheStatus } from '../chat/contextCache.ts';
 import { createStepSink } from '../chat/streamSteps.ts';
+import { factoryBrowserChildEnv } from '../browser/factoryBrowserEnvironment.ts';
 import type { ChatStep } from '../chat/streamSteps.ts';
 import { buildDeepSeekChildEnv, chatHomeFor, ensureHarnessChatHome, ensurePrivateDir } from './env.ts';
 import {
@@ -498,7 +499,9 @@ export async function runDeepSeekTurn({
         requireDeepSeekToolPolicy(launch.toolPolicyPath);
       }
 
-      const childEnv = buildDeepSeekChildEnv({ source: env, dshHome: launch.dshHome });
+      const childEnv = factoryBrowserChildEnv(
+        buildDeepSeekChildEnv({ source: env, dshHome: launch.dshHome }), env, factory,
+      );
 
       if (nativeSettings?.accepted.length) {
         preparation = await startDeepSeekAcpSettings({

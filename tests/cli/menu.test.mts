@@ -147,7 +147,7 @@ for (const mode of ['NO_COLOR', 'dumb', 'normal']) {
       ...(mode === 'NO_COLOR' ? { NO_COLOR: '1' } : {}),
     };
     const session = startPty(t, {
-      argv: ['/bin/bash', path.join(box.root, 'bin/grigdesk-ctl')],
+      argv: box.argv(),
       env,
       columns: 100,
     });
@@ -279,7 +279,7 @@ for (const language of ['ru_RU.UTF-8', 'en_US.UTF-8']) {
       const box = await installedFixture(t, { mode: 'server' });
       const hook = await pinnedKeyHook(box.temporary, box.release.publicKeyPem);
       const entry = path.join(box.temporary, 'installed-menu.mjs');
-      const cliUrl = new URL('../../cli/installedCli.ts', import.meta.url).href;
+      const cliUrl = new URL('../../tests/fixtures/legacy-ctl/cli/installedCli.ts', import.meta.url).href;
 
       await writeFile(entry, [
         'globalThis.fetch = async () => new Promise(() => {});',

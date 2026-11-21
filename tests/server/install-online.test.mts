@@ -88,7 +88,7 @@ async function onlineBox(t: TestContext) {
   const { envelope } = localEnvelope(release, source.port);
   const indexFile = path.join(temporary, 'release.json');
   const cacheDir = path.join(temporary, 'cache');
-  const { fixtureModuleUrl } = await loadInstalledModule(t, 'tools/maintenance.mts',
+  const { fixtureModuleUrl } = await loadInstalledModule(t, 'tests/fixtures/release-v2/maintenance.mts',
     release.publicKeyPem);
   const home = path.join(temporary, 'home');
 

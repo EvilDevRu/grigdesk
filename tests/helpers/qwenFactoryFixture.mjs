@@ -1,11 +1,10 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { copyFile, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
-import { settingsFixture, sourceRoot } from './stageRunnerSettingsFixture.mjs';
+import { settingsFixture } from './stageRunnerSettingsFixture.mjs';
 import { QWEN_KEY, SECOND_KEY, qwenAdapter, qwenFixture } from './qwenFixture.mjs';
-import { listInstalledRunners } from '../../server/src/lib/runnersCatalog.ts';
 
 /**
  * В дочерний Factory попадают только пути и синтетические ключи этой фикстуры.
@@ -26,37 +25,20 @@ function qwenFactoryEnvironment(fixture) {
 }
 
 /**
- * Реальный реестр проверяется до копирования модуля во временный профиль.
- * Отсутствие Qwen на базе даёт assertion, а не ENOENT или shell command-not-found.
+ * Профиль Qwen использует временный набор настроек и подмену native CLI.
+ * Команда метаданных читает настоящий закреплённый узел Go.
  */
 export async function qwenFactoryFixture(t) {
   const qwen = await qwenFixture(t);
-  const installed = await listInstalledRunners({ factoryHome: path.join(sourceRoot, 'engine') });
+  const stage = await settingsFixture(t);
 
-  assert.ok(installed.includes('qwen'), 'Реестр конвейера не содержит раннера Qwen');
-
-  // Work MCP добавляет путь до сокета внутри журнала запуска и ограничен 107 байтами.
-  const stage = await settingsFixture(t, 'q');
-
-  await copyFile(path.join(sourceRoot, 'engine/lib/runners/qwen.sh'),
-    path.join(stage.env.FACTORY_RUNNERS_DIR, 'qwen.sh'));
   Object.assign(stage.env, qwenFactoryEnvironment(qwen), {
-    FACTORY_HOME: path.join(sourceRoot, 'engine'),
-    FACTORY_TESTS_HOME: path.join(sourceRoot, 'tests/engine'),
-    FACTORY_RUNNERS_DIR: path.join(stage.root, 'runners'),
-    FACTORY_PROFILES_DIR: path.join(stage.root, 'profiles'),
-    FACTORY_STATE: path.join(stage.root, 'state'),
-    STATE_DIR: path.join(stage.root, 'state'),
-    FACTORY_CONTROL_ROOT: path.join(stage.root, 'control'),
-    FACTORY_CONFIG_ROOT: path.join(stage.root, 'config'),
-    TEST_ROOT: stage.root,
-    NODE_BIN: process.execPath,
-    FACTORY_FORBID_LIVE: '0',
     GRIGDESK_QWEN_BIN: qwen.bin,
     GRIGDESK_QWEN_CONFIG_ROOT: qwen.config.rootDir,
   });
   await writeFile(stage.config, [
-    'RUNNERS_SCHEMA=1', 'CONFIG_REVISION=1', 'PROJECT_RUNNER_PRIMARY=qwen', 'PROJECT_RUNNER_FAILOVER=',
+    'RUNNERS_SCHEMA=1', 'CONFIG_REVISION=1', 'RUNNERS_COVERAGE=required',
+    'PROJECT_RUNNER_PRIMARY=qwen', 'PROJECT_RUNNER_FAILOVER=',
     'MODEL_DEFAULT_QWEN_FAMILY=default', 'MODEL_DEFAULT_QWEN_VERSION=latest',
     'MODEL_DEFAULT_QWEN_VARIANT=auto', '',
   ].join('\n'));

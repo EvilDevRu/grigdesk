@@ -46,7 +46,7 @@ GRAPH
 
 run_check() {
   FACTORY_PROFILES_DIR="$profiles" \
-    "$FACTORY_HOME/bin/factory-check" fixture --quick >"$TEST_ROOT/check-contract.out" 2>&1
+    fixture_profile_check fixture --quick >"$TEST_ROOT/check-contract.out" 2>&1
 }
 
 run_check

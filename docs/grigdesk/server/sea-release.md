@@ -10,11 +10,10 @@ npm --prefix server run build:sea -- --out-dir /path/to/releases --cache-dir /pa
 npm --prefix server run test:sea -- --release-dir /path/to/releases/grigdesk-server-VERSION-linux-x64-CONTENT
 ```
 
-Требуются Linux x64, поддерживаемый Node для инструментов, установленные devDependencies
+Требуются Linux x64, Go 1.27.4, поддерживаемый Node для инструментов, установленные devDependencies
 с закреплёнными esbuild/postject, tar/xz, инструменты native-сборки npm и strip из binutils.
-Node **24.21.0** берётся из проверенного архива в cache либо `b24/.cache`/`relay/.cache`;
-сборщик сервера его не скачивает. Повреждённый cache допускает другой проверенный
-локальный архив; копия хешируется и публикуется атомарным rename.
+В `--cache-dir` должен заранее лежать архив Node **24.21.0** с SHA256 из
+`server/build/node-runtime.json`.
 npm использует `npm_config_cache` либо cache/npm,
 режим `--prefer-offline` и отдельный HOME вне комплекта. Полный состав описан в
 [подготовке пакета](sea-package.md).
@@ -23,7 +22,8 @@ npm использует `npm_config_cache` либо cache/npm,
 контекст SEA и замену module URL. Внешними остаются npm и builtin. Warning esbuild и
 наружный собственный import останавливают выпуск. Banner связывает require с физическим
 `server/grigdesk-server`, а не с cwd. Blob и исполняемый файл используют один Node.
-Helpers собираются отдельными ESM; b24 и relay — своими закреплёнными сборщиками.
+Helpers собираются отдельными ESM. Команды `grigdesk-ctl`, `tracker`, `pipeline`,
+`routes`, `voice` и `grigdesk-relay` собираются в staging из Go-исходников.
 
 `release.json` содержит schema 1, версию из VERSION, packagingVersion 1,
 Node/platform/arch/ABI, файлы с mode/size/SHA256 и внутренние относительные ссылки.
@@ -58,7 +58,8 @@ rename. Отказ prepare, smoke или tar сохраняет предыдущ
 и запускает весь `test:sea`,
 сохраняя код отказа; публикации или установки в нём нет. Явные каталоги можно передать
 двумя аргументами либо через `GRIGDESK_SEA_RELEASE_DIR`/`GRIGDESK_SEA_CACHE_DIR`.
-Без них создаётся отдельный временный каталог, проверенный результат сохраняется.
+По умолчанию результат сохраняется во временном каталоге, архив Node берётся из
+`${XDG_CACHE_HOME:-$HOME/.cache}/grigdesk/server-sea`.
 Кэш npm общий для build и dependency probe, пользовательский `npm_config_cache` имеет приоритет.
 Обычные `tools/release`/`tools/release-check` SEA не собирают и не принимают.
 Подробности и проверки обоих путей — [контракт release gate](sea-release-gate.md).

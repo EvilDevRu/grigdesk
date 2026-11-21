@@ -6,7 +6,7 @@
 доступны через отдельный клиентский TLS-вход. Прежнее приложение с посредником и контрактом
 v1 сохранено отдельно. Основной HTTP и прежний мобильный вход остаются на loopback.
 
-Читай перед правкой: `mobile/`, `relay/`, `server/src/lib/mobile/`,
+Читай перед правкой: `mobile/`, `utilities/relay/`, `server/src/lib/mobile/`,
 `server/src/modules/mobile/`, `tools/mobile-phone/`, `tools/mobile`.
 
 ## Контракты продукта
@@ -35,9 +35,8 @@ v1 сохранено отдельно. Основной HTTP и прежний 
 - [Полный снимок подключения после разблокировки и совместимость с прежним ответом ok](unlock-shell-snapshot.md)
 - [Разблокировка: повтор, поворот системного диалога и карточка входа](unlock-recovery.md)
 - [Привязка в настройках: карточки посредников, телефоны и диалог QR](pairing-settings.md)
-- [Развёртывание, выбор задания, перенос посредника и откат при отказе канала](relay-deploy.md)
-- [Посредник одним файлом: сборка и выпуск](relay-binary.md)
-- [Ограниченный журнал контейнера и отключение compression](relay-log.md)
+- [Нативное развёртывание, выбор задания, перенос посредника и возобновление установки](relay-deploy.md)
+- [Go-посредник одним файлом: сборка, выпуск и TLS-пробы Go-кандидата](relay-binary.md)
 - [Сборка Android, версии и ключ подписи](android-build.md)
 - [Локальное окружение Android: FEX, Docker, Termux и Linux-VM](android-runtime.md)
 - [Упаковка Linux в APK: rootfs, PRoot и target SDK в DroidDeck](android-linux-packaging.md)

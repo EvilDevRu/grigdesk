@@ -3,7 +3,7 @@
 set -uo pipefail
 source "$FACTORY_TESTS_HOME/lib/testlib.sh"
 
-route_tool="$FACTORY_HOME/bin/factory-route"
+route_tool=fixture_route
 fixture_file="$FACTORY_TESTS_HOME/../fixtures/routes-editor.mjs"
 marker="$TEST_ROOT/forbidden-marker"
 
@@ -26,15 +26,19 @@ process.stdout.write(JSON.stringify({
 ' "$fixture_file" "$marker" "$step_index" "$terminal"
 }
 
-result=$(make_payload 1 false | "$route_tool" --profile sample editor-step)
+make_payload 1 false >"$TEST_ROOT/editor-step-valid.json" || exit $?
+make_payload 201 false >"$TEST_ROOT/editor-step-limit.json" || exit $?
+make_payload 2 true >"$TEST_ROOT/editor-step-terminal.json" || exit $?
+
+result=$("$route_tool" --profile sample editor-step <"$TEST_ROOT/editor-step-valid.json")
 assert_rc 0 "$?" 'editor-step вычисляет переход без runtime state'
 assert_contains "$result" '"next": "check"' 'результат основан на переходе fixture'
 
-overflow=$(make_payload 201 false | "$route_tool" --profile sample editor-step)
+overflow=$("$route_tool" --profile sample editor-step <"$TEST_ROOT/editor-step-limit.json")
 assert_rc 78 "$?" '201-й шаг отвергается до вычисления'
 assert_contains "$overflow" 'stepIndex' 'причина лимита сообщается'
 
-terminal=$(make_payload 2 true | "$route_tool" --profile sample editor-step)
+terminal=$("$route_tool" --profile sample editor-step <"$TEST_ROOT/editor-step-terminal.json")
 assert_rc 78 "$?" 'терминальный сценарий нельзя продолжить'
 assert_contains "$terminal" 'терминальный' 'причина остановки сообщается'
 

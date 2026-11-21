@@ -26,6 +26,8 @@ export interface BrowserRun {
   epoch: string;
   tokenHash: string;
   runner: string;
+  node?: string;
+  profile?: string;
   pid: number;
   pgid: number;
   session: number;
@@ -169,24 +171,26 @@ async function privateText(root: string, file: string): Promise<string> {
 }
 
 /**
- * Старый engine env-format имеет ровно один экземпляр каждого ожидаемого ключа.
- * Лишнее поле, строка без equals или duplicate переводят authority в отказ.
+ * Каждый ключ опубликован ровно один раз. Native engine добавляет точную попытку
+ * узел, профиль и роль цикла к записи запуска. Имена дополнительных полей закрыты.
  */
-function envRecord(text: string, keys: readonly string[]): Record<string, string> {
+function envRecord(text: string, keys: readonly string[], optional: readonly string[] = [])
+  : Record<string, string> {
+  const allowed = [...keys, ...optional];
   const fields: Record<string, string> = Object.create(null);
 
   for (const line of text.split('\n').filter(Boolean)) {
     const index = line.indexOf('=');
     const key = line.slice(0, index);
 
-    if (index < 1 || !keys.includes(key) || Object.hasOwn(fields, key)) {
+    if (index < 1 || !allowed.includes(key) || Object.hasOwn(fields, key)) {
       return browserAuthorityError();
     }
 
     fields[key] = line.slice(index + 1);
   }
 
-  if (Object.keys(fields).sort().join() !== [...keys].sort().join()) {
+  if (keys.some((key) => !Object.hasOwn(fields, key))) {
     return browserAuthorityError();
   }
 
@@ -205,11 +209,19 @@ export async function readBrowserRun(root: string, raw: unknown,
   try {
     const activeText = await privateText(root,
       path.join(root, 'runs', `t${proof.task}`, `${proof.stage}.active`));
-    const active = envRecord(activeText, ['SCHEMA', 'RUN_ID', 'EPOCH', 'TOKEN_HASH', 'STATE']);
+    const active = envRecord(activeText, ['SCHEMA', 'RUN_ID', 'EPOCH', 'TOKEN_HASH', 'STATE'],
+      ['ATTEMPT_ID', 'LOOP_ROLE', 'NODE', 'PROFILE']);
     const tokenHash = createHash('sha256').update(proof.token).digest('hex');
+
+    const scoped = active.NODE !== undefined || active.PROFILE !== undefined;
 
     if (active.SCHEMA !== '1' || active.STATE !== 'active' || active.RUN_ID !== proof.runId
       || active.EPOCH !== proof.epoch || !HASH.test(active.TOKEN_HASH ?? '')
+      || (active.ATTEMPT_ID !== undefined && active.ATTEMPT_ID !== proof.attemptId)
+      || (scoped && (active.ATTEMPT_ID !== proof.attemptId
+        || !NODE.test(active.NODE ?? '') || !ID.test(active.PROFILE ?? '')))
+      || (active.LOOP_ROLE !== undefined
+        && (active.ATTEMPT_ID === undefined || !['lead', 'worker'].includes(active.LOOP_ROLE)))
       || !timingSafeEqual(Buffer.from(active.TOKEN_HASH!), Buffer.from(tokenHash))) {
       return browserAuthorityError();
     }
@@ -249,6 +261,10 @@ export async function readBrowserRun(root: string, raw: unknown,
       epoch: proof.epoch,
       tokenHash,
       runner: live.RUNNER!,
+      ...(scoped ? {
+        node: active.NODE,
+        profile: active.PROFILE,
+      } : {}),
       pid,
       pgid: pid,
       session: pid,

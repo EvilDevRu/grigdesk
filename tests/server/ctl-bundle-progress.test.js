@@ -22,10 +22,10 @@ async function bundleFixture(t, failStage) {
   const failure = Object.assign(new Error('Синтетический отказ'), { code: 23 });
 
   t.after(() => fs.rm(root, { recursive: true, force: true }));
-  await fs.mkdir(path.join(root, 'bin'), { recursive: true });
+  await fs.mkdir(path.join(root, 'bin/utilities'), { recursive: true });
   await fs.mkdir(path.join(root, 'deploy/lib'), { recursive: true });
   await fs.writeFile(path.join(root, 'VERSION'), '9.8.7\n');
-  await fs.writeFile(path.join(root, 'bin/grigdesk-ctl'), '#!/bin/bash\nexit 0\n');
+  await fs.writeFile(path.join(root, 'bin/utilities/ctl'), '#!/bin/bash\nexit 0\n');
   await fs.writeFile(path.join(root, 'deploy/lib/runtime-env.sh'), '# изолированный payload\n');
   await fs.mkdir(path.join(root, 'release'));
   await fs.writeFile(path.join(root, 'release/previous'), 'прежняя поставка');

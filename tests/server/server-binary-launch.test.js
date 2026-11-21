@@ -60,7 +60,8 @@ async function fixture(t) {
     await fs.mkdir(directory, { recursive: true });
   }
 
-  await fs.cp(path.join(SOURCE, 'bin/grigdesk-ctl'), path.join(root, 'bin/grigdesk-ctl'));
+  await fs.cp(path.join(SOURCE, 'tests/fixtures/legacy-ctl/grigdesk-ctl'),
+    path.join(root, 'bin/grigdesk-ctl'));
   await fs.writeFile(path.join(temp, 'metadata.json'), JSON.stringify(metadata));
   await fs.writeFile(path.join(temp, 'prepared.json'), JSON.stringify({
     packageId: PACKAGE,
@@ -78,10 +79,21 @@ async function fixture(t) {
     'exec "$FIXTURE_NODE" "$@"',
   ].join('\n'), { mode: 0o555 });
 
+  const manifestFile = path.join(SOURCE, 'server/build/helpers.json');
+  const sourceManifest = JSON.parse(await fs.readFile(manifestFile, 'utf8'));
+
+  sourceManifest.helpers.push({
+    id: 'grigdesk-cli',
+    entry: 'tests/fixtures/legacy-ctl/cli/main.ts',
+    entryKind: 'script',
+    exports: [],
+    description: 'Фикстура для исторического server ELF.',
+  });
+
   for (const id of ['grigdesk-cli', 'data-home-check']) {
     await buildHelper({
       root: SOURCE,
-      manifestPath: path.join(SOURCE, 'server/build/helpers.json'),
+      manifest: sourceManifest,
       id,
       outDir: path.join(runtime, 'server/runtime/helpers'),
       workDir: path.join(temp, 'helper-work'),

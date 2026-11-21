@@ -12,6 +12,7 @@ import os from 'node:os';
 import path from 'node:path';
 import type { TestContext } from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { fixtureGo } from '../../helpers/goBuildFixture.mts';
 
 export interface RunOutput {
   code: number;
@@ -35,6 +36,7 @@ export interface Sandbox {
   lock(target: string): void;
   serve(kind: 'grigdesk' | 'other' | 'hang', mobile?: unknown): Promise<void>;
   requests(): string[];
+  argv(args?: string[]): string[];
   run(args: string[], env?: Record<string, string | undefined>): Promise<RunOutput>;
   spawn(args: string[], env?: Record<string, string | undefined>): ChildProcess;
   waitFor(predicate: () => boolean, ms?: number): Promise<void>;
@@ -141,7 +143,7 @@ fs.appendFileSync(path.join(base, 'calls.log'), command + ' ' + args.join(' ') +
  * Создаёт отдельную копию CLI с командами-заглушками и своим свободным HTTP-портом.
  * До запуска доказывает через command -v, что ни один системный инструмент не достижим.
  */
-export async function createSandbox(t: TestContext): Promise<Sandbox> {
+export async function createSandbox(t: TestContext, options: { go?: boolean } = {}): Promise<Sandbox> {
   const home = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'grigdesk-cli-')));
   const root = path.join(home, 'репозиторий с пробелами');
   const stubs = path.join(home, 'stubs');
@@ -150,17 +152,37 @@ export async function createSandbox(t: TestContext): Promise<Sandbox> {
   const servers = new Set<Server>();
   const children = new Set<ChildProcess>();
   const requests: string[] = [];
+  const go = options.go ?? process.env.GRIGDESK_CTL_TEST_GO === '1';
+  const executable = go ? fixtureGo('grigdesk-ctl') : '/bin/bash';
+  const prefix = go ? [] : [path.join(root, 'bin/grigdesk-ctl')];
 
-  for (const dir of [stubs, stubDir, path.join(root, 'bin'), path.join(root, 'tools'),
+  for (const dir of [stubs, stubDir, path.join(root, 'bin/utilities'), path.join(root, 'tools'),
     path.join(root, 'deploy/lib'), path.join(root, 'shared'), path.join(home, '.grigdesk/state'),
     path.join(root, 'relay')]) {
     mkdirSync(dir, { recursive: true });
   }
 
-  for (const name of ['bin/grigdesk-ctl', 'cli', 'deploy/lib/runtime-env.sh',
+  for (const name of ['cli', 'deploy/lib/runtime-env.sh',
     'server/src/lib/runtimePaths.ts', 'server/src/lib/runtimeBuildContext.ts',
     'shared', 'VERSION']) {
     cpSync(path.join(repo, name), path.join(root, name), { recursive: true });
+  }
+
+  if (!go) {
+    for (const relative of ['tests/fixtures/legacy-ctl/cli', 'tests/fixtures/release-v2']) {
+      cpSync(path.join(repo, relative), path.join(root, relative), { recursive: true });
+    }
+
+    cpSync(path.join(repo, 'tests/fixtures/legacy-ctl/grigdesk-ctl'), path.join(root, 'bin/grigdesk-ctl'));
+  }
+
+  if (go) {
+    for (const name of ['server/src/app.ts', 'web/package.json', 'desktop/package.json']) {
+      const file = path.join(root, name);
+
+      mkdirSync(path.dirname(file), { recursive: true });
+      writeFileSync(file, '{}\n');
+    }
   }
 
   writeFileSync(path.join(root, 'relay/compose.yaml'), '');
@@ -177,7 +199,7 @@ export async function createSandbox(t: TestContext): Promise<Sandbox> {
   // Команды, которые bin/grigdesk-ctl передаёт отдельным скриптам: имя — путь заглушки.
   const delegated: Record<string, string> = {
     desktop: 'deploy/desktop.sh',
-    tracker: 'bin/tracker',
+    tracker: go ? 'bin/utilities/tracker' : 'bin/tracker',
     mobile: 'tools/mobile',
     release: 'tools/release',
   };
@@ -210,6 +232,10 @@ exit 7
     GRIGDESK_WAIT_SEC: '5',
     DISPLAY: ':99',
   });
+
+  if (go) {
+    env.GRIGDESK_CTL_CHECKOUT_ROOT = root;
+  }
 
   const guard = await completed(spawnChild('bash', ['-c',
     'command -v systemctl journalctl docker xdg-open notify-send'], { env }));
@@ -407,7 +433,7 @@ printf 'app-secret %s\\n' "\${SECRET_TOKEN:-}" >> "$STUB_HOME/calls.log"
         }
       }
 
-      const child = spawnChild('bash', [path.join(root, 'bin/grigdesk-ctl'), ...args], {
+      const child = spawnChild(executable, [...prefix, ...args], {
         env: childEnv,
         cwd: '/',
       });
@@ -419,6 +445,9 @@ printf 'app-secret %s\\n' "\${SECRET_TOKEN:-}" >> "$STUB_HOME/calls.log"
     },
     run(args, overrides) {
       return completed(box.spawn(args, overrides));
+    },
+    argv(args = []) {
+      return [executable, ...prefix, ...args];
     },
     /**
      * Ждёт наблюдаемое событие без фиксированной задержки перед assertion.

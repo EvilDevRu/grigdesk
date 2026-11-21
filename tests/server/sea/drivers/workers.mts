@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
 
@@ -63,41 +63,17 @@ try {
   await peer.stop();
 }
 
-await mkdir('/D/engine-run', { recursive: true });
-await writeFile('/D/engine-run/meta.env', 'SOURCE=runtime\n');
-await writeFile('/D/engine-run/events.jsonl', JSON.stringify({
-  type: 'turn.failed',
-  error: { code: '401', message: 'authentication required' },
-}) + '\n');
-await writeFile('/D/prepared.json', JSON.stringify({
-  normalization: { provider: 'codex', normalizerDialect: 'codex-json' },
-}));
-
-const engine = await execute('/bin/bash', ['-c', [
-  'source "$FACTORY_HOME/lib/runner-launcher.sh"',
-  'source "$FACTORY_HOME/lib/runners/codex.sh"',
-  'runner_codex_classify /D/engine-run 1',
-  'exec {RUNNER_RUNTIME_RUN_DIR_FD}</D/engine-run',
-  '_runner_runtime_usage_call invalidate /D/prepared.json fixtureConflict',
-].join('\n')], {
-  cwd: '/D',
-  env: {
-    ...env,
-    FACTORY_HOME: path.join(root, 'engine'),
-    NODE_BIN: node,
-  },
-  timeout: 20000,
-});
-const lines = engine.stdout.trim().split('\n');
-
-assert.equal(lines[0], 'provider_unavailable');
-assert.equal(JSON.parse(lines[1]!).normalization.completeness, 'conflict');
-
 const options = {
   cwd: '/D',
   env,
   timeout: 30000,
 };
+const engine = await execute(path.join(root, 'engine/bin/factory'), [
+  'capabilities', '--format', 'json',
+], options);
+
+assert.ok(JSON.parse(engine.stdout).features.includes('native-subcommands'));
+
 const help = await execute(path.join(root, 'bin/grigdesk-ctl'), ['--help'], options);
 const version = await execute(path.join(root, 'bin/grigdesk-ctl'), ['--version'], options);
 

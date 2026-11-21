@@ -18,10 +18,9 @@ const dataStateDir = dataPath(dataHome, 'state');
 const rootDir = runtimeRoot();
 const installationBin = runtimeInstallationBin();
 // Одиночный ELF не зависит от checkout: движок поставки и физические профили D.
-// Source и прежний SEA-комплект сохраняют переопределения и умолчания байт в байт.
 const singleBinary = runtimeMode() === 'payload';
 const factoryRuntime = factoryRuntimePaths({
-  kind: singleBinary ? 'packaged' : 'source',
+  kind: runtimeKind(),
   root: rootDir,
   env: process.env,
 });
@@ -121,6 +120,7 @@ export const config = {
       env: process.env,
     }),
   factoryBin: factoryRuntime.bin,
+  factoryEngineProtocol: factoryRuntime.protocol,
   // Debug settings принадлежат engine writer-у, GrigDesk передаёт этот root его CLI.
   factoryConfigRoot: process.env.FACTORY_CONFIG_ROOT || path.join(dataHome, 'factory', 'config'),
   // Профиль для запуска на конвейер (пусто → определяется по данным/обнаружению).

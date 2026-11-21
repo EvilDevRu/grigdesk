@@ -17,7 +17,7 @@ test('INSTALL-MAC-PLATFORM: несовместимый хост не запра�
   const fixture = signedMacIndex();
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-other-platform-'));
   const root = path.join(directory, 'program');
-  const { installRelease } = await loadInstalledModule(t, 'tools/installRelease.mts',
+  const { installRelease } = await loadInstalledModule(t, 'tests/fixtures/release-v2/installRelease.mts',
     fixture.publicKeyPem);
   let archives = 0;
 
@@ -73,7 +73,7 @@ async function makeInstallInput(t: TestContext, mode: 'remote' | 'server', candi
       `export const RELEASE_SIGNING_PUBLIC_KEY = ${JSON.stringify(release.publicKeyPem)};`)
       .replace("ReleaseDistributionSource = 'channel';", "ReleaseDistributionSource = 'candidate-file';"),
   } : {};
-  const { installRelease } = await loadInstalledModule(t, 'tools/installRelease.mts',
+  const { installRelease } = await loadInstalledModule(t, 'tests/fixtures/release-v2/installRelease.mts',
     release.publicKeyPem, stubs);
   const maintenance = path.join(temporary, 'maintenance');
   const archives = new Map<string, string>();
@@ -226,7 +226,7 @@ test('INSTALL-LEGACY-HELPER: существующая установка гот�
     await fs.writeFile(file, upgraded.archives.get(url)!);
   }
 
-  const { installRelease } = await loadInstalledModule(t, 'tools/installRelease.mts',
+  const { installRelease } = await loadInstalledModule(t, 'tests/fixtures/release-v2/installRelease.mts',
     upgraded.publicKeyPem);
 
   const receipt = await installRelease({
@@ -257,7 +257,8 @@ test('INSTALL-OFFLINE-RETRY: тот же B повторяет задачу и о
   const current = path.join(root, 'current.json');
   const before = await fs.readFile(current);
   const candidate = installedRelease({ version: '9.9.9', keys: box.keys });
-  const { installRelease: channelInstaller } = await loadInstalledModule(t, 'tools/installRelease.mts',
+  const { installRelease: channelInstaller } = await loadInstalledModule(t,
+    'tests/fixtures/release-v2/installRelease.mts',
     candidate.publicKeyPem);
   const input = { ...box.input, envelope: candidate.envelope };
 
@@ -277,8 +278,9 @@ test('INSTALL-OFFLINE-RETRY: тот же B повторяет задачу и о
   const ownedArchive = path.join(root, 'update', failed.id, 'desktop.tar.gz');
   const source = path.join(path.dirname(root), 'candidate-desktop.tar.gz');
 
-  await fs.writeFile(ownedArchive, 'частичный архив');
-  await fs.writeFile(source, candidate.archives.get(candidate.envelope.payload.artifacts.desktop.url)!);
+  await fs.writeFile(ownedArchive, 'частичный архив', { mode: 0o600 });
+  await fs.writeFile(source, candidate.archives.get(candidate.envelope.payload.artifacts.desktop.url)!,
+    { mode: 0o600 });
   await box.installRelease({ ...input, archive: async () => source });
 
   const ready = JSON.parse(await fs.readFile(jobFile, 'utf8'));

@@ -145,8 +145,8 @@ test('BP-WEIGHTS: первый запуск использует грубые в
 });
 
 test('BP-HISTORY: успешные веса по варианту/id, ошибка и INT не переписывают историю', async (t) => {
-  const read = await requiredApi('cli/buildLog.ts', 'readBuildTimings');
-  const save = await requiredApi('cli/buildLog.ts', 'saveBuildTimings');
+  const read = await requiredApi('tests/fixtures/legacy-ctl/cli/buildLog.ts', 'readBuildTimings');
+  const save = await requiredApi('tests/fixtures/legacy-ctl/cli/buildLog.ts', 'saveBuildTimings');
   const home = await mkdtemp(path.join(os.tmpdir(), 'ctl-build-history-'));
   const steps = [{ id: 'web.dependencies', durationMs: 1000 }, { id: 'web.build', durationMs: 9000 }];
   const input = {

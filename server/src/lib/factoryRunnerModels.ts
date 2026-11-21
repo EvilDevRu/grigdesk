@@ -22,12 +22,13 @@ export interface FactoryModelOption {
 
 /**
  * Читает только native metadata, без реестра чатов и обращения к модели.
- * Каталог раннера ограничивает canonical id; effort принадлежит конкретной модели.
+ * Переданный каталог раннера ограничивает canonical id. Effort принадлежит конкретной модели.
  */
 export async function collectFactoryRunnerModels(
-  provider: string, catalog: string, cli?: string,
+  provider: string, catalog: string | null, cli?: string,
 ): Promise<FactoryModelOption[]> {
-  const ids = catalog.split('\n').filter(Boolean).map((line) => line.split('\t')[0]!);
+  const ids = catalog?.split('\n').filter(Boolean).map((line) => line.split('\t')[0]!);
+  const includes = (id: string) => ids === undefined || ids.includes(id);
   let models: FactoryModelOption[];
 
   if (provider === 'codex') {
@@ -39,7 +40,7 @@ export async function collectFactoryRunnerModels(
       const id = String(entry.id);
       const efforts = entry.efforts;
 
-      return ids.includes(id) && Array.isArray(efforts) && efforts.length ? [{
+      return includes(id) && Array.isArray(efforts) && efforts.length ? [{
         id,
         label: String(entry.name || id),
         efforts: efforts.map(String),
@@ -75,14 +76,14 @@ export async function collectFactoryRunnerModels(
 
     const available = Array.isArray(entries) ? entries.filter(isRecord) : [];
 
-    models = available.filter((entry) => ids.includes(String(entry.id))).map((entry) => ({
+    models = available.filter((entry) => includes(String(entry.id))).map((entry) => ({
       id: String(entry.id),
       label: String(entry.name || entry.id),
       efforts: [''],
       aliases: [],
     }));
   } else if (provider === 'kimi') {
-    models = ids.map((id) => ({
+    models = (ids ?? []).map((id) => ({
       id,
       label: id,
       efforts: ['low', 'high', 'max'],
@@ -99,7 +100,7 @@ export async function collectFactoryRunnerModels(
     }
 
     assertGlmGenerationAdmission(generation, mode);
-    models = GLM_FACTORY_MODELS.filter((model) => ids.includes(model.id)).map((model) => ({
+    models = GLM_FACTORY_MODELS.filter((model) => includes(model.id)).map((model) => ({
       id: model.id,
       label: runnerModelName(model.id) || model.id,
       efforts: [...model.efforts],
@@ -111,7 +112,7 @@ export async function collectFactoryRunnerModels(
     try {
       const metadata = await readDeepSeekCatalog({ config: { ...config, deepseekRuntimeHome: temporary } });
 
-      models = metadata.models.filter((model) => ids.includes(model.id)).map((model) => ({
+      models = metadata.models.filter((model) => includes(model.id)).map((model) => ({
         id: model.id,
         label: model.name,
         efforts: model.efforts.filter((effort) => ['off', 'low', 'high', 'max'].includes(effort)),

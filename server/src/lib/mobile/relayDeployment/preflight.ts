@@ -73,7 +73,8 @@ base=/opt/grigdesk-relay/${id}
 conf=/etc/grigdesk-relay/${id}
 state=/var/lib/grigdesk-relay/${id}
 unit=/etc/systemd/system/grigdesk-relay-${id}.service
-for item in /opt/grigdesk-relay /etc/grigdesk-relay /var/lib/grigdesk-relay \
+for item in /opt /etc /var /var/lib /etc/systemd /etc/systemd/system \
+  /opt/grigdesk-relay /etc/grigdesk-relay /var/lib/grigdesk-relay \
   "$base" "$conf" "$state" "$unit"; do
   test ! -L "$item"
 done

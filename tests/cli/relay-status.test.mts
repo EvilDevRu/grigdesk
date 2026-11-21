@@ -2,10 +2,10 @@ import assert from 'node:assert/strict';
 import path from 'node:path';
 import test from 'node:test';
 
-import { dockerProblem, parseLinks, parseRelayList, pickRelay, relayState } from '../../cli/relay.ts';
-import { printable, renderText, toJson } from '../../cli/status.ts';
-import type { StatusSnapshot } from '../../cli/status.ts';
-import type { RunResult } from '../../cli/system.ts';
+import { dockerProblem, parseLinks, parseRelayList, pickRelay, relayState } from '../../tests/fixtures/legacy-ctl/cli/relay.ts';
+import { printable, renderText, toJson } from '../../tests/fixtures/legacy-ctl/cli/status.ts';
+import type { StatusSnapshot } from '../../tests/fixtures/legacy-ctl/cli/status.ts';
+import type { RunResult } from '../../tests/fixtures/legacy-ctl/cli/system.ts';
 import { createSandbox } from './helpers/sandbox.mts';
 
 const ready: StatusSnapshot = {

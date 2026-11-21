@@ -1,34 +1,29 @@
 // Каталог установленных исполнителей (LLM-провайдеров) для API GrigDesk.
 //
-// Зеркало `factory runners` движка (engine/lib/runner-cli.sh): адаптер — это
-// *.sh-модуль в lib/runners, служебные index/policy/catalog исполнителями не
-// являются. Имя обязано проходить тот же формат, что проверяет CLI движка,
-// иначе его нельзя передать обратно аргументом (`--runner-primary`, runner set).
-import { promises as fs } from 'node:fs';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import path from 'node:path';
 
+const runCli = promisify(execFile);
 const RUNNER_ID = /^[a-z][a-z0-9_-]*$/;
-const SERVICE_MODULES = new Set(['index', 'policy', 'catalog']);
 
 /**
  * Список установленных исполнителей, отсортированный. Каталога нет — список
  * пустой: выбор исполнителя в UI просто не предлагается, это не авария.
  */
 export async function listInstalledRunners(config: {
-  factoryRunnersDir?: string;
-  factoryHome: string;
+  factoryBin?: string;
 }): Promise<string[]> {
-  const dir = config.factoryRunnersDir || path.join(config.factoryHome, 'lib', 'runners');
-  let entries: string[];
-
-  try {
-    entries = await fs.readdir(dir);
-  } catch {
+  if (!config.factoryBin || !path.isAbsolute(config.factoryBin)) {
     return [];
   }
-  const runners = entries
-    .filter((name) => name.endsWith('.sh'))
-    .map((name) => name.slice(0, -'.sh'.length))
-    .filter((id) => RUNNER_ID.test(id) && !SERVICE_MODULES.has(id));
-  return [...new Set(runners)].sort();
+
+  const response = await runCli(config.factoryBin, ['runners'], {
+    timeout: 5_000,
+    maxBuffer: 64 * 1024,
+    shell: false,
+  }).catch(() => null);
+  const ids = response?.stdout.trim().split('\n') ?? [];
+
+  return ids.every((id) => RUNNER_ID.test(id)) ? [...new Set(ids)].sort() : [];
 }

@@ -15,7 +15,6 @@ import { readArbiterStopContext } from '../../server/src/lib/arbiterStopContext.
 import {
   registerArbiterConversationRoutes
 } from '../../server/src/modules/factory/arbiterConversationRoutes.ts';
-import { canonicalJson } from '../../shared/lib/canonicalJson.ts';
 
 const Fastify = createRequire(new URL('../../server/package.json', import.meta.url))('fastify');
 
@@ -312,7 +311,7 @@ app.mount('#app');
       failure = mode;
     },
     stopAgain: async () => {
-      const verdict = Buffer.from(canonicalJson({
+      ledger.commit('check', 'failed', {
         owner: 'tests', findings: [
           {
             id: 'timeout',
@@ -320,17 +319,7 @@ app.mount('#app');
             summary: 'Новая остановка проверки по времени.'
           },
         ]
-      })).toString('base64');
-
-      await ledger.call(
-        'attempt_stage_state_commit_v2',
-        '7',
-        ledger.attempt,
-        'check',
-        'failed',
-        '0',
-        verdict
-      );
+      });
     }
   };
 }

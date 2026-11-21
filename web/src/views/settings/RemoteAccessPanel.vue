@@ -103,7 +103,13 @@
           </template>
           <template v-if="['failed', 'interrupted', 'recovery_required'].includes(current.state)">
             <UiInlineMessage tone="danger">{{ failureMessage }}</UiInlineMessage>
-            <UiButton :disabled="busy" @click="act('retry')">{{ t('settings.remoteRetry') }}</UiButton>
+            <UiButton :disabled="busy" @click="act('retry')">
+              {{
+                current.error?.code === 'relay_resume_required'
+                  ? t('settings.remoteResumeOverSsh')
+                  : t('settings.remoteRetry')
+              }}
+            </UiButton>
           </template>
           <p v-for="step in current.steps" :key="step.name">
             {{ stepLabel(step.name) }}: {{ stepState(step.state) }}
@@ -189,6 +195,14 @@ const failureMessage = computed(() => {
 
   if (code === 'remote_rollback_failed') {
     return t('settings.remoteRollbackFailed');
+  }
+
+  if (code === 'relay_resume_required') {
+    return t('settings.remoteResumeRequired');
+  }
+
+  if (code === 'relay_release_floor') {
+    return t('settings.remoteReleaseFloor');
   }
 
   if (code === 'deployment_cancelled') {

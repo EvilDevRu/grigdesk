@@ -1,8 +1,9 @@
 # Engine — движок конвейера (инструкции для агента)
 
-Движок фабрики задач — **часть GrigDesk** и канонически живёт в каталоге `engine/`.
-GrigDesk — пульт (запускает `engine/bin/factory`, читает реестры), движок — станок.
-Внешний checkout не является источником кода; он подключается только явными env-override.
+Движок фабрики задач — **часть GrigDesk**. Исходники Go-движка находятся в
+`utilities/factory/`, публичный профильный ресурс `lib/delivery_contract.py` — в `engine/`.
+GrigDesk запускает выбранный сервером движок и читает его реестры. Для закреплённой
+попытки engine и helpers берутся из её поколения.
 Общение и комментарии в коде — **только на русском**.
 
 Несмотря на имя файла, эти правила общие для Claude Code, Codex и любого другого
@@ -30,11 +31,11 @@ GrigDesk — пульт (запускает `engine/bin/factory`, читает �
 1. **Движок не знает ни одного проекта.** Имена контейнеров, команды стека, пути репозиториев —
    только в локальном `../profiles/<имя>/profile.sh`; весь `/profiles/` игнорируется Git,
    новых исключений не добавлять.
-2. **Агент завершает этап только через `lib/stage-result.sh`.** Нетерминальные маршрутные
-   данные идут через `lib/stage-progress.sh`; прямой pipeline writer агенту не выдаётся.
+2. **Агент завершает этап через `stage-result` своего запуска.** Нетерминальные данные
+   идут через `stage-progress`. Обе команды принадлежат закреплённому Go-бинарнику.
    Хостовый `executor=command` вместо этого печатает JSON-вердикт в stdout — его форму
    (`findings` только при `failed`, `id` уникальны) обязан проверять тест профиля прогоном
-   через `_route_v2_command_result`, а не сверкой одного лишь JSON скрипта. Рассинхрон здесь
+   через Go-фабрику на реальном командном узле. Рассинхрон здесь
    не отклоняет поле, а останавливает маршрут кодом 78 на уже отработавшем узле.
 3. **Документация правится вместе с кодом.** Новый или удалённый хук — в тот же заход в
    `../docs/engine/PROFILE-CONTRACT.md`. Комментарии-объяснения причин («так возникает
@@ -43,23 +44,16 @@ GrigDesk — пульт (запускает `engine/bin/factory`, читает �
 ## Проверки перед тем, как сказать «готово»
 
 ```bash
-bash -n bin/factory bin/factory-check lib/*.sh ../profiles/*/profile.sh
-python3 -m py_compile lib/dashboard.py
-bin/factory-check --quick        # все профили: capability/hooks, runner config, paths/host
-../tests/run-all.sh              # полный offline suite, без GrigDesk и model call
+go -C utilities/factory test -count=1 -p=2 ./...
+go -C utilities/factory test -race -count=1 ./internal/state ./internal/engine
+bin/factory profile-check --quick
 ```
 
+Команды выполняются из корня проекта с Go 1.27.4.
+Исходники команд лежат в `utilities/factory/cmd/factory`, orchestration —
+в `utilities/factory/internal/engine`, запись журналов — в `internal/state`.
+Профили в `profiles/<имя>/` находятся вне Git.
 Коммит и пуш — только по явной просьбе человека.
-
-## Что где лежит
-
-```
-bin/      factory (CLI+демон), factory-route/context, dashboard, factory-check
-lib/      core.sh (ядро), multi-runner.sh (dispatcher), run-state.sh (protocol v2), dashboard.py
-../profiles/<имя>/ локальные profile.sh + обязательные runners.env/graph.json/dashboard.env +
-                    routes/ и проектные stand-скрипты; каталог целиком вне Git
-../tests/engine/ проверки движка, профилей и дашборда
-```
 
 Состояние задач — вне репозитория: `~/.factory/state/` (`tNNNN.pipeline`, `logs/`, `archive/`,
 `shots/`, `quarantine/`). Путь берётся из `FACTORY_STATE`/`STATE_DIR`, хардкодить нельзя.

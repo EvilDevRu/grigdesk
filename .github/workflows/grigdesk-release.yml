@@ -119,6 +119,11 @@ jobs:
         run: |
           mkdir release-plan
           node tools/platformCandidate.mts plan release-plan/candidate-plan.json
+      - name: Go для утилит GrigDesk
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16
+        with:
+          go-version: '1.27.4'
+          cache-dependency-path: go.sum
       - name: Идентичность выпуска
         if: ${{ steps.accepted.outputs.platforms == 'linux' }}
         run: node tools/release-identity.mts
@@ -199,6 +204,11 @@ jobs:
         env:
           CANDIDATE_VERSION: ${{ needs.plan.outputs.version }}
         run: node tools/platformCandidate.mts identity
+      - name: Go для утилит GrigDesk
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16
+        with:
+          go-version: '1.27.4'
+          cache-dependency-path: go.sum
       - name: Идентичность выпуска
         if: ${{ needs.plan.outputs.platforms == 'linux' }}
         run: node tools/release-identity.mts
@@ -228,10 +238,6 @@ jobs:
         run: npm --prefix mobile ci
       - name: Зависимости комплекта
         run: |
-          npm --prefix tracker ci
-          npm --prefix routes ci --include=dev
-          npm --prefix voice ci --include=dev
-          npm --prefix relay ci
           npm --prefix deepseek ci
           npm --prefix desktop ci
       - name: Подготовка среды тестового исполнителя
@@ -295,6 +301,11 @@ jobs:
         env:
           CANDIDATE_VERSION: ${{ needs.plan.outputs.version }}
         run: node tools/platformCandidate.mts identity
+      - name: Go для утилит GrigDesk
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16
+        with:
+          go-version: '1.27.4'
+          cache-dependency-path: go.sum
       - name: Идентичность выпуска
         if: ${{ needs.plan.outputs.platforms == 'linux' }}
         run: node tools/release-identity.mts
@@ -310,10 +321,6 @@ jobs:
         run: npm --prefix mobile ci
       - name: Зависимости комплекта
         run: |
-          npm --prefix tracker ci
-          npm --prefix routes ci --include=dev
-          npm --prefix voice ci --include=dev
-          npm --prefix relay ci
           npm --prefix deepseek ci
           npm --prefix desktop ci --ignore-scripts
           node desktop/node_modules/esbuild/install.js
@@ -364,6 +371,11 @@ jobs:
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
           node-version: ${{ steps.node_runtime.outputs.version }}
+      - name: Go для утилит GrigDesk
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16
+        with:
+          go-version: '1.27.4'
+          cache-dependency-path: go.sum
       - name: Идентичность выпуска
         run: node tools/release-identity.mts
         env:
@@ -401,10 +413,6 @@ jobs:
         run: npm --prefix mobile ci
       - name: Зависимости комплекта
         run: |
-          npm --prefix tracker ci
-          npm --prefix routes ci --include=dev
-          npm --prefix voice ci --include=dev
-          npm --prefix relay ci
           npm --prefix deepseek ci
           npm --prefix desktop ci --ignore-scripts
           node desktop/node_modules/esbuild/install.js
@@ -499,6 +507,11 @@ jobs:
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
           node-version: ${{ steps.node_runtime.outputs.version }}
+      - name: Go для утилит GrigDesk
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16
+        with:
+          go-version: '1.27.4'
+          cache-dependency-path: go.sum
       - name: Идентичность выпуска
         run: node tools/release-identity.mts
         env:
@@ -547,6 +560,11 @@ jobs:
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
           node-version: ${{ steps.node_runtime.outputs.version }}
+      - name: Go для утилит GrigDesk
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16
+        with:
+          go-version: '1.27.4'
+          cache-dependency-path: go.sum
       - name: Идентичность выпуска
         run: node tools/release-identity.mts
         env:
@@ -559,6 +577,12 @@ jobs:
           merge-multiple: true
       - name: Зависимости публикации
         run: npm --prefix server ci
+      - name: Нативные доказательства Go перед доступом к сайту
+        run: node tools/verifyGoReleaseEvidence.mts release-artifacts
+        env:
+          GRIGDESK_GO_LINUX_ARTIFACT_ID: ${{ needs.build.outputs.artifact_id }}
+          GRIGDESK_GO_SOURCE_RUN_ID: ${{ github.run_id }}
+          GRIGDESK_GO_SOURCE_ATTEMPT: ${{ github.run_attempt }}
       - name: Ключ сайта
         env:
           SITE_KEY: ${{ secrets.RELEASE_SITE_KEY }}
@@ -573,6 +597,9 @@ jobs:
       - name: Публикация на сайт
         run: node tools/release-publish.mts "$PWD"
         env:
+          GRIGDESK_GO_LINUX_ARTIFACT_ID: ${{ needs.build.outputs.artifact_id }}
+          GRIGDESK_GO_SOURCE_RUN_ID: ${{ github.run_id }}
+          GRIGDESK_GO_SOURCE_ATTEMPT: ${{ github.run_attempt }}
           RELEASE_SITE_HOST: ${{ secrets.RELEASE_SITE_HOST }}
           RELEASE_SITE_USER: ${{ secrets.RELEASE_SITE_USER }}
           RELEASE_SITE_PORT: ${{ secrets.RELEASE_SITE_PORT || '22' }}
@@ -636,6 +663,11 @@ jobs:
           artifact-ids: ${{ needs.plan.outputs.artifact_id }}
           path: ${{ runner.temp }}/candidate-plan
           merge-multiple: true
+      - name: Go для утилит GrigDesk
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16
+        with:
+          go-version: '1.27.4'
+          cache-dependency-path: go.sum
       - name: Серверный receipt по ID
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
         with:
@@ -822,6 +854,11 @@ jobs:
           artifact-ids: ${{ needs.plan.outputs.artifact_id }}
           path: ${{ runner.temp }}/candidate-plan
           merge-multiple: true
+      - name: Go для утилит GrigDesk
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16
+        with:
+          go-version: '1.27.4'
+          cache-dependency-path: go.sum
       - name: Серверный receipt по ID
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
         with:

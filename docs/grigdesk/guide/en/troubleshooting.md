@@ -32,7 +32,7 @@ without retrying the operation or sending an agent message.
 
 For source builds, E0 `factory_source_lock_invalid` can concern temporary test HOME permissions.
 The corrected builder creates it privately regardless of terminal settings.
-Update source and retry `bin/grigdesk-ctl build server`; do not delete data or locks.
+Update source and retry `bin/utilities/ctl build server`; do not delete data or locks.
 An `ENOENT` package under `server/node_modules` can mean outdated dependencies.
 The corrected build reconciles server dependencies before packaging even when node_modules exists.
 Update source and repeat the same command. For npm preparation errors, retain the output and check registry access;

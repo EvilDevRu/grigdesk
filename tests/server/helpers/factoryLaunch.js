@@ -20,7 +20,8 @@ export const ROUTE_HASH = 'a'.repeat(64);
  */
 export async function factoryLaunchFixture(t, {
   tracker = null,
-  sourceFixture = null,
+  sourceFixture = /** @type {{config: any, tracker: any,
+    analyzer: import('../../../server/src/lib/analysis/analyzer.ts').Analyzer} | null} */ (null),
   app: suppliedApp = null,
   clarifications = null,
   openQuestions = null,

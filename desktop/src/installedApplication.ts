@@ -1,12 +1,14 @@
 import path from 'node:path';
 
 import type { ReleaseIdentity } from '../../shared/runtime/installedUpdateContracts.ts';
+import { readInstalledUpdate } from '../../shared/node/installedUpdateState.ts';
 import type { InstalledUpdateJob } from '../../shared/node/installedUpdateState.ts';
+import { installedControl, usesInstalledControl } from '../../shared/node/installedControl.ts';
 import { installationForExecutable, readUpdateProcess } from '../../shared/node/updateProcessOwner.ts';
 import { acquireInstalledDesktopDrain, inspectInstalledServer, inspectUpdateActivity, installedServerUnit,
   startInstalledServer } from '../../shared/node/installedServer.ts';
-import { createUpdateHandoff, launchUpdateWorker, waitUpdateWorker,
-  writeDesktopBootProof, resumeDesktopHandoff } from '../../shared/node/installedUpdateWorker.ts';
+import { launchUpdateWorker, waitUpdateWorker } from '../../shared/node/installedUpdateProcess.ts';
+import type { UpdateHandoff } from '../../shared/node/installedUpdateProcess.ts';
 import type { ServerApi } from '../../shared/runtime/releaseCompatibility.ts';
 import { createApplicationUpdates } from './applicationUpdates.ts';
 import { desktopText } from './locale.ts';
@@ -39,6 +41,10 @@ export async function createInstalledApplication(ports: InstalledApplicationPort
 
   try {
     receipt = await installationForExecutable(ports.executable);
+
+    if (receipt && !await usesInstalledControl(receipt.root)) {
+      receipt = null;
+    }
   } catch (error) {
     console.warn('installed-update-disabled',
       error instanceof Error ? error.message : 'installation_read_failed');
@@ -109,10 +115,14 @@ export async function createInstalledApplication(ports: InstalledApplicationPort
         throw new Error('release_return_to_confirmed_profile');
       }
 
-      const handoff = await createUpdateHandoff(receipt.root, job.id, {
+      const handoffInput = {
         desktop: await readUpdateProcess(process.pid, path.join(receipt.root, 'update/maintenance')),
         stopLocal: job.scope === 'pair' || ports.ownsLocal(),
         remoteApi: ports.remoteApi(),
+      };
+      const handoff = await installedControl<UpdateHandoff>(receipt.root, 'handoff', {
+        ...handoffInput,
+        jobId: job.id,
       });
 
       await launchUpdateWorker(receipt.root, job.id);
@@ -148,7 +158,10 @@ export async function createInstalledApplication(ports: InstalledApplicationPort
         return;
       }
 
-      const handoff = await resumeDesktopHandoff(receipt.root, job.id);
+      const handoff = await installedControl<UpdateHandoff>(receipt.root, 'resume-handoff', {
+        jobId: job.id,
+        desktop: await readUpdateProcess(process.pid, path.join(receipt.root, 'update/maintenance')),
+      });
 
       await launchUpdateWorker(receipt.root, job.id, 'recover');
       await waitUpdateWorker(receipt.root, handoff, 'accepted');
@@ -211,7 +224,13 @@ export async function createInstalledApplication(ports: InstalledApplicationPort
             return 'idle';
           }
 
-          await runApply(job, true, signal);
+          const saved = await readInstalledUpdate(receipt);
+
+          if (!saved || saved.id !== job.id) {
+            return 'blocked';
+          }
+
+          await runApply(saved, true, signal);
 
           return 'applied';
         } catch (error) {
@@ -239,6 +258,18 @@ export async function createInstalledApplication(ports: InstalledApplicationPort
 
       return true;
     },
-    bootProof: () => writeDesktopBootProof(receipt.root, ports.identity!),
+    async bootProof() {
+      const job = await readInstalledUpdate(receipt);
+
+      if (job?.intent) {
+        await installedControl(receipt.root, 'boot-proof', {
+          jobId: job.id,
+          nonce: job.intent.nonce,
+          version: ports.identity!.version,
+          releaseId: ports.identity!.releaseId,
+          process: await readUpdateProcess(process.pid, path.join(receipt.root, 'update/maintenance')),
+        });
+      }
+    },
   };
 }

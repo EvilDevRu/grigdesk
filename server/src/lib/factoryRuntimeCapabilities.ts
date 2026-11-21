@@ -5,15 +5,16 @@ import { dataPath } from '../../../shared/runtime/dataHome.ts';
 import type { ArbiterCapabilities, StopIdentity } from '../../../shared/pipeline/arbiterConversation.ts';
 import { config as runtimeConfig } from '../config.ts';
 import { selectedFactoryRuntimeConfig, withDarwinFactoryEnvironment } from './factoryLaunch.ts';
-import { readExistingFactoryRuntimePin } from './factoryRuntimePins.ts';
+import { readExistingFactoryRuntimePin, readFactoryDecisionRuntime } from './factoryRuntimePins.ts';
 import type { FactoryRuntimeSelection } from './factoryRuntimePins.ts';
 import { routeLaunchEnv } from './factoryRouteCli.ts';
 import type { RouteConfig } from './factoryRouteCli.ts';
+import { nodeExecutable, runtimeMode } from './runtimePaths.ts';
 
 const execute = promisify(execFile);
 const supportedPackages = new Set<string>();
-const unsupportedMessage = 'Эта попытка запущена старой версией движка; защищённое применение здесь '
-  + 'недоступно. Доступны чтение и разбор; обновлённый движок используется в новой попытке.';
+const unsupportedMessage = 'Движок попытки не объявил поддержку команды. '
+  + 'Для остановленной попытки доступна перепривязка рантайма.';
 const unknownMessage = 'Не удалось проверить поддержку применения; проверку можно повторить.';
 
 interface ProbeDeps {
@@ -64,7 +65,7 @@ async function probeFactoryCapability(
   let selected;
 
   try {
-    selected = await (deps.readPin || readExistingFactoryRuntimePin)({
+    const input = {
       controlRoot: config.factoryControlDir,
       stateRoot: config.stateDir,
       profileRoot: config.profilesDir,
@@ -75,7 +76,23 @@ async function probeFactoryCapability(
           'serverRuntime'
         ),
       ...identity,
-    });
+    };
+
+    selected = await (deps.readPin || readExistingFactoryRuntimePin)(input);
+
+    if (!selected && !deps.readPin && feature === 'stage-runner-settings-v1' && !config.runtime
+      && runtimeMode() === 'source' && config.factoryEngineProtocol === 'go-v1') {
+      selected = await readFactoryDecisionRuntime({
+        ...input,
+        current: {
+          packageId: null,
+          runtimeRoot: config.rootDir,
+          engineHome: config.factoryHome,
+          engineBin: config.factoryBin,
+          node: nodeExecutable(),
+        },
+      });
+    }
   } catch {
     return { status: 'unknown', message: unknownMessage };
   }

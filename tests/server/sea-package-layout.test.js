@@ -319,7 +319,7 @@ test('REVIEW-P3: аудит видит пути сборки в npm-тексте
   }
 });
 
-test('REVIEW-P8: повреждённый cache заменяется проверенной локальной копией без .part', async (t) => {
+test('REVIEW-P8: SEA принимает только проверенный архив в заданном кэше', async (t) => {
   const root = await scratch(t);
   const cache = path.join(root, 'cache');
   const archive = 'node-v24.21.0-linux-x64.tar.xz';
@@ -331,14 +331,13 @@ test('REVIEW-P8: повреждённый cache заменяется прове�
     sha256: sha256(bytes),
   }));
   await put(root, `cache/${archive}`, 'broken');
-  await put(root, `b24/.cache/${archive}`, 'broken');
-  await put(root, `relay/.cache/${archive}`, bytes);
+  await assert.rejects(build.cachedRuntime(cache, root), /проверенного архива/);
+  await put(root, `cache/${archive}`, bytes);
 
   const result = await build.cachedRuntime(cache, root);
 
   assert.equal(await readFile(result, 'utf8'), bytes);
   assert.deepEqual(await readdir(cache), [archive]);
-  await put(root, `relay/.cache/${archive}`, 'broken');
   assert.equal(await build.cachedRuntime(cache, root), result);
   await put(root, `cache/${archive}`, 'previous bytes');
   await assert.rejects(build.cachedRuntime(cache, root), /проверенного архива/);

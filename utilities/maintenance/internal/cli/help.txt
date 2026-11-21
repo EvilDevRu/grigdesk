@@ -1,0 +1,4 @@
+Использование:
+  grigdesk-maintenance --runtime-info --json
+  grigdesk-maintenance --version
+  grigdesk-maintenance --help

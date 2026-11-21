@@ -2,7 +2,7 @@
 // за ним. Собственной качки, venv и приёмки у раздела больше нет — пакет voice
 // делает это сам и публикует результат только после контрольной фразы.
 //
-// Каталог пакетов — копия значений voice/src/local/catalogs.ts: размер и лицензию
+// Каталог пакетов — копия значений utilities/voice/internal/local/packages.json: размер и лицензию
 // человек видит ДО нажатия. При обновлении пакета сверяй обе копии.
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
@@ -75,7 +75,7 @@ export interface PackageInstallerOptions {
 }
 
 // Собственные имена пакетов раздела (проводной id); значения размера/лицензии/
-// голосов скопированы из voice/src/local/catalogs.ts (PIPER_PACKAGE, SILERO_PACKAGE).
+// голосов скопированы из utilities/voice/internal/local/packages.json.
 // byteSize — модель + движок (fileBytes + engineBytes): человек видит полный объём
 // ДО нажатия; wheels Python ставятся сверх и зависят от платформы (находка F26).
 // При обновлении пакета сверяй обе копии.

@@ -21,6 +21,7 @@ import { CatalogObserver } from './catalogObserver.ts';
 import type { CatalogObserverScheduler } from './catalogObserver.ts';
 import { RoutesStore } from './store.ts';
 import type { GrigDeskConfig } from '../../config.ts';
+import type { FactoryEngineProtocol } from '../../lib/factoryRuntime.ts';
 
 // Реестр проектов GrigDesk живёт в ещё нетипизированном сторе настроек: объявлено
 // ровно то, что читает и пишет этот модуль.
@@ -31,6 +32,9 @@ export interface RoutesPrefsPort extends ProjectsPrefsPort {
 
 export interface RoutesModuleOptions {
   config: Pick<GrigDeskConfig, 'routesDir' | 'profilesDir'> & {
+    factoryHome?: string;
+    factoryBin?: string;
+    factoryEngineProtocol?: FactoryEngineProtocol;
     routesAuthoringDir?: string;
     pipelineSampleDir?: string;
   };
@@ -60,6 +64,11 @@ async function routesModule(fastify: FastifyInstance, opts: RoutesModuleOptions)
     profilesDir: config.profilesDir,
     prefs,
     pipelineSampleDir: config.pipelineSampleDir,
+    runtime: config.factoryHome && config.factoryBin ? {
+      home: config.factoryHome,
+      bin: config.factoryBin,
+      protocol: config.factoryEngineProtocol ?? 'go-v1',
+    } : undefined,
   });
 
   // ── Проекты ──

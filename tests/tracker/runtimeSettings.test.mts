@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { readSettings } from '../../cli/commands.ts';
+import { readSettings } from '../../tests/fixtures/legacy-ctl/cli/commands.ts';
 import { resolveRuntimeSettings } from '../../shared/runtime/runtimeSettings.ts';
 import type { RuntimeSettingsInput } from '../../shared/runtime/runtimeSettings.ts';
 
@@ -16,7 +16,6 @@ test('BR-01: runtimeSettings сохраняет defaults и все поля grig
     port: 8140,
     origin: 'http://127.0.0.1:8140',
     windowKeyPath: null,
-    relayProject: null,
     cliTokenPath: '/home/user/.grigdesk/state/cli-token',
   });
   assert.deepEqual(resolveRuntimeSettings({
@@ -24,14 +23,12 @@ test('BR-01: runtimeSettings сохраняет defaults и все поля grig
     file: {
       GRIGDESK_PORT: '8123',
       GRIGDESK_WINDOW_KEY_PATH: '/run/key',
-      GRIGDESK_RELAY_PROJECT: 'relay-home',
     },
     home: HOME,
   }), {
     port: 8123,
     origin: 'http://127.0.0.1:8123',
     windowKeyPath: '/run/key',
-    relayProject: 'relay-home',
     cliTokenPath: '/data/c/state/cli-token',
   });
 });
@@ -90,12 +87,17 @@ test('BR-04: legacyTokenPath используется только по явно
     ['GRIGDESK_CLI_TOKEN_PATH=/file-token', legacy]] as const) {
     const env = { HOME };
 
-    assert.deepEqual(readSettings('/example', env, envFile, legacyPath), resolveRuntimeSettings({
+    const expected = resolveRuntimeSettings({
       env,
       file: envFile === null ? {} : Object.fromEntries([envFile.split('=') as [string, string]]),
       home: HOME,
       legacyTokenPath: legacyPath,
-    }));
+    });
+
+    assert.deepEqual(readSettings('/example', env, envFile, legacyPath), {
+      ...expected,
+      relayProject: null,
+    });
   }
 });
 
@@ -104,7 +106,7 @@ test('BR-05: общий resolver не мутирует входы', () => {
     HOME,
     GRIGDESK_PORT: '8181',
   });
-  const file = Object.freeze({ GRIGDESK_RELAY_PROJECT: 'relay' });
+  const file = Object.freeze({ GRIGDESK_WINDOW_KEY_PATH: '/run/key' });
   const input: RuntimeSettingsInput = Object.freeze({
     env,
     file,
@@ -116,7 +118,7 @@ test('BR-05: общий resolver не мутирует входы', () => {
     HOME,
     GRIGDESK_PORT: '8181',
   });
-  assert.deepEqual(file, { GRIGDESK_RELAY_PROJECT: 'relay' });
+  assert.deepEqual(file, { GRIGDESK_WINDOW_KEY_PATH: '/run/key' });
 });
 
 test('BR-06: явный путь токена не требует верной папки данных', () => {

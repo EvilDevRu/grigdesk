@@ -21,14 +21,14 @@ export function allowedRequest(method: string, path: string) {
       return false;
     }
 
-    const read = /^\/api\/mobile\/v1\/(hello|chats|chat-options|attention|waiting|tasks|b24\/tasks|app)$/;
+    const read = /^\/api\/mobile\/v1\/(hello|chats|chat-options|attention|waiting|tasks|tracker\/tasks|app)$/;
     const detail = new RegExp(
       '^/api/mobile/v1/(' +
         [
           'chats/[A-Za-z0-9_-]{1,64}(/deliveries)?',
           'waiting/[A-Za-z0-9_-]{1,200}/details',
           'tasks/[0-9]+(/plan)?',
-          'b24/tasks/[0-9]+(/launch-options)?',
+          'tracker/tasks/[0-9]+(/launch-options)?',
           'operations/[A-Za-z0-9_-]{8,80}',
         ].join('|') +
         ')$',
@@ -40,7 +40,7 @@ export function allowedRequest(method: string, path: string) {
           'chats/[A-Za-z0-9_-]{1,64}/(messages|stop|settings|read|workspace(/preview)?)',
           'waiting/[A-Za-z0-9_-]{1,200}',
           'tasks/[0-9]+/(gate|resume|stop)',
-          'b24/tasks/[0-9]+/launch',
+          'tracker/tasks/[0-9]+/launch',
         ].join('|') +
         ')$',
     );

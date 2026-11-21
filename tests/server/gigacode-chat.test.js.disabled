@@ -6,7 +6,6 @@ import path from 'node:path';
 import test from 'node:test';
 
 import adapter from '../../server/src/lib/executors/gigacode.ts';
-import { launch } from '../helpers/gigacode/factory.mjs';
 import {
   makeGigaCodeFixture,
   MODEL_A
@@ -311,7 +310,7 @@ test('ошибка после текста сохраняется в pending в�
   assert.ok(pending.steps.some((step) => step.k === 'text' && step.text === 'Ответ fixture'));
 });
 
-test('API Stop чата не затрагивает параллельную Factory; следующий ход завершается', async (t) => {
+test('API Stop завершает текущий ход чата, следующий ход завершается штатно', async (t) => {
   const w = await world(t, {
     waitForCancel: true,
     ignoreTerm: true,
@@ -335,27 +334,6 @@ test('API Stop чата не затрагивает параллельную Fac
   await waitFor(async () => (await w.requests()).some((entry) =>
     entry.message?.method === 'session/prompt'));
 
-  let factoryStarted = false;
-  const factory = launch(t, {
-    updates: [{
-      sessionUpdate: 'agent_message_chunk',
-      content: { type: 'text', text: 'Ответ стадии' },
-    }],
-    mcpCalls: [{
-      tool: 'stage_result',
-      arguments: { result: 'done' },
-      delayAfterMs: 1000,
-    }],
-  }, {}, {
-    onObserve: (entry) => {
-      if (entry.method === 'session/prompt') {
-        factoryStarted = true;
-      }
-    },
-  });
-
-  await waitFor(() => factoryStarted);
-
   const stopped = await w.app.inject({
     method: 'POST',
     url: '/api/chat/stop',
@@ -365,26 +343,6 @@ test('API Stop чата не затрагивает параллельную Fac
   assert.equal(stopped.json().ok, true, stopped.body);
   await waitFor(() => w.events.some((entry) => entry.event === 'chat-done'));
   assert.deepEqual((await w.app.inject('/api/chat/active')).json().active, []);
-
-  const stage = await factory;
-
-  assert.equal(stage.result.code, undefined, `${stage.result.stdout}\n${stage.result.stderr}`);
-  assert.match(stage.result.stdout, /^RESULT=done$/mu);
-  assert.equal(stage.last, 'Ответ стадии');
-
-  const chatSession = (await w.requests()).find((entry) => entry.message?.method === 'session/new');
-  const stageSession = stage.requests.find((entry) => entry.message?.method === 'session/new');
-
-  assert.notEqual(chatSession.message.params.cwd, stageSession.message.params.cwd);
-  assert.notEqual(stage.root, w.root);
-
-  const chatPrompt = (await w.requests()).find((entry) => entry.message?.method === 'session/prompt');
-  const stagePrompt = stage.requests.find((entry) => entry.message?.method === 'session/prompt');
-
-  assert.notEqual(chatPrompt.message.params.sessionId, stagePrompt.message.params.sessionId);
-  assert.equal(stageSession.message.params.mcpServers[0].name, 'factory-status');
-  assert.equal(chatSession.message.params.mcpServers.some((server) =>
-    server.name === 'factory-status'), false);
 
   const scenario = JSON.parse(await fs.readFile(w.scenarioFile, 'utf8'));
 

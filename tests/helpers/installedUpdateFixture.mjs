@@ -7,8 +7,8 @@ import { gzipSync } from 'node:zlib';
 import { createServer } from 'node:net';
 
 import { canonicalJson } from '../../shared/lib/canonicalJson.ts';
-import { InstalledUpdateManager } from '../../shared/node/installedUpdate.ts';
-import { probeInstalledComponent } from '../../shared/node/installedUpdateService.ts';
+import { InstalledUpdateManager } from '../../tests/fixtures/release-v2/installedUpdate.ts';
+import { probeInstalledComponent } from '../../tests/fixtures/release-v2/installedUpdateService.ts';
 import { writeInstallationJson, readInstalledPointer } from '../../shared/node/installedLayout.ts';
 import { readInstalledUpdate } from '../../shared/node/installedUpdateState.ts';
 import { signedIndex, sha256 } from './releaseV2Fixture.mjs';
@@ -17,11 +17,11 @@ import { signedIndex, sha256 } from './releaseV2Fixture.mjs';
  * Создаёт настоящий ustar с одной обычной записью и проверяемой контрольной суммой.
  * Имя можно испортить отдельно от подписанной описи для проверки traversal и links.
  */
-export function archiveBytes(name, bytes, type = '0') {
+export function archiveBytes(name, bytes, type = '0', mode = 0o755) {
   const header = Buffer.alloc(512);
 
   header.write(name, 0, 100);
-  header.write('0000755\0', 100);
+  header.write(mode.toString(8).padStart(7, '0') + '\0', 100);
   header.write('0000000\0', 108);
   header.write('0000000\0', 116);
   header.write(bytes.length.toString(8).padStart(11, '0') + '\0', 124);

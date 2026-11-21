@@ -31,6 +31,13 @@ PID хоста не обязан быть виден в namespace агента. 
 Логи не читаются агентом как текст ошибки: launcher передаёт только машинный код,
 а содержимое запроса, пути и capability не отражаются в ответе CLI/MCP.
 
+В Go-движке на Linux DeepSeek и GLM используют тот же mailbox при политике
+`browser: allow`. Движок публикует точную identity удержанного процесса,
+передаёт capability брокеру через FD9 и ждёт подтверждения готовности
+перед запуском ACP. MCP получает nonce через окружение процесса.
+При завершении право запуска отзывается. Сквозная проба DeepSeek на loopback
+проверяет один вызов `grigdesk_browser` и один результат этапа.
+
 Регрессии: `factory-browser-identity.test.mts` использует настоящий writer под umask `0002`;
 `factory-browser-entry.test.mts` проверяет CLI без mailbox, без readiness и после смерти relay;
 `factory-browser-relay.test.mts` — настоящий relay, обновление lease во время долгого

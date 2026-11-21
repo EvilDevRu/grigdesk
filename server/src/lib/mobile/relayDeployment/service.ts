@@ -1,6 +1,8 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 
+import { errorCode } from '../../../../../shared/lib/errors.ts';
+import { compareProductVersions } from '../../../../../shared/runtime/productReleaseVersion.ts';
 import {
   decodeDeploymentInput,
 } from '../../../../../shared/mobile/relayDeploymentContracts.ts';
@@ -8,16 +10,18 @@ import type {
   DeploymentJob, DeploymentState,
 } from '../../../../../shared/mobile/relayDeploymentContracts.ts';
 import type { SshTransport, SshTransportSession } from '../../ssh/transport.ts';
-import type { HostKeyStore } from '../../ssh/hostKeys.ts';
+import type { HostKey, HostKeyStore } from '../../ssh/hostKeys.ts';
 import type { MobileService } from '../service.ts';
 import { MobileInputError } from '../errors.ts';
-import { resolveRelayArtifact } from './artifact.ts';
+import { pinRelayArtifact, readRelayPin, removeRelayPin, resolveRelayArtifact } from './artifact.ts';
 import type { ArtifactOptions, RelayArtifact } from './artifact.ts';
 import { DeploymentStateStore } from './stateStore.ts';
 import type { DeploymentRecord } from './stateStore.ts';
 import { preflight } from './preflight.ts';
-import { installRelay } from './installer.ts';
-import type { RelayInstallation } from './installer.ts';
+import { digest as deploymentDigest, installRelay } from './installer.ts';
+import type { UpdateRecovery } from './installer.ts';
+import { assertReleaseFloor, floorOf, inspectRemote } from './remoteState.ts';
+import type { ReleaseFloor } from './remoteState.ts';
 import { candidateAddress, verifyCandidate } from './candidate.ts';
 import type { CandidateOptions } from './candidate.ts';
 
@@ -82,6 +86,11 @@ export class RelayDeploymentService {
     this.options = options;
     this.runtime = runtime;
     this.store = new DeploymentStateStore(directory);
+    options.hostKeys.admit?.((key, commit) => this.store.readLocked((records) => {
+      this.assertHostKey(records, key);
+
+      return commit();
+    }));
   }
 
   /**
@@ -90,11 +99,23 @@ export class RelayDeploymentService {
    */
   async recover(): Promise<void> {
     await this.store.mutate((records) => {
-      for (const { job } of records) {
-        if (!terminal.includes(job.state)) {
-          job.state = 'interrupted';
+      for (const { job, updateRecovery } of records) {
+        if (terminal.includes(job.state)) {
+          continue;
+        }
+
+        const waiting = updateRecovery?.published?.reason;
+
+        if (waiting) {
+          if (job.state !== waiting) {
+            job.state = waiting;
+            job.revision += 1;
+            job.error = { code: waiting === 'waiting_vpn' ? waiting : 'update_dns' };
+          }
+        } else {
+          job.state = updateRecovery ? 'recovery_required' : 'interrupted';
           job.revision += 1;
-          job.error = { code: 'credentials_required' };
+          job.error = { code: updateRecovery ? 'relay_resume_required' : 'credentials_required' };
         }
       }
     });
@@ -207,6 +228,7 @@ export class RelayDeploymentService {
     return this.update(id, (current, records) => {
       this.revision(current, input.revision);
       this.assertAvailable(records, current, id);
+      this.assertHostKey(records, key!);
       current.state = checked.status === 'trusted' ? 'awaiting_credentials' : 'awaiting_host_key';
       current.hostKey = {
         challengeId: checked.challengeId,
@@ -245,7 +267,7 @@ export class RelayDeploymentService {
     challengeId: string;
     decision: string;
   }): Promise<DeploymentJob> {
-    return this.update(id, async (job) => {
+    return this.update(id, async (job, records) => {
       this.revision(job, input.revision);
 
       if (job.state !== 'awaiting_host_key' || input.challengeId !== job.hostKey?.challengeId) {
@@ -257,7 +279,8 @@ export class RelayDeploymentService {
         job.error = { code: 'host_key_rejected' };
       } else {
         try {
-          await this.options.hostKeys.decide(input.challengeId, input.decision);
+          await this.options.hostKeys.decide(input.challengeId, input.decision,
+            (key) => this.assertHostKey(records, key));
         } catch {
           throw new MobileInputError('host_key_conflict', 'Проверка отпечатка истекла.', 409);
         }
@@ -354,7 +377,22 @@ export class RelayDeploymentService {
       });
       await preflight(session, job);
 
-      const artifact = await resolveRelayArtifact(this.directory, this.options);
+      const records = await this.store.read();
+      const pin = this.record(records, job.id).updateRecovery;
+      const artifact = pin ? await readRelayPin(this.directory, job.id, pin.binding, this.options)
+        : await resolveRelayArtifact(this.directory, this.options);
+
+      try {
+        if (job.relayId && artifact.binding) {
+          assertReleaseFloor(artifact.binding, this.activeFloor(records, job.relayId));
+        }
+      } catch (cause) {
+        if (artifact.staging) {
+          await fs.rm(artifact.staging, { recursive: true, force: true });
+        }
+
+        throw cause;
+      }
 
       if (generation !== this.generation || this.stopped || disconnected) {
         session.close();
@@ -408,7 +446,7 @@ export class RelayDeploymentService {
       }
 
       const safeCode = cause instanceof Error
-        && ['unsupported_platform', 'relay_port_busy'].includes(cause.message)
+        && ['unsupported_platform', 'relay_port_busy', 'relay_release_floor'].includes(cause.message)
         ? cause.message : authenticated ? 'preflight_failed' : 'ssh_auth_failed';
 
       await this.fail(job.id, safeCode, generation);
@@ -503,17 +541,15 @@ export class RelayDeploymentService {
   }
 
   /**
-   * Резервирует identity до удалённого эффекта; восстановление использует прежние секреты.
-   * Promotion выполняется только после сетевого доказательства и durable intent.
+   * Закрепляет пакет и регистрацию до первого удалённого изменения.
+   * После потери SSH повтор использует только сохранённый выпуск и тот же host key.
    */
   private async install(job: DeploymentJob): Promise<void> {
     const generation = this.generation;
     const worker = this.workers.get(job.id);
-    let installation: RelayInstallation | undefined;
-    let preserveBackup = false;
+    let pin: UpdateRecovery | undefined;
 
     if (!worker) {
-      // Shutdown между start и install не оставляет осиротевшей записи relay.
       await this.fail(job.id, 'installation_failed', generation);
 
       return;
@@ -526,103 +562,147 @@ export class RelayDeploymentService {
         });
       }
 
-      const relay = job.mode === 'setup' ? await this.mobile.relays.add({
-        name: job.name!,
-        host: job.public.host,
-        port: job.public.port,
-      }, { id: job.relayId!, enabled: false }) : await this.mobile.relay(job.relayId!);
+      const relay = await this.reserve(job);
 
-      await this.store.mutate((records) => {
-        this.record(records, job.id).before = {
-          id: relay.id,
-          host: relay.host,
-          port: relay.port,
-          enabled: relay.enabled,
-        };
-      });
-      installation = await installRelay(
-        worker.session, job, worker.artifact, await this.mobile.relayEnv(relay.id),
+      pin = await this.pin(job, worker, relay, generation);
+      await installRelay(
+        worker.session, job, worker.artifact, pin, await this.mobile.relayEnv(relay.id), relay.fp,
       );
 
       if (generation !== this.generation) {
         return;
       }
 
-      await this.update(job.id, (current) => {
+      await this.update(job.id, (current, records) => {
+        const recovery = this.record(records, job.id).updateRecovery!;
+
+        recovery.published = { digest: pin!.binding.manifestSha, endpoint: job.public };
         current.state = 'verifying';
         current.service = { state: 'running' };
         current.steps.find((step) => step.name === 'install')!.state = 'completed';
         current.steps.push({ name: 'channel', state: 'running' });
       });
 
-      const promoted = await this.promote(job, relay, generation);
-
-      if (installation.replaced && !promoted) {
-        preserveBackup = !await this.rollbackInstallation(job.id, installation, generation);
-      }
+      await this.promote(job, relay, generation);
     } catch (error) {
-      if (installation?.replaced) {
-        preserveBackup = !await this.rollbackInstallation(job.id, installation, generation);
-
-        return;
-      }
-
-      if (error instanceof Error && error.message === 'waiting_vpn') {
-        await this.fail(job.id, 'waiting_vpn', generation, 'waiting_vpn');
-
-        return;
-      }
-
-      const conflict = error instanceof MobileInputError && error.code === 'route_conflict';
-      const rollbackFailed = error instanceof Error && error.message === 'remote_rollback_failed';
-
-      await this.fail(job.id, rollbackFailed ? 'remote_rollback_failed'
-        : conflict ? 'route_conflict' : 'installation_failed', generation,
-      conflict || rollbackFailed ? 'recovery_required' : 'failed');
+      await this.installationFailed(job.id, error, generation, !!pin);
     } finally {
-      if (!preserveBackup) {
-        await installation?.dispose();
-      }
-
       this.release(job.id);
     }
   }
 
+  private reserve(job: DeploymentJob) {
+    return this.store.mutate(async (records) => {
+      this.assertAvailable(records, job, job.id);
+
+      const relay = job.mode === 'setup' ? await this.mobile.relays.add({
+        name: job.name!,
+        host: job.public.host,
+        port: job.public.port,
+      }, { id: job.relayId!, enabled: false }) : await this.mobile.relay(job.relayId!);
+
+      this.record(records, job.id).before ??= {
+        id: relay.id,
+        host: relay.host,
+        port: relay.port,
+        enabled: relay.enabled,
+      };
+
+      return relay;
+    });
+  }
+
   /**
-   * Сетевой отказ не оставляет прежний домашний маршрут указывать на уже заменённую службу.
-   * Потерянный SSH отделён от подтверждённого отката: автоматическое продолжение не обещается.
+   * Связывает одобренный пакет и исходные хеши VPS с тем же заданием.
+   * После готового pin повтор получает неизменяемую опись без обращения к latest.
    */
-  private async rollbackInstallation(
-    id: string,
-    installation: RelayInstallation,
-    generation: number,
-  ): Promise<boolean> {
+  private async pin(job: DeploymentJob, worker: Worker,
+    relay: Awaited<ReturnType<MobileService['relay']>>, generation: number): Promise<UpdateRecovery> {
+    const record = this.record(await this.store.read(), job.id);
+
+    if (record.updateRecovery) {
+      return record.updateRecovery;
+    }
+
+    const root = await preflight(worker.session, job);
+    const old = await inspectRemote(worker.session, job, root);
+    const files = [old.binary, old.env, old.unit];
+    const empty = files.every((sha) => sha === 'absent');
+
+    if ((!empty && files.includes('absent'))
+      || old.intent !== 'absent' && old.published !== deploymentDigest(old.intent)) {
+      throw new Error('remote_installation_conflict');
+    }
+
+    return this.store.mutate(async (records) => {
+      const current = this.record(records, job.id).job;
+      const hostKey = this.options.hostKeys.get(job.ssh.host, job.ssh.port);
+
+      this.assertAvailable(records, job, job.id);
+
+      if (!hostKey || hostKey.fingerprint !== current.hostKey?.fingerprint
+        || current.revision !== job.revision || current.state !== 'installing'
+        || generation !== this.generation) {
+        throw new Error('host_key_conflict');
+      }
+
+      this.assertHostKey(records, hostKey);
+
+      const binding = await pinRelayArtifact(this.directory, job.id, worker.artifact);
+
+      assertReleaseFloor(binding, old.floor);
+      assertReleaseFloor(binding, this.activeFloor(records, relay.id));
+
+      const pin: UpdateRecovery = {
+        schema: 1,
+        jobId: job.id,
+        relayId: relay.id,
+        hostKey,
+        revision: job.revision,
+        endpoint: job.public,
+        binding,
+        old,
+        preserveSettings: !empty && relay.host === job.public.host && relay.port === job.public.port,
+        proof: {
+          relayId: relay.id,
+          releaseId: binding.releaseId,
+          artifactSha: binding.artifactSha,
+          secret: randomBytes(32).toString('base64url'),
+        },
+      };
+
+      this.record(records, job.id).updateRecovery = pin;
+
+      return pin;
+    });
+  }
+
+  /**
+   * Отличает ожидание сети после локальной публикации от незавершённой установки.
+   * Сырой ответ SSH остаётся у владельца worker.
+   */
+  private async installationFailed(
+    id: string, error: unknown, generation: number, pinned: boolean,
+  ): Promise<void> {
     if (generation !== this.generation || this.stopped) {
-      return false;
+      return;
     }
 
-    try {
-      await this.update(id, (job) => {
-        job.steps.push({ name: 'rollback', state: 'running' });
-      });
-      await installation.rollback();
-      await this.update(id, (job) => {
-        job.service = { state: installation.wasRunning ? 'running' : 'unknown' };
-        job.channel = { state: 'unverified' };
-        job.steps.find((step) => step.name === 'rollback')!.state = 'completed';
-      });
-      await this.fail(id, 'previous_installation_restored', generation, 'recovery_required');
+    const failure = error instanceof Error ? error.message : '';
+    const record = this.record(await this.store.read(), id);
 
-      return true;
-    } catch {
-      await this.update(id, (job) => {
-        job.service = { state: 'unknown' };
-        job.channel = { state: 'unverified' };
-      }).catch(() => {});
-      await this.fail(id, 'remote_rollback_failed', generation, 'recovery_required');
+    if (failure === 'waiting_vpn' && record.updateRecovery?.published) {
+      await this.waitForNetwork(id, 'waiting_vpn');
 
-      return false;
+      return;
     }
+
+    const conflict = error instanceof MobileInputError && error.code === 'route_conflict';
+    const code = conflict ? 'route_conflict' : failure === 'relay_release_floor' ? failure
+      : pinned ? 'relay_resume_required' : 'installation_failed';
+    const recoverable = pinned || conflict;
+
+    await this.fail(id, code, generation, recoverable ? 'recovery_required' : 'failed');
   }
 
   /**
@@ -631,12 +711,14 @@ export class RelayDeploymentService {
    */
   private async promote(job: DeploymentJob, relay: Awaited<ReturnType<MobileService['relay']>>,
     generation: number): Promise<boolean> {
+    const record = this.record(await this.store.read(), job.id);
+    const pin = record.updateRecovery;
     const address = await candidateAddress(job.candidateHost, this.runtime.vpnGate);
     const status = await this.mobile.status();
     const existing = relay.enabled && relay.host === job.candidateHost && relay.port === job.public.port
       && status.relays.find((item) => item.id === relay.id)?.link.state === 'online';
 
-    await (this.options.verifyCandidate ?? verifyCandidate)({
+    const verified = await (this.options.verifyCandidate ?? verifyCandidate)({
       relay: {
         ...relay,
         host: address,
@@ -646,14 +728,22 @@ export class RelayDeploymentService {
       vpnGate: this.runtime.vpnGate,
       clientTarget: this.runtime.clientTarget,
       existing,
+      address,
+      proof: pin?.proof,
     });
+
+    if (!verified.verified || verified.address !== address) {
+      throw new Error('relay_proof_required');
+    }
 
     let publicAddress: string | undefined;
 
     try {
       publicAddress = await candidateAddress(job.public.host, this.runtime.vpnGate);
     } catch (error) {
-      const code = (error as NodeJS.ErrnoException | null)?.code;
+      const cause = error !== null && typeof error === 'object'
+        ? (error as { cause?: unknown }).cause : undefined;
+      const code = errorCode(error) || errorCode(cause);
 
       if (!['ENOTFOUND', 'ENODATA', 'EAI_AGAIN'].includes(code ?? '')) {
         throw error;
@@ -665,10 +755,7 @@ export class RelayDeploymentService {
     }
 
     if (address !== publicAddress) {
-      await this.update(job.id, (current) => {
-        current.state = 'awaiting_dns';
-        current.error = { code: 'update_dns' };
-      });
+      await this.waitForNetwork(job.id, 'awaiting_dns');
 
       return false;
     }
@@ -679,7 +766,9 @@ export class RelayDeploymentService {
         && (relay.host !== job.public.host || relay.port !== job.public.port);
     });
 
-    const after = await this.mobile.relays.compareRoute(relay, { ...job.public, enabled: true });
+    // Повтор использует ожидаемый маршрут, сохранённый до удалённой записи.
+    const before = record.before ? { ...relay, ...record.before } : relay;
+    const after = await this.mobile.relays.compareRoute(before, { ...job.public, enabled: true });
 
     try {
       await this.runtime.sync();
@@ -702,19 +791,47 @@ export class RelayDeploymentService {
         }
       }
 
-      await this.update(job.id, (current) => {
+      if (generation !== this.generation) {
+        throw new Error('deployment_closed');
+      }
+
+      await this.update(job.id, (current, records) => {
+        const saved = this.record(records, job.id);
+
+        if (pin) {
+          saved.activeRelease = floorOf(pin.binding);
+          delete saved.updateRecovery;
+        }
+
         current.state = 'ready';
         current.steps.find((step) => step.name === 'channel')!.state = 'completed';
         delete current.error;
       });
 
+      if (pin) {
+        await removeRelayPin(this.directory, job.id).catch(() => {});
+      }
+
       return true;
     } catch {
-      await this.mobile.relays.compareRoute(after, relay);
+      await this.mobile.relays.compareRoute(after, before);
       await this.runtime.sync();
 
       throw new Error('relay_channel_unavailable');
     }
+  }
+
+  private async waitForNetwork(id: string, reason: 'waiting_vpn' | 'awaiting_dns'): Promise<void> {
+    await this.update(id, (job, records) => {
+      const published = this.record(records, id).updateRecovery?.published;
+
+      if (published) {
+        published.reason = reason;
+      }
+
+      job.state = reason;
+      job.error = { code: reason === 'waiting_vpn' ? reason : 'update_dns' };
+    });
   }
 
   /**
@@ -727,7 +844,8 @@ export class RelayDeploymentService {
 
       const waiting = ['waiting_vpn', 'awaiting_dns'].includes(record.job.state);
 
-      if (!terminal.includes(record.job.state) && !waiting) {
+      if (record.job.state === 'ready' || waiting && record.updateRecovery?.published
+        || !terminal.includes(record.job.state) && !waiting) {
         throw new MobileInputError('deployment_state', 'Задание уже выполняется.', 409);
       }
 
@@ -785,16 +903,69 @@ export class RelayDeploymentService {
 
       // waiting_vpn остаётся возобновляемым: check существует именно для ожидания сети.
       void this.mobile.relay(job.relayId!).then((relay) => this.promote(job, relay, generation))
-        .catch((cause) => this.fail(id, cause instanceof Error && cause.message === 'waiting_vpn'
-          ? 'waiting_vpn' : 'relay_channel_unavailable', generation,
-        cause instanceof Error && cause.message === 'waiting_vpn' ? 'waiting_vpn' : 'failed'));
+        .catch(async (cause) => {
+          const record = this.record(await this.store.read(), id);
+
+          if (!record.updateRecovery && cause instanceof Error && cause.message === 'waiting_vpn') {
+            await this.fail(id, 'waiting_vpn', generation, 'waiting_vpn');
+
+            return;
+          }
+
+          await this.installationFailed(id, cause, generation, !!record.updateRecovery);
+        });
     }
 
     return job;
   }
 
   async busy(relayId: string): Promise<boolean> {
-    return (await this.list()).some((job) => job.relayId === relayId && !terminal.includes(job.state));
+    return this.store.readLocked((records) => this.relayBusy(records, relayId));
+  }
+
+  async withRelayRemoval(relayId: string, remove: () => Promise<void>): Promise<void> {
+    await this.store.readLocked(async (records) => {
+      if (this.relayBusy(records, relayId)) {
+        throw new MobileInputError('deployment_busy', 'Сначала завершите задание удалённого доступа.', 409);
+      }
+
+      await remove();
+    });
+  }
+
+  private relayBusy(records: DeploymentRecord[], relayId: string): boolean {
+    return records.some(({ job, updateRecovery }) => job.relayId === relayId
+      && (updateRecovery || !terminal.includes(job.state)));
+  }
+
+  private assertHostKey(records: DeploymentRecord[], key: HostKey): void {
+    const reserved = records.some(({ updateRecovery }) => {
+      const hostKey = updateRecovery?.hostKey;
+
+      return hostKey?.host.toLowerCase() === key.host.toLowerCase() && hostKey.port === key.port
+        && (hostKey.algorithm !== key.algorithm || hostKey.fingerprint !== key.fingerprint);
+    });
+
+    if (reserved) {
+      throw new MobileInputError('deployment_busy', 'SSH-ключ закреплён заданием восстановления.', 409);
+    }
+  }
+
+  private activeFloor(records: DeploymentRecord[], relayId: string): ReleaseFloor | undefined {
+    const candidates = records.filter(({ job }) => job.relayId === relayId)
+      .flatMap(({ activeRelease, updateRecovery }) => {
+        const pending = updateRecovery?.published ? floorOf(updateRecovery.binding) : undefined;
+
+        return [activeRelease, pending].filter((value) => value !== undefined);
+      });
+
+    return candidates.reduce<ReleaseFloor | undefined>((floor, candidate) => {
+      if (floor && compareProductVersions(candidate.version, floor.version) <= 0) {
+        return floor;
+      }
+
+      return candidate;
+    }, undefined);
   }
 
   /**
@@ -839,7 +1010,8 @@ export class RelayDeploymentService {
    */
   private assertAvailable(records: DeploymentRecord[], target: Pick<DeploymentJob, 'relayId' | 'public'>,
     excludingId?: string): void {
-    const busy = records.find(({ job }) => job.id !== excludingId && !terminal.includes(job.state)
+    const busy = records.find(({ job, updateRecovery }) => job.id !== excludingId
+      && (updateRecovery || !terminal.includes(job.state))
       && (job.relayId && job.relayId === target.relayId
         || job.public.host === target.public.host && job.public.port === target.public.port));
 

@@ -1,0 +1,22 @@
+tracker — команды задач Б24 через локальный GrigDesk.
+
+Использование:
+  tracker dashboard                    доска: мои задачи, показатели и графики
+  tracker boards                       включённые доски и доска по умолчанию
+  tracker --board <id> <команда>        выполнить команду на указанной доске
+  tracker task <id>                    детали задачи
+  tracker comment <id> <текст…>        комментарий к задаче
+  tracker timer <id> start|pause|stop  таймер задачи
+  tracker start <id>                   взять в работу: возобновить и запустить таймер
+  tracker complete <id>                завершить задачу со стопом таймера
+  tracker renew <id>                   возобновить задачу
+  tracker analyze <id>                 поставить задачу в очередь оценки
+  tracker launch-options <id>          параметры запуска конвейера
+  tracker launch <id>                  запустить конвейер с JSON из stdin
+  tracker create                       создать задачу из JSON на stdin
+  tracker users [запрос]               сотрудники для выбора исполнителя
+  tracker --version                    показать версию
+  tracker --license                    показать лицензии GrigDesk и Go
+  tracker --help                       показать эту справку
+
+Адрес и токен: GRIGDESK_URL и GRIGDESK_TOKEN либо настройки папки данных GrigDesk.

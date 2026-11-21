@@ -24,7 +24,7 @@ type ReleaseIdentity = ReturnType<typeof buildReleaseIdentity>;
 const execute = promisify(execFile);
 const sourceRoot = path.resolve(import.meta.dirname, '..');
 const ordinaryFiles = ['grigdesk-install', 'grigdesk-install.sha256', 'grigdesk-install.sig',
-  'grigdesk-maintenance.gz', 'dev.json', 'desktop.tar.gz', 'server.tar.gz',
+  'grigdesk-maintenance.gz', 'dev.json', 'desktop.tar.gz', 'server.tar.gz', 'control.tar.gz',
   'local-build.json', 'release-acceptance.json'];
 const hex = /^[a-f0-9]{64}$/u;
 const commitPattern = /^[a-f0-9]{40}$/u;

@@ -351,7 +351,13 @@ if (process.argv.includes('--version')) {
   process.exit(0);
 }
 if (options.stderr) process.stderr.write(options.stderr);
-const log = (value) => appendFileSync(options.trace, JSON.stringify(value) + '\\n');
+const log = (value) => {
+  try {
+    appendFileSync(options.trace, JSON.stringify(value) + '\\n');
+  } catch (error) {
+    if (!options.metadataTraceOptional || !['ENOENT', 'EROFS'].includes(error.code)) throw error;
+  }
+};
 const send = (value) => process.stdout.write(JSON.stringify({ jsonrpc: '2.0', ...value }) + '\\n');
 const reply = (id, result) => send({ id, result });
 const notify = (update) => send({ method: 'session/update', params: { sessionId, update } });

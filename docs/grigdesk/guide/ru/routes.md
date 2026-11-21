@@ -47,14 +47,13 @@
 
 ## Из терминала
 
-`routes` поставляется отдельным исполняемым файлом SEA: системный Node не нужен.
-В исходниках соберите его командой `npm --prefix routes run build`; результат
-`bin/routes` находится вне Git. До сборки можно вызвать
-`node routes/src/main.ts …`. Справка, версия и лицензия: `--help`, `--version`, `--license`.
+`routes` поставляется нативным Go-бинарником. В исходниках соберите его командой
+`bash tools/build-go-utilities.sh "$PWD/bin/utilities"`. Справка, версия и лицензия доступны
+через `--help`, `--version` и `--license`.
 Готовый серверный комплект включает CLI в bin своего поколения; при ручной установке ELF
 положите новый файл в bin выбранной установки.
 
-`bin/routes` возвращает JSON через тот же сервер. Используйте `editor <профиль>`,
+`bin/utilities/routes` возвращает JSON через тот же сервер. Используйте `editor <профиль>`,
 затем при необходимости `source <профиль> --mode editor --yes` с прочитанными
 `--expected-source-revision` и `--expected-catalog-hash` (none — отсутствие каталога).
 Создайте `new <профиль> --from empty`, сохраните `show <профиль> --draft <id>` в JSON,
@@ -70,6 +69,9 @@ Exit 0 означает полученный отчёт: проверьте issu
 Для отката используйте `rollback <профиль> --hash <хеш>` с ожиданиями source/current и --yes.
 Перед публикацией stderr выдаёт operationId: при обрыве читайте `publications <профиль> <operationId>`,
 не повторяйте запись вслепую. Конфликт требует сопоставления версий.
+
+В пробной Go-сборке `routes` перенаправление запроса записи завершает команду с кодом 5.
+Если команда напечатала `operationId`, проверьте квитанцию через `publications`.
 
 `profile-config get <профиль>` читает конфигурацию, а
 `profile-config set <профиль> --file profile.sh --set PROFILE_LOOP_MAX_ROUNDS=40`

@@ -12,7 +12,6 @@ export interface Settings {
   port: number;
   origin: string;
   windowKeyPath: string | null;
-  relayProject: string | null;
   cliTokenPath: string;
 }
 
@@ -37,7 +36,6 @@ export function resolveRuntimeSettings(input: RuntimeSettingsInput): Settings {
     port,
     origin: `http://127.0.0.1:${port}`,
     windowKeyPath: value('GRIGDESK_WINDOW_KEY_PATH') || null,
-    relayProject: value('GRIGDESK_RELAY_PROJECT') || null,
     cliTokenPath: value('GRIGDESK_CLI_TOKEN_PATH') || legacyTokenPath
       || dataPath(dataHome({
         env,

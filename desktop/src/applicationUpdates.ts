@@ -3,7 +3,8 @@ import { randomUUID } from 'node:crypto';
 import type { ApplicationUpdatePort, ApplicationUpdateSnapshot }
   from '../../shared/runtime/applicationUpdateContracts.ts';
 import { candidateNeedsInstaller } from '../../shared/runtime/applicationUpdateContracts.ts';
-import { InstalledUpdateService } from '../../shared/node/installedUpdateService.ts';
+import { installedControl } from '../../shared/node/installedControl.ts';
+import type { ControlStatus } from '../../shared/node/installedControl.ts';
 import type { InstalledUpdateJob } from '../../shared/node/installedUpdateState.ts';
 import { compareProductVersions } from '../../shared/runtime/productReleaseVersion.ts';
 
@@ -21,7 +22,8 @@ interface ApplicationUpdateOptions {
  * Сеть запускается после локального снимка и никогда не задерживает первый shell state.
  */
 export function createApplicationUpdates(options: ApplicationUpdateOptions) {
-  const service = new InstalledUpdateService(options.root);
+  const getStatus = () => installedControl<ControlStatus>(options.root, 'status');
+
   const listeners = new Set<() => void>();
   let timer: ReturnType<typeof setInterval> | null = null;
   let autoTimer: ReturnType<typeof setInterval> | null = null;
@@ -63,7 +65,7 @@ export function createApplicationUpdates(options: ApplicationUpdateOptions) {
     let status;
 
     try {
-      status = await service.status();
+      status = await getStatus();
     } catch (error) {
       publish({
         ...snapshot,
@@ -113,12 +115,10 @@ export function createApplicationUpdates(options: ApplicationUpdateOptions) {
    * Таймеры не удерживают desktop и снимаются вместе с оболочкой.
    */
   async function check(): Promise<void> {
-    const flight = service.checkUpdates();
-
-    await refresh();
+    const flight = installedControl<ControlStatus>(options.root, 'check');
 
     try {
-      await flight;
+      await Promise.all([flight, refresh()]);
     } finally {
       await refresh();
     }
@@ -137,7 +137,7 @@ export function createApplicationUpdates(options: ApplicationUpdateOptions) {
      */
     async action(action, body) {
       if (action === 'check' && Object.keys(body).length === 0) {
-        if ((await service.status()).source !== 'channel') {
+        if ((await getStatus()).source !== 'channel') {
           throw new Error('candidate_source_required');
         }
 
@@ -148,7 +148,8 @@ export function createApplicationUpdates(options: ApplicationUpdateOptions) {
 
       if (action === 'channel' && Object.keys(body).length === 1
         && (body.channel === 'release' || body.channel === 'dev')) {
-        await service.setChannel(body.channel);
+        await installedControl(options.root, 'set-channel', { channel: body.channel });
+
         await check();
 
         return;
@@ -162,7 +163,7 @@ export function createApplicationUpdates(options: ApplicationUpdateOptions) {
         preparing = true;
 
         try {
-          const status = await service.status();
+          const status = await getStatus();
           const previous = status.job;
 
           if (status.source !== 'channel') {
@@ -172,6 +173,15 @@ export function createApplicationUpdates(options: ApplicationUpdateOptions) {
           const pending = ['queued', 'verifying', 'downloading', 'preparing', 'ready'];
 
           if (previous && pending.includes(previous.stage)) {
+            const scope = options.localSelected() ? 'pair' : 'desktop';
+
+            if (previous.stage !== 'ready' && previous.scope !== scope) {
+              throw new Error('release_update_in_progress');
+            }
+            if (previous.stage !== 'ready' && !status.workerActive) {
+              await options.prepare(previous);
+            }
+
             await refresh();
 
             return;
@@ -181,11 +191,12 @@ export function createApplicationUpdates(options: ApplicationUpdateOptions) {
             throw new Error('release_check_required');
           }
 
-          const job = await service.manager().createJob({
+          const request = {
             requestId: randomUUID(),
             manifestDigest: status.check.manifestDigest,
-            scope: options.localSelected() ? 'pair' : 'desktop',
-          });
+            scope: options.localSelected() ? 'pair' as const : 'desktop' as const,
+          };
+          const job = await installedControl<InstalledUpdateJob>(options.root, 'create-job', request);
 
           await options.prepare(job);
           await refresh();
@@ -197,7 +208,7 @@ export function createApplicationUpdates(options: ApplicationUpdateOptions) {
       }
 
       if (action === 'apply' && Object.keys(body).length === 1 && body.confirmed === true) {
-        const job = (await service.status()).job;
+        const job = (await getStatus()).job;
 
         // Server-задание принадлежит CLI/серверу: десктоп не мутирует чужой intent.
         if (!job || job.stage !== 'ready' || job.scope === 'server'
@@ -211,7 +222,7 @@ export function createApplicationUpdates(options: ApplicationUpdateOptions) {
       }
 
       if (action === 'resume' && Object.keys(body).length === 0) {
-        const { job, source } = await service.status();
+        const { job, source } = await getStatus();
 
         if (!job || job.scope === 'server' || (job.scope === 'pair') !== options.localSelected()) {
           throw new Error('release_return_to_confirmed_profile');

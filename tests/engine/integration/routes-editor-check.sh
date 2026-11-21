@@ -2,7 +2,7 @@
 set -uo pipefail
 source "$FACTORY_TESTS_HOME/lib/testlib.sh"
 
-route_tool="$FACTORY_HOME/bin/factory-route"
+route_tool=fixture_route
 fixture_file="$FACTORY_TESTS_HOME/../fixtures/routes-editor.mjs"
 
 editor_input=$("$NODE_BIN" --input-type=module -e '
@@ -12,7 +12,8 @@ process.stdout.write(JSON.stringify(makeCatalogInput()));
 ' "$fixture_file")
 
 # RE-C1-01: редактор получает чистый каталог через stdin без current и routesDir.
-checked=$(printf '%s' "$editor_input" | "$route_tool" --profile sample editor-check 2>&1)
+printf '%s' "$editor_input" >"$TEST_ROOT/editor-check-valid.json" || exit $?
+checked=$("$route_tool" --profile sample editor-check <"$TEST_ROOT/editor-check-valid.json" 2>&1)
 checked_rc=$?
 assert_rc 0 "$checked_rc" "RE-C1-01: корректный каталог проходит без current"
 assert_contains "$checked" '"ok": true' "RE-C1-01: ответ содержит ok=true"
@@ -35,7 +36,8 @@ process.stdin.on("end", () => {
 
 # RE-C1-02: отсутствие профиля, лишнее поле и null дают предметные ошибки.
 for variant in profile field transition; do
-  rejected=$(make_invalid "$variant" | "$route_tool" --profile sample editor-check 2>&1)
+  make_invalid "$variant" >"$TEST_ROOT/editor-check-invalid.json" || exit $?
+  rejected=$("$route_tool" --profile sample editor-check <"$TEST_ROOT/editor-check-invalid.json" 2>&1)
   rejected_rc=$?
   assert_contains "$rejected" '"ok": false' "RE-C1-02: $variant отклонён JSON-ответом"
   assert_contains "$rejected" '"path":' "RE-C1-02: $variant имеет адрес проблемы"
@@ -57,7 +59,7 @@ fi
 mkdir -p "$TEST_ROOT/profiles/sample-profile"
 printf 'touch "%s"\n' "$TEST_ROOT/profile-sourced" > "$TEST_ROOT/profiles/sample-profile/profile.sh"
 before=$(find "$TEST_ROOT" -type f -printf '%P\n' | sort)
-printf '%s' "$editor_input" | "$route_tool" --profile sample editor-check >/dev/null 2>&1
+"$route_tool" --profile sample editor-check <"$TEST_ROOT/editor-check-valid.json" >/dev/null 2>&1
 after=$(find "$TEST_ROOT" -type f -printf '%P\n' | sort)
 assert_eq "$before" "$after" "RE-C1-03: проверка не создала файлов"
 assert_file_missing "$TEST_ROOT/profile-sourced" "RE-C1-03: профильный shell не исполнен"

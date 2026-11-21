@@ -1,3 +1,4 @@
+import type { FactoryCommands } from '../../lib/factoryRuntime.ts';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 
 import {
@@ -37,6 +38,7 @@ type EditorRequest = FastifyRequest<{
 }>;
 
 export interface RoutesEditorApiOptions {
+  runtime?: FactoryCommands;
   routesStore: RoutesStore;
   authoringDir: string;
   pipelineSampleDir?: string;
@@ -147,6 +149,7 @@ export async function registerRoutesEditorApi(
     draftStore,
     profilesDir: options.profilesDir,
     prefs: options.prefs,
+    runtime: options.runtime,
   });
   const base = '/api/routes/:profile/drafts';
   const emitDraft = (draft: { profile: string; id: string; revision: number; state: string }) => {
@@ -270,6 +273,7 @@ export async function registerRoutesEditorApi(
     });
     const snapshot = await readEditorCapabilities(request.params.profile, {
       profilesDir: options.profilesDir,
+      runtime: options.runtime,
     });
     const report = validateDraft(draft);
     emitDraft(draft);
@@ -338,8 +342,10 @@ export async function registerRoutesEditorApi(
       { expectedRevision: draft.revision, operations: plan.operations },
     );
     if (!plan.cancelled) emitDraft(changed);
+
     const snapshot = await readEditorCapabilities(request.params.profile, {
       profilesDir: options.profilesDir,
+      runtime: options.runtime,
     });
     const report = validateDraft(changed);
     reply.header('cache-control', 'no-store');
@@ -449,6 +455,7 @@ export async function registerRoutesEditorApi(
     const report = validateDraft(draft);
     const snapshot = await readEditorCapabilities(request.params.profile, {
       profilesDir: options.profilesDir,
+      runtime: options.runtime,
     });
     return {
       ...report,
@@ -483,7 +490,7 @@ export async function registerRoutesEditorApi(
       routeId: body.routeId as string | null,
       nodeId: body.nodeId,
       context: body.context as Record<string, unknown>,
-    });
+    }, { runtime: options.runtime });
     reply.header('cache-control', 'no-store');
     return { draftRevision: draft.revision, ...result };
   }));
@@ -516,7 +523,8 @@ export async function registerRoutesEditorApi(
     }
     const { expectedRevision, ...stepRequest } = body as unknown as RouteSimulationStepRequest;
     void expectedRevision;
-    const result = await stepDraftSimulation(draft, stepRequest);
+
+    const result = await stepDraftSimulation(draft, stepRequest, { runtime: options.runtime });
     reply.header('cache-control', 'no-store');
     return { draftRevision: draft.revision, ...result };
   }));

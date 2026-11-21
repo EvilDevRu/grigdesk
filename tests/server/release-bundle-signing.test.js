@@ -31,8 +31,8 @@ async function fixture(t) {
   await fs.writeFile(path.join(root, 'VERSION'), '0.3.0\n');
   await fs.mkdir(path.join(root, 'deploy/lib'), { recursive: true });
   await fs.writeFile(path.join(root, 'deploy/lib/runtime-env.sh'), '# runtime\n');
-  await fs.mkdir(path.join(root, 'bin'), { recursive: true });
-  await fs.writeFile(path.join(root, 'bin/grigdesk-ctl'), '# ctl\n');
+  await fs.mkdir(path.join(root, 'bin/utilities'), { recursive: true });
+  await fs.writeFile(path.join(root, 'bin/utilities/ctl'), '# ctl\n');
 
   const builders = {};
   const targets = {

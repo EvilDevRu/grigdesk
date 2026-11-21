@@ -5,9 +5,7 @@ import net from 'node:net';
 import test from 'node:test';
 import { promisify } from 'node:util';
 
-import { readConfig } from '../../relay/src/config.ts';
-import { createRelayServer } from '../../relay/src/relayServer.ts';
-import { connect, hello, makeCert, readLine, relayEnv, temporary } from './helpers.js';
+import { connect, hello, makeCert, readLine, relayBinary, relayFixture, temporary } from './helpers.js';
 
 const execute = promisify(execFile);
 
@@ -17,19 +15,8 @@ const execute = promisify(execFile);
  */
 async function networkFixture(t, overrides = {}) {
   const cert = await makeCert(await temporary(t), 'relay-network');
-  const server = createRelayServer(
-    {
-      ...readConfig(
-        relayEnv({
-          cert,
-          overrides,
-        }),
-      ),
-      port: 0,
-    },
-    { log: () => {} },
-  );
-  const port = await server.listen('127.0.0.1');
+  const server = await relayFixture(t, cert, overrides);
+  const port = server.port;
 
   t.after(() => server.close());
 
@@ -58,9 +45,10 @@ async function closed(socket) {
 
 test('RL-26: отдельный healthcheck успешно проверяет TLS и отказывает на закрытом порту', async (t) => {
   const { port } = await networkFixture(t);
-  const script = new URL('../../relay/src/healthcheck.ts', import.meta.url).pathname;
+  const executable = relayBinary();
+  const args = ['--healthcheck'];
 
-  await execute(process.execPath, [script], {
+  await execute(executable, args, {
     env: {
       PATH: process.env.PATH,
       RELAY_PORT: String(port),
@@ -76,7 +64,7 @@ test('RL-26: отдельный healthcheck успешно проверяет TL
   await new Promise((resolve) => unused.close(resolve));
   await assert.rejects(
     () =>
-      execute(process.execPath, [script], {
+      execute(executable, args, {
         env: {
           PATH: process.env.PATH,
           RELAY_PORT: String(unavailable),
@@ -219,4 +207,23 @@ test('RL-28: фрагментированный control, замена pending и
     error: 'bad_hello',
   });
   [control, replacement, device, stale, early].forEach((socket) => socket.destroy());
+});
+
+test('RL-DEPLOY: обычный relay не принимает запрос доказательства установки', async (t) => {
+  const { port, cert } = await networkFixture(t);
+  const socket = await connect(port, cert.fp);
+
+  t.after(() => socket.destroy());
+
+  const reply = await hello(socket, {
+    v: 1,
+    role: 'health',
+    deploymentProof: {
+      schema: 1,
+      challenge: 'A'.repeat(43),
+      mac: 'A'.repeat(43),
+    },
+  });
+
+  assert.deepEqual(reply, { ok: false, error: 'bad_deployment_proof' });
 });

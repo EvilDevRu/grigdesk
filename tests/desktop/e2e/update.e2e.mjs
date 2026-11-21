@@ -161,8 +161,8 @@ test('A6: настоящий Electron обновляется после свое
 
   const hook = await pinnedKeyHook(box.temporary, release.publicKeyPem);
   const helper = path.join(box.temporary, 'worker.mjs');
-  const workerUrl = new URL('../../../shared/node/installedUpdateWorker.ts', import.meta.url).href;
-  const serviceUrl = new URL('../../../shared/node/installedUpdateService.ts', import.meta.url).href;
+  const workerUrl = new URL('../../../tests/fixtures/release-v2/installedUpdateWorker.ts', import.meta.url).href;
+  const serviceUrl = new URL('../../../tests/fixtures/release-v2/installedUpdateService.ts', import.meta.url).href;
   const layoutUrl = new URL('../../../shared/node/installedLayout.ts', import.meta.url).href;
 
   for (const component of ['desktop', 'server']) {
@@ -436,7 +436,7 @@ test('A3: headless CLI применяет готовый server-only и оста
 
   const hook = await pinnedKeyHook(box.temporary, box.release.publicKeyPem);
   const worker = path.join(box.temporary, 'apply.mjs');
-  const workerUrl = new URL('../../../shared/node/installedUpdateWorker.ts', import.meta.url).href;
+  const workerUrl = new URL('../../../tests/fixtures/release-v2/installedUpdateWorker.ts', import.meta.url).href;
   const bin = path.join(box.temporary, 'bin');
 
   await fs.mkdir(bin);
@@ -454,7 +454,7 @@ test('A3: headless CLI применяет готовый server-only и оста
     DISPLAY: '',
   });
 
-  const { runUpdateCommand } = await loadInstalledModule(t, 'cli/updates.ts', box.release.publicKeyPem);
+  const { runUpdateCommand } = await loadInstalledModule(t, 'tests/fixtures/legacy-ctl/cli/updates.ts', box.release.publicKeyPem);
   const output = [];
   const port = {
     write: (value) => output.push(value),

@@ -5,12 +5,12 @@ import test from 'node:test';
 import { once } from 'node:events';
 
 import { applyInstalledUpdate, confirmInstalledUpdate, recoverInstalledUpdate }
-  from '../../shared/node/installedUpdateApply.ts';
-import { pruneCompletedUpdate } from '../../shared/node/installedUpdateCleanup.ts';
+  from '../../tests/fixtures/release-v2/installedUpdateApply.ts';
+import { pruneCompletedUpdate } from '../../tests/fixtures/release-v2/installedUpdateCleanup.ts';
 import { writeInstallationJson } from '../../shared/node/installedLayout.ts';
 import { processOwnerState } from '../../shared/node/directoryLock.ts';
 import { saveInstalledUpdate } from '../../shared/node/installedUpdateState.ts';
-import type { UpdateApplyPorts } from '../../shared/node/installedUpdateApply.ts';
+import type { UpdateApplyPorts } from '../../tests/fixtures/release-v2/installedUpdateApply.ts';
 import { installedFixture } from '../helpers/installedUpdateFixture.mjs';
 
 /**
@@ -258,7 +258,7 @@ for (const boundary of ['intent', 'stop', 'before-pointer', 'after-pointer', 'pr
     await box.manager.prepare(created.id);
     await confirmInstalledUpdate(box.root, created.id);
 
-    const applyUrl = new URL('../../shared/node/installedUpdateApply.ts', import.meta.url).href;
+    const applyUrl = new URL('../../tests/fixtures/release-v2/installedUpdateApply.ts', import.meta.url).href;
     const script = path.join(box.temporary, 'crash.mjs');
 
     await fs.writeFile(script, [

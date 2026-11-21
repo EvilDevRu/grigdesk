@@ -24,8 +24,7 @@ test('RW-1: workflow релиза запускается вручную, соб�
   assert.match(text, /npm --prefix mobile ci/);
   assert.ok(text.indexOf('npm --prefix mobile ci')
     < text.indexOf(pipelineEntry + ' --groups prepare-server'));
-  assert.match(text, /npm --prefix tracker ci/);
-  assert.match(text, /npm --prefix relay ci/);
+  assert.match(text, /go-version: '1\.27\.4'/u);
   assert.match(text, /npm --prefix deepseek ci/);
   assert.match(text, /npm --prefix desktop ci/);
   assert.match(text, /tools\/bundle\.mts/);
@@ -144,25 +143,10 @@ test('RW-CHANNELS: этапы выпуска связаны строгими в�
   assert.equal(publish.steps.find((step) => step.name === 'Публикация на сайт').env.RELEASE_SITE_PORT,
     "${{ secrets.RELEASE_SITE_PORT || '22' }}");
 
-  // Зависимости voice готовятся в каждом job до потребления его тестами или bundle.
-  // Outcome обязателен в общем gate, даже при continue-on-error самого шага.
-  for (const job of [server, web, build]) {
-    const install = job.steps.findIndex((step) =>
-      (step.run ?? '').includes('npm --prefix voice ci --include=dev'));
-    const consumer = job.steps.findIndex((step) => job === server || job === web
-      ? /releasePipeline\.mts/u.test(step.run ?? '') : step.name === 'Сборка комплекта');
+  const recipe = JSON.parse(await fs.readFile(path.join(repository, 'tools/releaseRecipe.json'), 'utf8'));
 
-    assert.ok(install >= 0 && consumer > install);
-  }
-
-  for (const job of [server, web, build]) {
-    const install = job.steps.findIndex((step) =>
-      (step.run ?? '').includes('npm --prefix routes ci --include=dev'));
-    const consumer = job.steps.findIndex((step) => job === server || job === web
-      ? /releasePipeline\.mts/u.test(step.run ?? '') : step.name === 'Сборка комплекта');
-
-    assert.ok(install >= 0 && consumer > install);
-  }
+  assert.deepEqual(recipe.stages.find((stage) => stage.id === 'go-utilities-behavior')?.argv,
+    ['bash', 'tests/run-go-utilities.sh']);
 
   const serverRun = server.steps.find((step) => step.name === 'Общий прогон серверных проверок');
 

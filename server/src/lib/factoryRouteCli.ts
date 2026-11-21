@@ -1,3 +1,4 @@
+import type { FactoryEngineProtocol } from './factoryRuntime.ts';
 // Вызовы route-движка из GrigDesk: аргументы, запуск в отвязанном юните и разбор отказов.
 //
 // ТРИ ВЕЩИ, КОТОРЫЕ ЗДЕСЬ НЕЛЬЗЯ ДЕЛАТЬ ИНАЧЕ.
@@ -72,6 +73,7 @@ const ROUTE_HOST_NAMES = [
   'GRIGDESK_BROWSER_RELAY_SOCKET',
   'PATH',
   'HOME',
+  'SHELL',
   'GRIGDESK_HOME',
   'GRIGDESK_QWEN_BIN',
   'GRIGDESK_QWEN_HOME',
@@ -88,6 +90,8 @@ const ROUTE_HOST_NAMES = [
   'GRIGDESK_DEEPSEEK_BIN',
   'GRIGDESK_DEEPSEEK_RUNTIME_HOME',
   'FACTORY_HOME',
+  'FACTORY_EXTERNAL_CLI_DESCRIPTOR',
+  'FACTORY_QWEN_CREDENTIAL_NAMES',
   'FACTORY_PROFILES_DIR',
   'FACTORY_CONFIG_ROOT',
   'FACTORY_CONTROL_ROOT',
@@ -113,6 +117,7 @@ export interface RouteConfig {
   stateDir: string;
   factoryControlDir: string;
   factoryBin: string;
+  factoryEngineProtocol?: FactoryEngineProtocol;
   rootDir: string;
   installationBin?: string;
   factoryHome: string;
@@ -514,6 +519,7 @@ export function routeLaunchEnv(
     QWEN_CODE_SYSTEM_SETTINGS_PATH: process.env.QWEN_CODE_SYSTEM_SETTINGS_PATH || '',
     QWEN_CODE_SYSTEM_DEFAULTS_PATH: process.env.QWEN_CODE_SYSTEM_DEFAULTS_PATH || '',
     HOME: process.env.HOME || '',
+    SHELL: config.runtimeHostEnv?.FACTORY_DARWIN_BASH || process.env.SHELL || '/bin/bash',
     FACTORY_HOME: config.factoryHome,
     FACTORY_PROFILES_DIR: config.profilesDir,
     FACTORY_CONFIG_ROOT: config.factoryConfigRoot,
@@ -592,6 +598,13 @@ export function runtimeLaunchFailure(error: unknown): RouteFailure {
     return {
       error: code,
       message: 'Закрепление runtime не завершено. Повторите разрешённое решение по попытке.',
+    };
+  }
+
+  if (code === 'factory_runtime_engine_retired') {
+    return {
+      error: code,
+      message: 'Попытка закреплена за прежней фабрикой. Перепривяжите рантайм остановленной попытки.',
     };
   }
 
@@ -1206,6 +1219,7 @@ export async function spawnRouteEngine(config: RouteConfig, {
   }
 
   let secrets: Record<string, string>;
+  const qwenKeys: string[] = [];
   const service = config.accessProfiles ?? accessService({ stateDir: config.stateDir });
   let accessEnv: NodeJS.ProcessEnv = {};
   let rollback = async () => {};
@@ -1255,6 +1269,10 @@ export async function spawnRouteEngine(config: RouteConfig, {
 
         if (participants.includes(adapter.id)) {
           allowedSecrets.push(field.env);
+
+          if (adapter.id === 'qwen') {
+            qwenKeys.push(field.env);
+          }
         }
       }
     }
@@ -1296,7 +1314,7 @@ export async function spawnRouteEngine(config: RouteConfig, {
   args = prepared.args;
 
   const launchDirectory = service
-    ? path.join(config.stateDir, 'access-launches', String(task), randomUUID()) : config.stateDir;
+    ? path.join(config.factoryControlDir, 'access-launches', String(task), randomUUID()) : config.stateDir;
   let externalCliDescriptor;
 
   try {
@@ -1322,6 +1340,10 @@ export async function spawnRouteEngine(config: RouteConfig, {
   await fs.mkdir(config.stateDir, { recursive: true });
 
   const env = routeLaunchEnv(config, extraEnv);
+
+  if (qwenKeys.length) {
+    env.FACTORY_QWEN_CREDENTIAL_NAMES = [...new Set(qwenKeys)].join(',');
+  }
 
   for (const key of accessKeys) {
     delete env[key];

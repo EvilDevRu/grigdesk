@@ -12,16 +12,6 @@
       "kind": "dir"
     },
     {
-      "source": "engine/bin",
-      "target": "engine/bin",
-      "kind": "dir"
-    },
-    {
-      "source": "engine/lib",
-      "target": "engine/lib",
-      "kind": "dir"
-    },
-    {
       "source": "schemas/analytics",
       "target": "schemas/analytics",
       "kind": "dir"
@@ -30,11 +20,6 @@
       "source": "deploy",
       "target": "deploy",
       "kind": "dir"
-    },
-    {
-      "source": "bin/grigdesk-ctl",
-      "target": "bin/grigdesk-ctl",
-      "kind": "file"
     },
     {
       "source": "bin/grigdesk.png",

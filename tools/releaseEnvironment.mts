@@ -1,4 +1,5 @@
 import fs from 'node:fs/promises';
+import { constants } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
@@ -10,6 +11,42 @@ import { downloadFile } from '../shared/node/seaBuild.ts';
 
 const execute = promisify(execFile);
 const requiredDiskKiB = 16 * 1024 * 1024;
+
+/**
+ * Изолированная сборка наследует только каталог уже проверенного Go из среды сборщика.
+ * Версия и физический путь берутся одной нативной пробой до очистки PATH.
+ */
+export async function resolveReleaseGoDirectory(env: NodeJS.ProcessEnv = process.env): Promise<string> {
+  try {
+    const { stdout } = await execute('go', ['env', '-json', 'GOROOT', 'GOVERSION'], {
+      env: {
+        PATH: env.PATH,
+        GOTOOLCHAIN: 'local',
+        GOWORK: 'off',
+        GOENV: 'off',
+      },
+      timeout: 8000,
+      maxBuffer: 65536,
+    });
+    const { GOROOT, GOVERSION } = JSON.parse(stdout);
+
+    if (GOVERSION !== 'go1.27.4' || typeof GOROOT !== 'string' || !path.isAbsolute(GOROOT)) {
+      throw new Error('неверные метаданные инструмента');
+    }
+
+    const bin = await fs.realpath(path.join(GOROOT, 'bin'));
+
+    if (bin.includes(path.delimiter)) {
+      throw new Error('путь инструмента содержит разделитель PATH');
+    }
+
+    await fs.access(path.join(bin, 'go'), constants.X_OK);
+
+    return bin;
+  } catch (cause) {
+    throw new Error('Для сборки выпуска нужен Go 1.27.4 в PATH.', { cause });
+  }
+}
 
 export interface EnvironmentCheck {
   id: string;
@@ -161,6 +198,7 @@ export async function runEnvironmentReport(root: string, options: {
   const runtime = await readTargetNodeRuntime(path.join(root, serverNodeRuntimeManifest(target)), target);
   const nodeVersion = await probeCommand(probes, process.execPath, ['--version']);
   const npmVersion = await probeCommand(probes, 'npm', ['--version']);
+  const goVersion = await probeCommand(probes, 'go', ['env', 'GOVERSION']);
   const checks: EnvironmentCheck[] = [];
   const mandatory = (id: string, ok: boolean, detail: string) => {
     checks.push({
@@ -182,6 +220,8 @@ export async function runEnvironmentReport(root: string, options: {
   mandatory('node-pinned', nodeVersion === `v${runtime.version}`,
     `активный ${nodeVersion ?? 'не найден'}, pinned v${runtime.version}`);
   mandatory('npm-present', npmVersion !== null, npmVersion ?? 'npm не найден');
+  mandatory('go-pinned', goVersion === 'go1.27.4',
+    `активный ${goVersion || 'не найден'}, pinned go1.27.4`);
 
   if (darwin) {
     await darwinHostChecks(probes, mandatory);

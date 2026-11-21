@@ -4,7 +4,7 @@
 // делом договорённости. Теперь тикет — файл, который движок делает СВОЕЙ доверенной
 // копией (режим 400, один hardlink) и больше никогда не перечитывает: попытка
 // immutable, значит и постановка задачи immutable. Отсюда жёсткость валидатора
-// (engine/bin/factory-context, read_ticket): ровно шесть полей, лишнее поле или
+// (utilities/factory/internal/route): ровно шесть полей, лишнее поле или
 // пустая строка — отказ 78.
 //
 // ПОЧЕМУ ПРОВЕРЯЕМ У СЕБЯ. Движок читает тикет не на старте, а при сборке
@@ -15,7 +15,7 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 
-/** Лимиты движка (engine/bin/factory-context). Меняются только вместе с ним. */
+/** Лимиты движка (factory context). Меняются только вместе с ним. */
 export const TICKET_LIMITS = {
   title: 500,
   description: 100_000,

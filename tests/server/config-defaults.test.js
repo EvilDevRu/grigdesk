@@ -9,7 +9,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const CONFIG_URL = pathToFileURL(path.join(ROOT, 'server/src/config.ts')).href;
 
-test('по умолчанию сервер использует встроенный engine', async () => {
+test('сервер из исходников по умолчанию использует Go-фабрику', async () => {
   const savedHome = process.env.FACTORY_HOME;
   const savedBin = process.env.GRIGDESK_FACTORY_BIN;
   const savedProfiles = process.env.FACTORY_PROFILES_DIR;
@@ -19,7 +19,8 @@ test('по умолчанию сервер использует встроенн
   try {
     const { config } = await import(`${CONFIG_URL}?defaults-test=${Date.now()}`);
     assert.equal(config.factoryHome, path.join(ROOT, 'engine'));
-    assert.equal(config.factoryBin, path.join(ROOT, 'engine/bin/factory'));
+    assert.equal(config.factoryBin, path.join(ROOT, 'bin/factory'));
+    assert.equal(config.factoryEngineProtocol, 'go-v1');
     assert.equal(config.profilesDir, path.join(ROOT, 'profiles'));
   } finally {
     if (savedHome === undefined) delete process.env.FACTORY_HOME;

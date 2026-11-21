@@ -156,7 +156,7 @@ test('ready не означает running; фактический commit пов�
   let doc = await fx.store.read('7', fx.doc.id);
 
   assert.equal(doc.operations[0].observation, 'waiting');
-  await fx.call('attempt_stage_state_commit_v2', '7', fx.attempt, 'instrument', 'done');
+  fx.commit('instrument', 'done');
   await fx.apply.observe(doc);
   doc = await fx.store.read('7', doc.id);
 
@@ -169,7 +169,7 @@ test('повторённый узел с новым human stop сохраняе�
   const fx = await applyFixture(t);
 
   await fx.apply.apply(fx.doc, fx.operation);
-  await fx.call('attempt_stage_state_commit_v2', '7', fx.attempt, 'instrument', 'skipped');
+  fx.commit('instrument', 'skipped');
   await fx.apply.observe(await fx.store.read('7', fx.doc.id));
 
   const doc = await fx.store.read('7', fx.doc.id);
@@ -241,7 +241,7 @@ test('позднейшие события не теряют receipt; чужой 
   const fx = await applyFixture(t);
 
   await fx.rewind('instrument', fx.operation.reason, fx.operation.originalStage);
-  await fx.call('attempt_stage_state_commit_v2', '7', fx.attempt, 'instrument', 'done');
+  fx.commit('instrument', 'done');
   await fx.apply.recover(fx.doc);
 
   let doc = await fx.store.read('7', fx.doc.id);

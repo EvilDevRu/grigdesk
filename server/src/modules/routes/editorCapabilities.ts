@@ -2,7 +2,6 @@ import { createHash } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 
 import { isRecord } from '../../../../shared/lib/objects.ts';
@@ -12,9 +11,10 @@ import { parseRouteMap } from '../../lib/analysis/routePolicy.ts';
 import { loadRunnerConfig } from '../../lib/runnerState.ts';
 
 import { assertProfileId } from './schema.ts';
+import { editorRouteCommand, RoutesEditorEngineError } from './editorEngine.ts';
+import type { FactoryCommands } from '../../lib/factoryRuntime.ts';
 
 const runCli = promisify(execFile);
-const ROUTE_CLI = fileURLToPath(new URL('../../../../engine/bin/factory-route', import.meta.url));
 const ID_RE = /^[a-z0-9][a-z0-9_-]{0,40}$/;
 const CONTEXT_RE = /^[a-z][a-zA-Z0-9]{0,40}$/;
 const FILESYSTEM = new Set(['state-only', 'workspace-write']);
@@ -74,10 +74,12 @@ function stable(value: unknown): unknown {
 }
 
 /**
- * Получает известные движку секции и политики из его чистого CLI без profile.sh.
+ * Получает известные движку секции и политики из его чистого CLI.
+ * Команда не загружает profile.sh даже при выбранном внешнем runtime.
  */
-async function engineBuiltins(profile: string) {
-  const { stdout } = await runCli(ROUTE_CLI, ['--profile', profile, 'editor-capabilities'], {
+async function engineBuiltins(profile: string, runtime?: FactoryCommands) {
+  const helper = editorRouteCommand(runtime, ['--profile', profile, 'editor-capabilities']);
+  const { stdout } = await runCli(helper.command, helper.args, {
     timeout: 5_000,
     maxBuffer: 64 * 1024,
   });
@@ -202,12 +204,19 @@ async function staticTriageRoutes(file: string): Promise<string[]> {
 /**
  * Только metadata: не запускает профиль, не раскрывает runners.env или prompts.
  */
+/**
+ * Собирает builtins текущего движка вместе с декларациями профиля.
+ * Затем вычисляет общий hash для проверки совместимости черновика.
+ */
 export async function readEditorCapabilities(
   profile: string,
-  { profilesDir }: { profilesDir: string },
+  { profilesDir, runtime }: { profilesDir: string; runtime?: FactoryCommands },
 ): Promise<EditorCapabilitiesSnapshot> {
   assertProfileId(profile);
-  const builtins = await engineBuiltins(profile);
+
+  const builtins = await engineBuiltins(profile, runtime).catch(() => {
+    throw new RoutesEditorEngineError('Движок не подтвердил возможности редактора');
+  });
   const issues: RouteEditorIssue[] = [];
   const profileDir = path.join(profilesDir, profile);
   const graph = path.join(profileDir, 'graph.json');

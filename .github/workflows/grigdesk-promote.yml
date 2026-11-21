@@ -57,6 +57,8 @@ jobs:
         run: |
           case "$SOURCE_RUN_ID:$ARTIFACT_ID" in *[!0-9:]*|:*|*:) exit 2 ;; esac
           gh api "repos/${GITHUB_REPOSITORY}/actions/runs/$SOURCE_RUN_ID" > run.json
+          attempt=$(jq -er '.run_attempt|select(type == "number" and . >= 1)' run.json)
+          printf 'GRIGDESK_GO_SOURCE_ATTEMPT=%s\n' "$attempt" >> "$GITHUB_ENV"
           node tools/promoteArtifact.mts --run run.json \
             --artifact-id "$ARTIFACT_ID" --output release-artifacts
         env:
@@ -73,6 +75,12 @@ jobs:
           GRIGDESK_RELEASE_VERSION: ${{ inputs.version }}
           GRIGDESK_RELEASE_CHANNEL: ${{ inputs.channel }}
           GRIGDESK_RELEASE_EXPECTED_DIGEST: ${{ inputs.digest }}
+      - name: Нативные доказательства Go перед доступом к сайту
+        if: ${{ inputs.publish }}
+        run: node tools/verifyGoReleaseEvidence.mts release-artifacts
+        env:
+          GRIGDESK_GO_LINUX_ARTIFACT_ID: ${{ inputs.artifact_id }}
+          GRIGDESK_GO_SOURCE_RUN_ID: ${{ inputs.source_run_id }}
       - name: Ключ сайта
         if: ${{ inputs.publish }}
         env:
@@ -90,6 +98,8 @@ jobs:
         run: node tools/release-publish.mts "$PWD"
         env:
           RELEASE_CHANNEL: ${{ inputs.channel }}
+          GRIGDESK_GO_LINUX_ARTIFACT_ID: ${{ inputs.artifact_id }}
+          GRIGDESK_GO_SOURCE_RUN_ID: ${{ inputs.source_run_id }}
           RELEASE_SITE_HOST: ${{ secrets.RELEASE_SITE_HOST }}
           RELEASE_SITE_USER: ${{ secrets.RELEASE_SITE_USER }}
           RELEASE_SITE_PORT: ${{ secrets.RELEASE_SITE_PORT || '22' }}

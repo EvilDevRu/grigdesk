@@ -1,4 +1,4 @@
-// Адаптер голосового пакета voice: раздел синтезирует через CLI bin/voice.
+// Адаптер голосового пакета voice: раздел синтезирует через команду voice.
 //
 // Пакет — самостоятельный инструмент: он не читает серверные хранилища ключей и не
 // зависит от сервера. Адаптер передаёт ключи облака через env дочернего процесса,
@@ -240,7 +240,8 @@ function runVoice(
     child.on('error', (error) => {
       finish(new ShowcaseError(
         'voice_failed',
-        `Пакет voice не запускается: ${error.message}. Соберите его: npm --prefix voice run build.`,
+        `Пакет voice не запускается: ${error.message}. `
+        + 'Соберите его из исходников: bash tools/build-go-utilities.sh "$PWD/bin/utilities".',
         503,
       ));
     });

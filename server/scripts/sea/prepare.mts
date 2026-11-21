@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import type { NodeRuntime } from '../../../shared/node/nodeRuntime.ts';
-import { writeCompatibility } from './compatibility.mts';
+import { writeCompatibility, type CompatibilityManifest } from './compatibility.mts';
 import { assertRuntimeDependencies, cleanNativeBuilds, extractRuntime, installDependencies,
   probeDependencies, runtimeSpecifiers } from './dependencies.mts';
 import { buildHelper, loadHelpers } from './helpers.mts';
@@ -21,6 +21,7 @@ export async function prepareRelease(input: {
   cacheDir: string;
   work: string;
   resources?: ResourceManifest;
+  compatibility?: CompatibilityManifest;
   install?: typeof installDependencies;
 }) {
   const directory = input.directory;
@@ -78,7 +79,9 @@ export async function prepareRelease(input: {
     });
   }
 
-  await writeCompatibility(directory, await json('server/build/compatibility.json'), helpers);
+  const compatibility = input.compatibility ?? await json('server/build/compatibility.json');
+
+  await writeCompatibility(directory, compatibility, helpers);
 
   return {
     helpers,

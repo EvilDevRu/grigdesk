@@ -2,7 +2,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 
 import {
-  decodeReleaseChannelIndex, type ReleaseEnvelope, type ReleasePlatform,
+  parseReleaseChannelIndex, type ReleaseEnvelope, type ReleasePlatform,
 } from '../runtime/installedUpdateContracts.ts';
 import type { ReleaseChannel } from '../runtime/productReleaseVersion.ts';
 import { verifyReleaseEnvelope } from './releaseTrust.ts';
@@ -176,7 +176,7 @@ export class ReleaseChannelService {
         }
 
         const text = new TextDecoder().decode(bytes);
-        const index = decodeReleaseChannelIndex(JSON.parse(text));
+        const index = parseReleaseChannelIndex(text);
 
         if (index.channel !== this.options.channel) {
           throw new Error('release_channel_mismatch');

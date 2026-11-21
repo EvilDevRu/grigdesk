@@ -12,7 +12,7 @@ import { legacyRuntimeContext } from '../../server/src/lib/factoryLegacyRuntimeC
 import { readExistingFactoryRuntimePin } from '../../server/src/lib/factoryRuntimePins.ts';
 import { factoryMobileIdentity } from '../../server/src/lib/mobile/factoryIdentity.ts';
 import { RUNTIME_TOKEN } from '../../server/src/binary/leases.ts';
-import { canonicalJson } from '../../shared/lib/canonicalJson.ts';
+import { writeFactoryLedger } from './factoryLedgerFixture.mjs';
 import { dataPath } from '../../shared/runtime/dataHome.ts';
 import { assertRuntimePinDirectory } from '../../tools/ci/runtimePinEvidence.mts';
 import type { platformFixture } from './platformReleaseAcceptance.mts';
@@ -87,10 +87,8 @@ export async function macosRuntimePinFixture(
   const helper = packageId ? path.join(runtimeRoot, 'server/runtime/helpers/factory-runtime-pin.mjs')
     : path.join(runtimeRoot, 'server/scripts/factoryRuntimePin.mts');
   const engineHome = path.join(runtimeRoot, 'engine');
-  const engineBin = path.join(engineHome, 'bin/factory');
+  const engineBin = path.join(runtimeRoot, packageId ? 'engine/bin/factory' : 'bin/factory');
   const answer = path.join(directory, 'answer.txt');
-  const reason = path.join(directory, 'reason.txt');
-  const runs = path.join(directory, 'runs.json');
 
   for (const folder of [controlRoot, stateRoot, profileRoot, routes]) {
     await fs.mkdir(folder, { mode: 0o700 });
@@ -120,23 +118,18 @@ export async function macosRuntimePinFixture(
     [publisher, routes, 'Bootstrap fixture', 'null'], { env })).stdout);
 
   await fs.writeFile(answer, 'Ответ для проверяемого визита.\n', { mode: 0o600 });
-  await fs.writeFile(reason, 'Проверочная остановка.\n', { mode: 0o600 });
-  await fs.writeFile(runs, '[{"runId":"fixture-scout","epoch":1,"result":null}]', { mode: 0o600 });
 
-  const seeded = await execute(toolEnv.FACTORY_DARWIN_BASH!, ['-euc', `
-    source "$FACTORY_HOME/lib/bootstrap-state.sh"
-    task=$1
-    profile=$2
-    attempt=$(attempt_state_begin_v2 "$task" "$profile" "$ROUTES_DIR")
-    attempt_state_select_route_v2 "$task" "$attempt" debug >/dev/null
-    printf '%s\\n' "$attempt"
-    [[ "$5" == bootstrap ]] || exit 0
-    start=$(attempt_bootstrap_journal_v2 begin "$task" "$attempt" "$profile")
-    visit=$(jq -er .visitId <<<"$start")
-    stop=$(attempt_bootstrap_journal_v2 stop "$task" "$attempt" "$profile" "$visit" exhausted "$3" '' "$4")
-    printf '%s\\n%s\\n' "$visit" "$(jq -er .recordHash <<<"$stop")"
-  `, '--', task, profile, reason, runs, mode], { env, timeout: 15_000 });
-  const [attempt, visit, stopHash] = seeded.stdout.trim().split('\n');
+  const attempt = writeFactoryLedger(directory, 'begin', {
+    task,
+    profile,
+    route: 'debug',
+    skipStage: true,
+  }) as string;
+  const { visit, stopHash } = mode === 'bootstrap' ? writeFactoryLedger(directory, 'bootstrap-stop', {
+    task,
+    attempt,
+    reason: 'Проверочная остановка.',
+  }) as { visit: string; stopHash: string } : {};
 
   assert.match(attempt!, /^a_[a-f0-9]{32}$/u);
 
@@ -296,33 +289,42 @@ export async function seedRuntimePinGate(fixture: PinFixture, stop: 'gate' | 'hu
     'PROJECT_RUNNER_PRIMARY=codex', '',
   ].join('\n'), { mode: 0o600 });
 
-  const verdict = Buffer.from(canonicalJson({
+  const scope = { task: identity.task, attempt: identity.attempt };
+  const location = env.HOME!;
+  const verdict = {
     owner: 'tests',
     findings: [{
       id: 'fixture',
       severity: 'blocking',
       summary: 'Проверочная остановка арбитра.',
     }],
-  })).toString('base64');
-  const { stdout } = await execute(env.FACTORY_DARWIN_BASH!, ['-euc', `
-    source "$FACTORY_HOME/lib/attempt-stage-state.sh"
-    attempt_stage_state_init_v2 "$1" "$2" debug >/dev/null
-    attempt_stage_state_commit_v2 "$1" "$2" instrument done >/dev/null
-    if [[ "$3" == human ]]; then
-      attempt_stage_state_commit_v2 "$1" "$2" check failed 0 "$4"
-    else
-      attempt_stage_state_commit_v2 "$1" "$2" check done >/dev/null
-      attempt_stage_state_pause_v2 "$1" "$2" gate_plan 'Проверочное решение'
-    fi
-  `, '--', identity.task, identity.attempt, stop, verdict], { env, timeout: 30_000 });
-  const cursor = JSON.parse(stdout);
+  };
+
+  writeFactoryLedger(location, 'init', scope);
+  writeFactoryLedger(location, 'commit', {
+    ...scope,
+    node: 'instrument',
+    outcome: 'done',
+  });
+
+  const cursor = writeFactoryLedger(location, 'commit', {
+    ...scope,
+    node: 'check',
+    outcome: stop === 'human' ? 'failed' : 'done',
+    ...(stop === 'human' ? { verdict, failureOwner: verdict.owner } : {}),
+  });
+
+  const stopped = stop === 'gate' ? writeFactoryLedger(location, 'pause', {
+    ...scope,
+    reason: 'Проверочное решение',
+  }) : cursor;
 
   if (stop === 'gate') {
-    assert.equal(cursor.currentNode, 'gate_plan');
-    assert.equal(cursor.state, 'paused');
+    assert.equal(stopped.CurrentNode, 'gate_plan');
+    assert.equal(stopped.State, 'paused');
   } else {
-    assert.equal(cursor.state, 'stopped');
-    assert.equal(cursor.stop, 'human');
+    assert.equal(stopped.State, 'stopped');
+    assert.equal(stopped.Stop, 'human');
   }
 
   await fs.appendFile(pipeline, [
@@ -334,13 +336,13 @@ export async function seedRuntimePinGate(fixture: PinFixture, stop: 'gate' | 'hu
     profile: identity.profile,
     attempt: identity.attempt,
     cursor: {
-      node: cursor.currentNode,
-      state: cursor.state,
-      stop: cursor.stop ?? null,
+      node: stopped.CurrentNode,
+      state: stopped.State,
+      stop: stopped.Stop || null,
     },
     stageIdentity: {
-      sequence: cursor.eventSequence,
-      headEventHash: cursor.headEventHash,
+      sequence: stopped.Sequence,
+      headEventHash: stopped.HeadEventHash,
     },
   }, {});
 

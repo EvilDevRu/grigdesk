@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import {
-  chmodSync, closeSync, existsSync, mkdtempSync, openSync, readdirSync, readFileSync, readSync, statSync,
+  chmodSync, closeSync, mkdtempSync, openSync, readdirSync, readFileSync, readSync, statSync,
   writeFileSync, symlinkSync, lstatSync, rmSync,
 } from 'node:fs';
 import os from 'node:os';
@@ -11,30 +11,20 @@ import { fileURLToPath } from 'node:url';
 
 const REPO = new URL('../../', import.meta.url);
 
-// Сервер кладёт bin/ первым в PATH каждого агента (server/src/lib/cliPath.ts), поэтому любой
-// исполняемый файл здесь становится командой агента по голому имени. Набор закрыт: единая
-// команда, иконка ярлыка и собранные файлы (tracker, посредник и установленное окно), которые в git
-// не попадают.
-const COMMANDS = ['grigdesk-ctl'];
-const BUILT = [
-  'tracker', 'pipeline', 'routes', 'voice', 'deepseek',
-  'grigdesk-relay', 'grigdesk-app', 'grigdesk-server',
-];
+// Сервер добавляет оба каталога checkout в PATH агента.
+// Состав каждого каталога проверяется отдельно, артефакты сборки остаются вне git.
+const BUILT = ['factory', 'deepseek', 'grigdesk-app', 'grigdesk-server'];
+const UTILITIES = ['tracker', 'pipeline', 'routes', 'voice', 'ctl', 'maintenance', 'relay'];
 const RECEIPTS = {
   'deepseek.grigdesk-deepseek.json': 'DeepSeek',
   'grigdesk-server.grigdesk-server.json': 'сервера',
 };
 const ALLOWED = new Set([
-  ...COMMANDS, ...BUILT, 'grigdesk.png', ...Object.keys(RECEIPTS),
+  ...BUILT, 'utilities', 'grigdesk.png', ...Object.keys(RECEIPTS),
 ]);
 
-// ELF сборки имеет 0755; установленный DeepSeek публикуется без записи, с правами 0555.
-const ELF_BUILT = [
-  'tracker', 'pipeline', 'routes', 'voice', 'deepseek', 'grigdesk-app', 'grigdesk-server',
-];
-
-// Скрипты, которым bin/grigdesk-ctl передаёт `desktop`, `mobile` и `release`. Им нужен
-// бит исполнения: команда зовёт их через exec, а не через bash. tracker — собранный файл или исходник.
+// Команда ctl вызывает эти скрипты через exec.
+// Каждый делегат должен сохранить бит исполнения.
 const DELEGATED = ['deploy/desktop.sh', 'tools/mobile', 'tools/release'];
 
 /**
@@ -42,20 +32,26 @@ const DELEGATED = ['deploy/desktop.sh', 'tools/mobile', 'tools/release'];
  * ELF имеет права сборки либо readonly установки DeepSeek. Квитанция не становится
  * командой агента: только обычный приватный файл; отсутствие ELF до установки штатно.
  */
-function binProblems(directory: string): string[] {
-  const problems = readdirSync(directory).filter((name) => !ALLOWED.has(name))
+function binProblems(directory: string, utilities = false): string[] {
+  const names = readdirSync(directory);
+  const expected = utilities ? new Set(UTILITIES) : ALLOWED;
+  const problems = names.filter((name) => !expected.has(name))
     .map((name) => `лишний файл ${name}`);
 
-  for (const name of COMMANDS) {
-    if (!(statSync(path.join(directory, name)).mode & 0o111)) {
-      problems.push(`${name} не исполняемый`);
+  if (!utilities && names.includes('utilities')) {
+    const child = path.join(directory, 'utilities');
+
+    if (lstatSync(child).isDirectory()) {
+      problems.push(...binProblems(child, true));
+    } else {
+      problems.push('utilities не обычный каталог');
     }
   }
 
-  for (const name of ELF_BUILT) {
+  for (const name of utilities ? UTILITIES : BUILT) {
     const file = path.join(directory, name);
 
-    if (!readdirSync(directory).includes(name)) {
+    if (!names.includes(name)) {
       continue;
     }
 
@@ -90,7 +86,7 @@ function binProblems(directory: string): string[] {
   }
 
   for (const [name, label] of Object.entries(RECEIPTS)) {
-    if (!readdirSync(directory).includes(name)) {
+    if (utilities || !names.includes(name)) {
       continue;
     }
 
@@ -118,25 +114,24 @@ test('BD-ROUTES: авторинг допускается только как и�
   const cwd = fileURLToPath(REPO);
 
   t.after(() => rmSync(directory, { recursive: true, force: true }));
-  writeFileSync(path.join(directory, 'grigdesk-ctl'), '#!/bin/bash\n', { mode: 0o755 });
-  assert.deepEqual(binProblems(directory), []);
+  assert.deepEqual(binProblems(directory, true), []);
   writeFileSync(binary, '#!/usr/bin/env node\n', { mode: 0o755 });
-  assert.deepEqual(binProblems(directory), ['routes не ELF']);
+  assert.deepEqual(binProblems(directory, true), ['routes не ELF']);
   writeFileSync(binary, Buffer.from([0x7f, 0x45, 0x4c, 0x46]));
-  assert.deepEqual(binProblems(directory), []);
+  assert.deepEqual(binProblems(directory, true), []);
   chmodSync(binary, 0o644);
-  assert.deepEqual(binProblems(directory), ['routes без прав 0755']);
+  assert.deepEqual(binProblems(directory, true), ['routes без прав 0755']);
   rmSync(binary);
   symlinkSync('missing-ELF', binary);
-  assert.deepEqual(binProblems(directory), ['routes не обычный ELF']);
+  assert.deepEqual(binProblems(directory, true), ['routes не обычный ELF']);
 
-  for (const relative of ['bin/routes', 'bin/.routes-Ab12Cd.tmp']) {
+  for (const relative of ['bin/utilities/routes', 'bin/utilities/.go-utilities.AB/routes']) {
     execFileSync('git', ['check-ignore', '-q', '--no-index', relative], { cwd });
     assert.equal(execFileSync('git', ['ls-files', '--', relative], { cwd }).length, 0);
   }
 
   writeFileSync(path.join(directory, 'package.json'), '{"type":"module"}\n');
-  assert.ok(binProblems(directory).includes('лишний файл package.json'));
+  assert.ok(binProblems(directory, true).includes('лишний файл package.json'));
 });
 
 test('BD-01: tracker отсутствует до сборки и допустим только как собранный ELF после неё', () => {
@@ -145,7 +140,6 @@ test('BD-01: tracker отсутствует до сборки и допусти�
   const fixture = (tracker?: { bytes: Buffer; mode: number }) => {
     const directory = mkdtempSync(path.join(os.tmpdir(), 'tracker-bin-layout-'));
 
-    writeFileSync(path.join(directory, 'grigdesk-ctl'), '#!/bin/bash\n', { mode: 0o755 });
 
     if (tracker) {
       writeFileSync(path.join(directory, 'tracker'), tracker.bytes);
@@ -156,19 +150,19 @@ test('BD-01: tracker отсутствует до сборки и допусти�
   };
   const elf = Buffer.from([0x7f, 0x45, 0x4c, 0x46, 2, 1, 1, 0]);
 
-  assert.deepEqual(binProblems(fixture()), []);
+  assert.deepEqual(binProblems(fixture(), true), []);
   assert.deepEqual(binProblems(fixture({
     bytes: elf,
     mode: 0o755,
-  })), []);
+  }), true), []);
   assert.deepEqual(binProblems(fixture({
     bytes: Buffer.from('#!/usr/bin/env bash\n'),
     mode: 0o755,
-  })), ['tracker не ELF']);
+  }), true), ['tracker не ELF']);
   assert.deepEqual(binProblems(fixture({
     bytes: elf,
     mode: 0o644,
-  })), ['tracker без прав 0755']);
+  }), true), ['tracker без прав 0755']);
 });
 
 test('BD-VOICE: команда допускает только обычный ELF 0755', (t) => {
@@ -176,24 +170,22 @@ test('BD-VOICE: команда допускает только обычный EL
   const binary = path.join(directory, 'voice');
 
   t.after(() => rmSync(directory, { recursive: true, force: true }));
-  writeFileSync(path.join(directory, 'grigdesk-ctl'), '#!/bin/bash\n', { mode: 0o755 });
-  assert.deepEqual(binProblems(directory), []);
+  assert.deepEqual(binProblems(directory, true), []);
   writeFileSync(binary, Buffer.from([0x7f, 0x45, 0x4c, 0x46]), { mode: 0o644 });
-  assert.deepEqual(binProblems(directory), ['voice без прав 0755']);
+  assert.deepEqual(binProblems(directory, true), ['voice без прав 0755']);
   chmodSync(binary, 0o755);
-  assert.deepEqual(binProblems(directory), []);
+  assert.deepEqual(binProblems(directory, true), []);
   writeFileSync(binary, '#!/bin/bash\n');
-  assert.deepEqual(binProblems(directory), ['voice не ELF']);
+  assert.deepEqual(binProblems(directory, true), ['voice не ELF']);
   rmSync(binary);
   symlinkSync('missing-ELF', binary);
-  assert.deepEqual(binProblems(directory), ['voice не обычный ELF']);
+  assert.deepEqual(binProblems(directory, true), ['voice не обычный ELF']);
 });
 
 test('BD-02: окно в bin/ допустимо только как ELF с правами 0755, временная копия — лишняя', () => {
   const directory = mkdtempSync(path.join(os.tmpdir(), 'app-bin-layout-'));
   const app = path.join(directory, 'grigdesk-app');
 
-  writeFileSync(path.join(directory, 'grigdesk-ctl'), '#!/bin/bash\n', { mode: 0o755 });
   assert.deepEqual(binProblems(directory), []);
 
   writeFileSync(app, Buffer.from([0x7f, 0x45, 0x4c, 0x46]));
@@ -211,7 +203,6 @@ test('BD-03: установленный DeepSeek — ELF 0555 и только п
   const binary = path.join(directory, 'deepseek');
   const receipt = path.join(directory, 'deepseek.grigdesk-deepseek.json');
 
-  writeFileSync(path.join(directory, 'grigdesk-ctl'), '#!/bin/bash\n', { mode: 0o755 });
   writeFileSync(binary, Buffer.from([0x7f, 0x45, 0x4c, 0x46]), { mode: 0o555 });
   writeFileSync(receipt, '{}\n', { mode: 0o600 });
   assert.deepEqual(binProblems(directory), []);
@@ -226,7 +217,6 @@ test('BD-03: установленный DeepSeek — ELF 0555 и только п
 
   const linked = mkdtempSync(path.join(os.tmpdir(), 'deepseek-bin-link-'));
 
-  writeFileSync(path.join(linked, 'grigdesk-ctl'), '#!/bin/bash\n', { mode: 0o755 });
   symlinkSync(receipt, path.join(linked, 'deepseek.grigdesk-deepseek.json'));
   assert.ok(binProblems(linked).includes('квитанция DeepSeek не обычный файл'));
   writeFileSync(path.join(linked, 'foreign.json'), '{}');
@@ -255,7 +245,6 @@ test('BD-SERVER: ELF и private receipt допустимы, staging запрещ
   const receipt = path.join(directory, 'grigdesk-server.grigdesk-server.json');
 
   t.after(() => rmSync(directory, { recursive: true, force: true }));
-  writeFileSync(path.join(directory, 'grigdesk-ctl'), '#!/bin/bash\n', { mode: 0o755 });
   writeFileSync(binary, Buffer.from([0x7f, 0x45, 0x4c, 0x46]), { mode: 0o555 });
   writeFileSync(receipt, '{}\n', { mode: 0o600 });
   assert.deepEqual(binProblems(directory), []);
@@ -272,7 +261,6 @@ test('BD-SERVER: режимы 0755/0555, отсутствие, non-ELF и links 
   const receipt = path.join(directory, 'grigdesk-server.grigdesk-server.json');
 
   t.after(() => rmSync(directory, { recursive: true, force: true }));
-  writeFileSync(path.join(directory, 'grigdesk-ctl'), '#!/bin/bash\n', { mode: 0o755 });
   assert.deepEqual(binProblems(directory), []);
   writeFileSync(binary, Buffer.from([0x7f, 0x45, 0x4c, 0x46]), { mode: 0o755 });
   assert.deepEqual(binProblems(directory), []);
@@ -313,25 +301,15 @@ test('иконка ярлыка совпадает с иконкой интер�
   assert.ok(icon.equals(web), 'bin/grigdesk.png — копия web/public/icon-512.png');
 });
 
-test('bin/grigdesk-ctl передаёт команды существующим исполняемым скриптам', () => {
-  const dispatcher = readFileSync(new URL('bin/grigdesk-ctl', REPO), 'utf8');
+test('BD-GO-CTL: отсутствие сборки допустимо, Bash по пути Go CLI отклоняется', (t) => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), 'go-ctl-bin-layout-'));
 
-  assert.match(dispatcher, /exec "\$DIR\/deploy\/desktop\.sh"/);
-  assert.match(dispatcher, /if \[\[ -x "\$DIR\/bin\/tracker" \]\]; then\n\s+exec "\$DIR\/bin\/tracker" "\$@"/);
-  assert.match(dispatcher, /exec node "\$DIR\/tracker\/src\/main\.ts" "\$@"/);
-  assert.match(dispatcher, /mobile\|release\)\n\s+shift\n\s+exec "\$DIR\/tools\/\$CMD"/);
-  assert.ok(existsSync(new URL('tracker/src/main.ts', REPO)), 'исходник tracker для запуска без сборки');
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  assert.deepEqual(binProblems(directory, true), []);
+  writeFileSync(path.join(directory, 'ctl'), '#!/bin/bash\n', { mode: 0o755 });
+  assert.deepEqual(binProblems(directory, true), ['ctl не ELF']);
 
   for (const file of DELEGATED) {
     assert.ok(statSync(new URL(file, REPO)).mode & 0o111, `${file} исполняемый`);
   }
-});
-
-// cli/ — только TypeScript единой команды. Shell-скрипты живут по назначению: установка и
-// запуск — в deploy/, общие bash-функции — в deploy/lib/, инструменты разработчика — в tools/.
-test('в cli/ только TypeScript единой команды', () => {
-  const extra = readdirSync(new URL('cli/', REPO))
-    .filter((name) => !name.endsWith('.ts') && name !== 'package.json');
-
-  assert.deepEqual(extra, []);
 });

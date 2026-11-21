@@ -41,7 +41,7 @@ rm "$BOOTSTRAP"
 
 Подставляются опубликованные значения. Скрипт проверяет annotated tag/SHA,
 чистоту, ветку `main`, допустимость fast-forward и installed publish contract;
-затем выполняет штатные `bin/grigdesk-ctl deps` и `build`. Dirty/diverged checkout
+затем выполняет штатные `bin/utilities/ctl deps` и `build`. Dirty/diverged checkout
 останавливает процедуру без reset или очистки. После ручного restart оператора
 обычная кнопка обновления может установить embedded-релиз.
 

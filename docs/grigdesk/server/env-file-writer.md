@@ -6,7 +6,7 @@
 [приватное хранилище профилей](../chat/access-profile-rules.md).
 
 Файл `.env` в папке данных читают сервер, окно, CLI, systemd (`EnvironmentFile=`),
-`node --env-file` (`bin/grigdesk-ctl`, `deploy/restart.sh`) и человек. Код GrigDesk правит его одним модулем
+`node --env-file` (`grigdesk-ctl`, `deploy/restart.sh`) и человек. Код GrigDesk правит его одним модулем
 `server/src/lib/envFile.ts`. Окно «Ключи доступа» в карточках исполнителей и раздел
 «Система → Запуск → Ворота VPN» (`server/src/lib/vpnGate.ts`) пишут через `updateEnvFile`.
 Второй самописный writer заводить нельзя.

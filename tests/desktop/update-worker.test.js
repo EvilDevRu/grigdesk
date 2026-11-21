@@ -46,9 +46,11 @@ for (const mode of ['remote', 'server']) {
     const hook = await pinnedKeyHook(box.temporary, box.release.publicKeyPem);
     const script = path.join(box.temporary, 'lifecycle.mjs');
     const imports = (name) => JSON.stringify(path.join(repository, `shared/node/${name}.ts`));
+    const worker = JSON.stringify(path.join(repository,
+      'tests/fixtures/release-v2/installedUpdateWorker.ts'));
     const source = [
       `import { createUpdateHandoff, launchUpdateWorker, waitUpdateWorker,`,
-      `  runInstalledUpdateWorker, writeDesktopBootProof } from ${imports('installedUpdateWorker')};`,
+      `  runInstalledUpdateWorker, writeDesktopBootProof } from ${worker};`,
       `import { readUpdateProcess } from ${imports('updateProcessOwner')};`,
       `import { readInstallationJson } from ${imports('installedLayout')};`,
       `const root = ${JSON.stringify(box.root)};`,
@@ -135,12 +137,13 @@ test('OWNER-RECHECK: настоящий PID с изменённым starttime н
   assert.equal(await updateProcessAlive({ ...owner, executable: '/чужой-процесс' }), false);
 });
 
+const { legacyControlStub } = await import('../helpers/legacyControlStub.mts');
 const { loadInstalledModule } = await import('../helpers/installedBuildFixture.mjs');
 
 test('APP-NONBLOCK: первый локальный снимок доступен до удержанного ответа сайта', async (t) => {
   const box = await installedFixture(t, { mode: 'remote' });
   const { createApplicationUpdates } = await loadInstalledModule(t, 'desktop/src/applicationUpdates.ts',
-    box.release.publicKeyPem);
+    box.release.publicKeyPem, legacyControlStub);
   const gate = Promise.withResolvers();
   let requests = 0;
 
@@ -177,7 +180,7 @@ test('APP-NONBLOCK: первый локальный снимок доступе�
 test('JOB-PROFILE: смена профиля и latest не меняет готовую цель пары', async (t) => {
   const box = await installedFixture(t);
   const { createApplicationUpdates } = await loadInstalledModule(t, 'desktop/src/applicationUpdates.ts',
-    box.release.publicKeyPem);
+    box.release.publicKeyPem, legacyControlStub);
   let local = true;
   let applied = 0;
 
@@ -217,7 +220,7 @@ test('JOB-PROFILE: смена профиля и latest не меняет гот�
 test('APPLY-SERVER-SCOPE: десктоп не мутирует готовое server-задание', async (t) => {
   const box = await installedFixture(t, { mode: 'server' });
   const { createApplicationUpdates } = await loadInstalledModule(t, 'desktop/src/applicationUpdates.ts',
-    box.release.publicKeyPem);
+    box.release.publicKeyPem, legacyControlStub);
   let applied = 0;
 
   t.mock.method(globalThis, 'fetch', async () => new Response(JSON.stringify(box.release.index)));
@@ -254,7 +257,7 @@ test('APPLY-SERVER-SCOPE: десктоп не мутирует готовое se
 test('QUIT-APPLY: чужой профиль и пустой журнал дают idle без диалога и без запуска worker', async (t) => {
   const box = await installedFixture(t);
   const { createInstalledApplication } = await loadInstalledModule(t,
-    'desktop/src/installedApplication.ts', box.release.publicKeyPem);
+    'desktop/src/installedApplication.ts', box.release.publicKeyPem, legacyControlStub);
   const executable = path.join(box.root, 'generations/0.2.0/desktop/GrigDesk');
   let confirmCalls = 0;
 
@@ -299,8 +302,9 @@ for (const changed of ['notes', 'serverApi']) {
   test(`TRUST-PARITY adapters: ${changed}, desktop и настоящая CLI-команда отклоняют подпись`, async (t) => {
     const box = await installedFixture(t, { mode: 'remote' });
     const { createApplicationUpdates } = await loadInstalledModule(t, 'desktop/src/applicationUpdates.ts',
-      box.release.publicKeyPem);
-    const { runUpdateCommand } = await loadInstalledModule(t, 'cli/updates.ts', box.release.publicKeyPem);
+      box.release.publicKeyPem, legacyControlStub);
+    const { runUpdateCommand } = await loadInstalledModule(t,
+      'tests/fixtures/legacy-ctl/cli/updates.ts', box.release.publicKeyPem);
     const forged = structuredClone(box.release.index);
 
     forged.latest.payload[changed] = changed === 'notes'
@@ -482,7 +486,8 @@ for (const foreign of [false, true]) {
     if (foreign) {
       await assert.rejects(installedServerUnit(box.receipt), /release_foreign_service/);
 
-      const { runInstalledCli } = await loadInstalledModule(t, 'cli/installedCli.ts',
+      const { runInstalledCli } = await loadInstalledModule(t,
+        'tests/fixtures/legacy-ctl/cli/installedCli.ts',
         box.release.publicKeyPem);
       const output = [];
 

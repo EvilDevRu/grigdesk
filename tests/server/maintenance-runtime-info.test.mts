@@ -4,8 +4,9 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
+
+import { fixtureGo } from '../helpers/goBuildFixture.mts';
 
 const execute = promisify(execFile);
 
@@ -14,19 +15,21 @@ test('MAINTENANCE-METADATA: метаданные доступны без уст�
 
   t.after(() => fs.rm(home, { recursive: true, force: true }));
 
-  const source = fileURLToPath(new URL('../../tools/maintenance.mts', import.meta.url));
-  const { stdout } = await execute(process.execPath, [source, '--runtime-info', '--json'], {
+  const { stdout, stderr } = await execute(fixtureGo('grigdesk-maintenance'), ['--runtime-info', '--json'], {
     cwd: home,
     env: { HOME: home, PATH: '/usr/bin:/bin' },
     timeout: 30_000,
   });
 
   assert.deepEqual(JSON.parse(stdout), {
+    schema: 1,
     kind: 'grigdesk-maintenance',
-    platform: process.platform,
-    arch: process.arch,
-    node: process.versions.node,
-    sea: false,
+    version: (await fs.readFile(new URL('../../VERSION', import.meta.url), 'utf8')).trim(),
+    os: process.platform,
+    arch: process.arch === 'x64' ? 'amd64' : process.arch,
+    go: 'go1.27.4',
+    runtime: 'go',
   });
+  assert.equal(stderr, '');
   assert.deepEqual(await fs.readdir(home), []);
 });

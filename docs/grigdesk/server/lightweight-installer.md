@@ -1,9 +1,9 @@
 # Лёгкий установщик и проверка дистрибутива
 
 Новая поставка Linux x64 (glibc ≥ 2.28) состоит из POSIX shell `grigdesk-install`
-размером до 64 KiB, отдельного `grigdesk-maintenance.gz`, двух архивов компонентов,
-индекса v2 и installer proof v1. Схема индекса и URL API `/api/releases/v1/` сохранены.
-Helper содержит собственный Node SEA без архивов; размер runtime не обещается килобайтным.
+размером до 64 KiB, отдельного `grigdesk-maintenance.gz`, трёх архивов компонентов,
+индекса v3 и installer proof v1. URL API `/api/releases/v1/` сохраняется.
+Helper v3 собран Go, архивы компонентов загружаются отдельно.
 [Исторический хвост ELF](installer-archive-tail.md) читается только для прежних выпусков.
 
 ## Начало установки и доверие
@@ -19,7 +19,8 @@ Mutable latest после начала установки не читается.
 индекса до архивов и изменений программы. Detached proof скрипта проверяют ctl и publisher.
 JSON metadata не исполняется как shell. Redirects запрещены; curl делает до трёх попыток.
 
-`remote` получает только desktop, `server` — только server, `local` — оба компонента.
+Во всех режимах загружается control. `remote` добавляет desktop, `server` добавляет server,
+`local` добавляет оба компонента.
 Системные Node/npm и исходники не нужны. Обязательны curl, gzip и coreutils.
 GUI/FUSE нужны для запуска окна: без `--launch` их отсутствие даёт предупреждение;
 с `--launch` — ранний отказ. Server с `--launch` запрещён. Пакеты системы автоматически

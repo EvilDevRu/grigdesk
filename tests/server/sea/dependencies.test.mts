@@ -12,9 +12,7 @@ import {
   probeDependencies,
 } from '../../../server/scripts/sea/dependencies.mts';
 import { auditStage, normalizeStageModes } from '../../../server/scripts/sea/stage.mts';
-import { readNodeRuntime } from '../../../shared/node/nodeRuntime.ts';
-import { nodeArchive } from '../../../shared/node/seaBuild.ts';
-import { SOURCE_ROOT } from './helperFixture.mts';
+import { pinnedRuntime, SOURCE_ROOT } from './helperFixture.mts';
 
 test('SEA-DEPS-01: реальный production npm ci и native ABI на Node 24 из проверенного архива', {
   timeout: 240000,
@@ -23,12 +21,10 @@ test('SEA-DEPS-01: реальный production npm ci и native ABI на Node 24
 
   t.after(() => rm(root, { recursive: true, force: true }));
 
-  const runtime = readNodeRuntime(JSON.parse(await readFile(
-    path.join(SOURCE_ROOT, 'server/build/node-runtime.json'), 'utf8',
-  )), 'server runtime');
+  const { runtime, archive } = await pinnedRuntime();
 
   await extractRuntime({
-    archive: path.join(SOURCE_ROOT, 'tracker/.cache', nodeArchive(runtime).name),
+    archive,
     runtime,
     target: path.join(root, 'runtime/node'),
   });

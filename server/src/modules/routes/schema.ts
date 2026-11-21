@@ -46,7 +46,7 @@ const FILESYSTEM_POLICIES = new Set([
   'transactional-write',
 ]);
 const COMMAND_FILESYSTEM_POLICIES = new Set(['state-only', 'workspace-write']);
-// Эти классы исполняет engine/lib/core.sh. Произвольный идентификатор здесь
+// Поддерживаемые классы задаёт Go-движок. Произвольный идентификатор здесь
 // опасен: движок лишь пишет предупреждение и молча отдаёт узлу общий timeout.
 const TIMEOUT_CLASSES = new Set([
   'planning',

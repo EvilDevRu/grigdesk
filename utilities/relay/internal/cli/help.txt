@@ -1,0 +1,8 @@
+grigdesk-relay — посредник между телефоном и GrigDesk.
+
+Использование:
+  grigdesk-relay                 запустить посредник; настройки — переменные RELAY_*
+  grigdesk-relay --healthcheck   проверить посредник на 127.0.0.1, порт RELAY_PORT (по умолчанию 7443)
+  grigdesk-relay --version       показать версию
+  grigdesk-relay --license       показать лицензии GrigDesk и Go
+  grigdesk-relay --help          показать эту справку

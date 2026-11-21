@@ -228,7 +228,7 @@ fs.readdir = async (directory, ...args) => {
 `);
 
   const session = startPty(t, {
-    argv: [process.execPath, '--import', hook, path.join(box.root, 'cli/main.ts')],
+    argv: [process.execPath, '--import', hook, path.join(box.root, 'tests/fixtures/legacy-ctl/cli/main.ts')],
     env: {
       ...box.environment,
       GRIGDESK_ARTIFACTS_DIR: artifacts,

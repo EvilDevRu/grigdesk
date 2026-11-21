@@ -55,7 +55,8 @@ export async function binaryFixture(t) {
     await fs.mkdir(directory, { recursive: true });
   }
 
-  await fs.cp(path.join(SOURCE, 'bin/grigdesk-ctl'), path.join(root, 'bin/grigdesk-ctl'));
+  await fs.cp(path.join(SOURCE, 'tests/fixtures/legacy-ctl/grigdesk-ctl'),
+    path.join(root, 'bin/grigdesk-ctl'));
   await fs.writeFile(path.join(temp, 'metadata.json'), JSON.stringify(metadata));
   await fs.writeFile(path.join(temp, 'prepared.json'), JSON.stringify({
     packageId: PACKAGE,

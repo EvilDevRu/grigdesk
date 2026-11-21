@@ -1,7 +1,8 @@
 import type { ReleaseEnvelope } from '../runtime/installedUpdateContracts.ts';
 import { decodeReleaseChannelIndex } from '../runtime/installedUpdateContracts.ts';
+import { verifyReleaseEnvelope } from './releaseTrust.ts';
 import type { InstalledPointer, InstallationReceipt } from './installedLayout.ts';
-import { readInstallationJson, writeInstallationJson } from './installedLayout.ts';
+import { decodeInstalledPointer, readInstallationJson, writeInstallationJson } from './installedLayout.ts';
 
 export type UpdateScope = 'pair' | 'desktop' | 'server';
 export type InstalledUpdateStage = 'queued' | 'verifying' | 'downloading' | 'preparing' | 'ready'
@@ -9,7 +10,7 @@ export type InstalledUpdateStage = 'queued' | 'verifying' | 'downloading' | 'pre
   | 'failed' | 'manual_recovery_required';
 
 export interface InstalledUpdateJob {
-  format: 1;
+  format: 1 | 2;
   id: string;
   requestId: string;
   installationId: string;
@@ -46,7 +47,7 @@ export async function readInstalledUpdate(receipt: InstallationReceipt): Promise
     throw error;
   }
 
-  if (!job || job.format !== 1 || job.installationId !== receipt.installationId
+  if (!job || ![1, 2].includes(job.format) || job.installationId !== receipt.installationId
     || !/^[a-f0-9-]{36}$/u.test(job.id) || typeof job.requestId !== 'string'
     || job.requestId.length > 128 || !/^[a-f0-9]{64}$/u.test(job.manifestDigest)
     || !['pair', 'desktop', 'server'].includes(job.scope)
@@ -57,20 +58,19 @@ export async function readInstalledUpdate(receipt: InstallationReceipt): Promise
   const components = job.scope === 'pair' ? ['desktop', 'server'] as const : [job.scope];
 
   for (const pointer of [job.previous, job.target]) {
-    if (!pointer || pointer.format !== 1 || pointer.installationId !== receipt.installationId
-      || Object.keys(pointer).sort().join(',') !== 'desktop,format,installationId,server') {
+    decodeInstalledPointer(receipt, pointer);
+
+    if (pointer.format !== job.format) {
       throw new Error('update_journal_invalid');
     }
+  }
 
-    for (const component of ['desktop', 'server'] as const) {
-      const relative = pointer[component];
-
-      if (relative !== null && (typeof relative !== 'string'
-        || !/^generations\/[0-9]+\.[0-9]+\.[0-9]+(?:-dev\.[0-9]+)?\/(?:desktop|server)$/u.test(relative)
-        || !relative.endsWith('/' + component))) {
-        throw new Error('update_journal_invalid');
-      }
-    }
+  if (job.format === 2 && (job.target.floor !== job.previous.floor
+    || job.target.control !== `generations/${job.envelope?.payload?.version}`
+    || job.stage === 'rolled_back'
+    || verifyReleaseEnvelope(job.envelope) !== job.manifestDigest
+    || job.intent !== null && (!/^[a-f0-9-]{36}$/u.test(job.intent.nonce) || !job.intent.confirmedAt))) {
+    throw new Error('update_journal_invalid');
   }
 
   for (const component of ['desktop', 'server'] as const) {
@@ -83,7 +83,7 @@ export async function readInstalledUpdate(receipt: InstallationReceipt): Promise
   }
 
   decodeReleaseChannelIndex({
-    format: 2,
+    format: job.format === 2 ? 3 : 2,
     channel: job.envelope?.payload?.channel,
     publishedAt: job.envelope?.payload?.publishedAt,
     latest: job.envelope,

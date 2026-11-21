@@ -5,6 +5,10 @@ Node/curl/jq ему не нужны. Работающий сервер и CLI-т
 настройки GRIGDESK_URL/GRIGDESK_TOKEN/GRIGDESK_HOME общие с tracker.
 Исходники и сборка двух CLI находятся в tracker/; tracker сохраняет свои прежние команды.
 
+Публичные операции из терминала проходят через `pipeline` и API.
+Служебный `bin/factory` запускает проверку профилей и выбранный сервером runtime.
+При продолжении API читает pin этой попытки и её исходный хеш маршрута.
+
 ## Чтение
 
 - pipeline list
@@ -80,16 +84,16 @@ SIGINT/SIGTERM останавливает клиентское ожидание,
 
 ## Сборка и поставка
 
-npm --prefix tracker run build:pipeline; исходный запасной вход —
-bin/grigdesk-ctl pipeline. source build all собирает обе утилиты в одной tasks-цепочке.
-Установщик source использует deploy/lib/pipeline-cli.sh и атомарную ссылку ~/.local/bin/pipeline.
-Чужой обычный файл сохраняется. Установка из готового server ELF использует готовый bin.
-Официальный server archive и исторический portable archive включают ELF.
-bin/pipeline не отслеживается git; без бинарника installed-поставка не подменяется source.
-В официальной local/server-установке grigdesk-ctl pipeline выбирает bin/pipeline из проверенного
-current.server через maintenance ctl. Следующий вызов после обновления выбирает новое поколение.
+`pipeline` собирается с Go 1.27.4 командой
+`bash tools/build-go-utilities.sh "$PWD/bin/utilities"`. В checkout
+`grigdesk-ctl pipeline` находит `bin/utilities/pipeline` рядом с собой. Установщик
+создаёт `~/.local/bin/pipeline` после проверки бинарника.
+
+В подписанной local/server-установке `grigdesk-ctl pipeline` проверяет
+`bin/pipeline` из `current.server`. Следующий вызов после обновления
+выбирает новое поколение.
 Папки данных задаёт receipt; явные GRIGDESK_URL/GRIGDESK_TOKEN сохраняют обычный приоритет.
 Аргументы, stdin/stdio, сигналы и код выхода сохраняются. Нет server/ELF или путь небезопасен —
 отказ1, без поиска source, PATH либо другого поколения. Установка remote без server не поддерживает этот вход.
 В dev-дереве с локально собранным bin/grigdesk-server вход grigdesk-ctl pipeline, как и tracker,
-требует готовый bin/pipeline и при его отсутствии отказывает кодом 1 без source-fallback.
+требует готовый `bin/utilities/pipeline` и при его отсутствии отказывает кодом 1.

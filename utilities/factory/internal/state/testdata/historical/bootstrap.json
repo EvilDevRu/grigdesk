@@ -1,0 +1,10 @@
+{
+  "event.00000000000000000001.299c4ab4fd30627f830bff39cb984e4330a5fb42df70b955bd76e00aebe9d4bc.json": {
+    "mode": 256,
+    "text": "{\n  \"at\": \"2026-11-21T10:26:57Z\",\n  \"attemptId\": \"a_11111111111111111111111111111111\",\n  \"catalogHash\": \"80d67ab25b9a1625caf3063677fb6fb73d10223516ff67067f05ab01a0083146\",\n  \"decisionHash\": null,\n  \"kind\": \"visit\",\n  \"node\": \"scout\",\n  \"phase\": \"bootstrap\",\n  \"previousEventHash\": null,\n  \"profile\": \"demo-profile\",\n  \"protocolVersion\": 2,\n  \"routeHash\": \"d77a3dcf922b2f797a421540dabacf9d5bfe4092ea00d5c8a62eda4f82e559d4\",\n  \"routeId\": \"debug\",\n  \"runKey\": \"SCOUT\",\n  \"schema\": 1,\n  \"sequence\": 1,\n  \"taskId\": \"51\",\n  \"visitId\": \"b_7321ae56e1e6458b8aebae0c685b7e99\"\n}\n"
+  },
+  "event.00000000000000000002.91c9c1c4483c459b84bace2746097a726735c2e134e42b677eca6315244da622.json": {
+    "mode": 256,
+    "text": "{\n  \"at\": \"2026-11-21T10:26:58Z\",\n  \"attemptId\": \"a_11111111111111111111111111111111\",\n  \"catalogHash\": \"80d67ab25b9a1625caf3063677fb6fb73d10223516ff67067f05ab01a0083146\",\n  \"kind\": \"stop\",\n  \"node\": \"scout\",\n  \"outcome\": \"exhausted\",\n  \"phase\": \"bootstrap\",\n  \"previousEventHash\": \"299c4ab4fd30627f830bff39cb984e4330a5fb42df70b955bd76e00aebe9d4bc\",\n  \"profile\": \"demo-profile\",\n  \"protocolVersion\": 2,\n  \"reason\": \"Нужно уточнение\",\n  \"routeHash\": \"d77a3dcf922b2f797a421540dabacf9d5bfe4092ea00d5c8a62eda4f82e559d4\",\n  \"routeId\": \"debug\",\n  \"runKey\": \"SCOUT\",\n  \"runs\": [\n    {\n      \"epoch\": 1,\n      \"result\": null,\n      \"runId\": \"scout-a\"\n    }\n  ],\n  \"schema\": 1,\n  \"sequence\": 2,\n  \"taskId\": \"51\",\n  \"transitionHash\": \"41d905d1f08bb0d0c7fbc5ee04a05182c581e051ae7a0a9bd834d4382cfee9f5\",\n  \"verdict\": null,\n  \"visitId\": \"b_7321ae56e1e6458b8aebae0c685b7e99\"\n}\n"
+  }
+}

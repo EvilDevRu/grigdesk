@@ -2,15 +2,13 @@ import { execFile } from 'node:child_process';
 import path from 'node:path';
 import { createInterface } from 'node:readline';
 import { promisify } from 'node:util';
-import { fileURLToPath } from 'node:url';
+import { factoryHelper, factoryStatusCommands } from '../src/lib/factoryRuntime.ts';
+import type { FactoryCommands } from '../src/lib/factoryRuntime.ts';
 
 import { factoryStatusBoundaryArgs } from '../src/lib/factoryStatusArgs.ts';
 import { createFactoryBrowserMcp } from '../src/lib/browser/factoryBrowserMcp.ts';
 
 const execFileAsync = promisify(execFile);
-const STAGE_PROGRESS = fileURLToPath(new URL('../../engine/lib/stage-progress.sh', import.meta.url));
-const STAGE_RESULT = fileURLToPath(new URL('../../engine/lib/stage-result.sh', import.meta.url));
-const FACTORY_HOME = path.dirname(path.dirname(STAGE_PROGRESS));
 
 interface RunContext {
   task: string;
@@ -20,6 +18,8 @@ interface RunContext {
   requestDir: string;
   stateDir: string;
   loopRole: string;
+  attempt: string;
+  engine: FactoryCommands;
 }
 
 interface RpcRequest {
@@ -57,6 +57,8 @@ function runContext(env: NodeJS.ProcessEnv): RunContext {
     epoch,
     requestDir,
     stateDir,
+    attempt: env.FACTORY_RUN_ATTEMPT || '',
+    engine: factoryStatusCommands(env),
     loopRole: String(env.FACTORY_LOOP_ROLE || ''),
   };
 }
@@ -90,7 +92,8 @@ function childEnvironment(context: RunContext): NodeJS.ProcessEnv {
     LANG: process.env.LANG || 'C.UTF-8',
     LC_ALL: process.env.LC_ALL || '',
     TZ: process.env.TZ || '',
-    FACTORY_HOME,
+    FACTORY_HOME: context.engine.home,
+    FACTORY_RUN_ATTEMPT: context.attempt,
     FACTORY_STATE: context.stateDir,
     STATE_DIR: context.stateDir,
     FACTORY_RUN_TASK: context.task,
@@ -108,9 +111,15 @@ function childEnvironment(context: RunContext): NodeJS.ProcessEnv {
   return env;
 }
 
-async function invoke(script: string, args: string[], context: RunContext) {
+/**
+ * Передаёт статус писателю запуска с неизменными ограничениями времени и вывода.
+ * Диагностика writer возвращается MCP как ошибка штатного инструмента.
+ */
+async function invoke(verb: 'stage-progress' | 'stage-result', args: string[], context: RunContext) {
+  const helper = factoryHelper(context.engine, verb, args);
+
   try {
-    const { stdout, stderr } = await execFileAsync(script, args, {
+    const { stdout, stderr } = await execFileAsync(helper.command, helper.args, {
       cwd: context.stateDir,
       env: childEnvironment(context),
       encoding: 'utf8',
@@ -151,7 +160,8 @@ async function stageProgress(argumentsValue: unknown, context: RunContext) {
     if (!/^[A-Z][A-Z0-9_]*$/.test(key)) throw new Error(`updates[${index}].key invalid`);
     pairs.push(key, value);
   }
-  return invoke(STAGE_PROGRESS, [
+
+  return invoke('stage-progress', [
     '--task', context.task,
     '--stage', context.stage,
     '--run-id', context.runId,
@@ -192,7 +202,8 @@ async function stageResult(argumentsValue: unknown, context: RunContext) {
   for (const item of reviewed) args.push('--reviewed', item);
 
   args.push(...factoryStatusBoundaryArgs(argumentsValue, context.loopRole), result, comment);
-  return invoke(STAGE_RESULT, args, context);
+
+  return invoke('stage-result', args, context);
 }
 
 const browser = createFactoryBrowserMcp(process.env);
@@ -207,9 +218,13 @@ const tools = [
       required: ['updates'],
       properties: {
         updates: {
-          type: 'array', minItems: 1, maxItems: 64,
+          type: 'array',
+          minItems: 1,
+          maxItems: 64,
           items: {
-            type: 'object', additionalProperties: false, required: ['key', 'value'],
+            type: 'object',
+            additionalProperties: false,
+            required: ['key', 'value'],
             properties: { key: { type: 'string' }, value: { type: 'string' } },
           },
         },
@@ -246,7 +261,8 @@ const tools = [
 
 function send(id: unknown, result?: unknown, error?: { code: number; message: string }): void {
   process.stdout.write(`${JSON.stringify({
-    jsonrpc: '2.0', id,
+    jsonrpc: '2.0',
+    id,
     ...(error ? { error } : { result }),
   })}\n`);
 }

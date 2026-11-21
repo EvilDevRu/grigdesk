@@ -1,0 +1,11 @@
+[
+  {"line":{"v":1,"role":"health"},"role":"health"},
+  {"line":{"v":1,"role":"device","token":"fixture"},"role":"device"},
+  {"line":{"v":2,"target":"client","role":"device","token":"fixture"},"role":"device"},
+  {"line":{"v":1,"target":"client","role":"device","token":"fixture"},"error":"bad_hello"},
+  {"line":{"v":2,"target":"client","role":"brain-control","token":"fixture"},"error":"bad_version"},
+  {"line":{"v":3,"role":"health"},"error":"bad_version"},
+  {"line":{"v":1,"role":"other"},"error":"bad_role"},
+  {"line":{"v":1,"role":"brain-data","token":"fixture","id":"z"},"error":"bad_hello"},
+  {"line":{"v":1,"role":"brain-control","token":"fixture","capabilities":[null]},"error":"bad_hello"}
+]

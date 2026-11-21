@@ -48,14 +48,13 @@ acceptance of gestures after updating the server is still required; component ch
 
 ## From the terminal
 
-`routes` ships as a standalone SEA executable and needs no system Node.
-In a source checkout, run `npm --prefix routes run build` to create
-`bin/routes`, which is ignored by Git. Before building, use
-`node routes/src/main.ts …`. Local information: `--help`, `--version`, `--license`.
+The release includes `routes` as a native Go binary. To build it from sources, run
+`bash tools/build-go-utilities.sh "$PWD/bin/utilities"`. Use `--help`, `--version`,
+and `--license` for local information.
 The server package includes the CLI in its generation's bin directory. For a manual ELF
 installation, place the new executable in the selected installation's bin directory.
 
-`bin/routes` returns JSON through the same server. Start with `editor <profile>`.
+`bin/utilities/routes` returns JSON through the same server. Start with `editor <profile>`.
 If necessary, explicitly call `source <profile> --mode editor --yes` using the values read for
 `--expected-source-revision` and `--expected-catalog-hash` (none means no catalog).
 Use `new <profile> --from empty`, save `show <profile> --draft <id>` as JSON, edit all five
@@ -69,6 +68,9 @@ with --draft, --expected-revision, --expected-source-revision, --expected-catalo
 Use `rollback <profile> --hash <hash>` with the source/current expectations and --yes to roll back.
 Before publication stderr prints an operationId. After a lost response, read
 `publications <profile> <operationId>` instead of blindly repeating the write. Compare versions on conflicts.
+
+In the trial Go build, `routes` exits with code 5 when a write receives an HTTP redirect.
+If the command printed an `operationId`, use `publications` to check its receipt.
 
 `profile-config get <profile>` reads metadata;
 `profile-config set <profile> --file profile.sh --set PROFILE_LOOP_MAX_ROUNDS=40`

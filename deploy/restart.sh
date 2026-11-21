@@ -5,7 +5,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
-# Машинные настройки — из .env папки данных, как у bin/grigdesk-ctl и systemd-юнита. Раньше путь к
+# Машинные настройки — из .env папки данных, как у grigdesk-ctl и systemd-юнита. Раньше путь к
 # venv распознавания был прописан прямо здесь, и работа диктовки зависела от способа запуска:
 # поднятый этим скриптом GrigDesk распознавал, поднятый systemd падал со spawn ... ENOENT.
 source "$ROOT/deploy/lib/runtime-env.sh"

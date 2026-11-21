@@ -9,7 +9,8 @@ import os from 'node:os';
 import path from 'node:path';
 import test, { after } from 'node:test';
 import { promisify } from 'node:util';
-import { fileURLToPath } from 'node:url';
+
+import { goCandidate } from '../helpers/goCandidate.mts';
 
 const exec = promisify(execFile);
 const home = await fs.mkdtemp(path.join(os.tmpdir(), 'routes-cli-home-'));
@@ -21,9 +22,7 @@ const CLI_ENV = {
 
 after(() => fs.rm(home, { recursive: true, force: true }));
 
-const BINARY = process.env.GRIGDESK_ROUTES_TEST_BINARY;
-const EXECUTABLE = BINARY || process.execPath;
-const PREFIX = BINARY ? [] : [fileURLToPath(new URL('../../routes/src/main.ts', import.meta.url))];
+const EXECUTABLE = goCandidate('routes');
 
 interface Captured {
   url: string;
@@ -99,7 +98,7 @@ test('RE-C1-01: list печатает JSON и несёт CLI-токен', async 
 
   await fs.writeFile(tokenFile, `secret-${port}\n`, { mode: 0o600 });
 
-  const { stdout } = await exec(EXECUTABLE, [...PREFIX, 'list', 'demo'], {
+  const { stdout } = await exec(EXECUTABLE, ['list', 'demo'], {
     env: {
       ...CLI_ENV,
       GRIGDESK_BASE_URL: '',
@@ -117,7 +116,7 @@ test('RE-C1-01: list печатает JSON и несёт CLI-токен', async 
 
 test('RE-C1-02: недоступный сервер даёт код 3 и сообщение', async () => {
   await assert.rejects(
-    exec(EXECUTABLE, [...PREFIX, 'list', 'demo'], {
+    exec(EXECUTABLE, ['list', 'demo'], {
       env: {
         ...CLI_ENV,
         GRIGDESK_BASE_URL: '',
@@ -134,7 +133,7 @@ test('RE-C1-03: молчащий сервер прерывается по тай
   const port = await stubServer(t, () => ({ ok: true }), { silent: true });
 
   await assert.rejects(
-    exec(EXECUTABLE, [...PREFIX, 'list', 'demo', '--timeout', '500'], {
+    exec(EXECUTABLE, ['list', 'demo', '--timeout', '500'], {
       env: {
         ...CLI_ENV,
         GRIGDESK_BASE_URL: '',
@@ -175,7 +174,7 @@ test('RE-C1-04: 404 от сервера даёт код 2', async (t) => {
   }));
 
   await assert.rejects(
-    exec(EXECUTABLE, [...PREFIX, 'list', 'demo'], {
+    exec(EXECUTABLE, ['list', 'demo'], {
       env: {
         ...CLI_ENV,
         GRIGDESK_BASE_URL: '',
@@ -403,7 +402,7 @@ async function authoringServer(t: test.TestContext, options: {
     GRIGDESK_CLI_TOKEN: 'fixture-token'
   };
 
-  return { state, run: (args: string[]) => exec(EXECUTABLE, [...PREFIX, ...args], { env }) };
+  return { state, run: (args: string[]) => exec(EXECUTABLE, args, { env }) };
 }
 
 /**
@@ -546,10 +545,15 @@ test('RE-C2-06: publish и rollback после обрыва дают ID для �
 
 
       const recovered = JSON.parse((await run(hint.recovery)).stdout);
+      const publishes = state.requests.filter((request) => request.method === 'POST'
+        && request.url.endsWith('/publish'));
 
       assert.equal(recovered.operationId, hint.operationId);
       assert.equal(recovered.state, 'committed');
       assert.equal(state.publishes, 1);
+      assert.equal(publishes.length, 1);
+      assert.equal(publishes[0]?.body?.operationId, hint.operationId);
+      assert.deepEqual(hint.recovery, ['publications', 'demo', hint.operationId]);
       assert.equal(state.creates, command === 'rollback' ? 1 : 0);
     });
   }
@@ -667,7 +671,7 @@ test('RE-C2-09: validate, export и import используют точные DTO
   ];
 
   for (const [index, args] of commands.entries()) {
-    const result = await exec(EXECUTABLE, [...PREFIX, ...args], { env });
+    const result = await exec(EXECUTABLE, args, { env });
 
     assert.deepEqual(JSON.parse(result.stdout), { fixtureResponse: index + 1 });
   }
@@ -726,7 +730,7 @@ test('RE-C3-01: profile-config set применяет изменения с фа
   });
 
   const { stdout } = await exec(EXECUTABLE,
-    [...PREFIX, 'profile-config', 'set', 'demo', '--file', 'profile.sh',
+    ['profile-config', 'set', 'demo', '--file', 'profile.sh',
       '--set', 'PROFILE_LOOP_MAX_ROUNDS=40'], {
       env: {
         ...CLI_ENV,
@@ -789,7 +793,7 @@ test('RE-C3-02: readonly не трактуется как отсутствие, 
     GRIGDESK_CLI_TOKEN: 'fixture-token'
   };
   const run = (assignment: string) => exec(EXECUTABLE,
-    [...PREFIX, 'profile-config', 'set', 'demo', '--set', assignment], { env });
+    ['profile-config', 'set', 'demo', '--set', assignment], { env });
 
   await assert.rejects(run('PROFILE_CTX=replacement'), (error: any) => error.code === 1);
   assert.deepEqual(patches, []);

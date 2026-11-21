@@ -1,31 +1,19 @@
 # CLI авторинга маршрутов
 
-`bin/routes` — самостоятельный ELF Node SEA для Linux x64 с правами 0755.
-Исходники находятся в `routes/src/app.ts` и `routes/src/main.ts`;
-готовый ELF и `bin/.routes-*.tmp` игнорируются Git. До сборки команды в `bin/` нет.
-Готовому файлу не нужны системный Node, node_modules и исходники. Он работает через тот же
-авторизованный API, что редактор и панель проекта; JSON в stdout, диагностика в stderr.
-Профиль уже должен существовать. Команда не создаёт profile.sh и не исполняет его.
+`routes` — нативная Go-утилита для Linux x64 и Apple Silicon. Она использует
+тот же авторизованный API, что редактор и панель проекта. JSON выводится в stdout,
+диагностика — в stderr. Профиль должен существовать до запуска.
 
 ## Сборка и установка
 
-`npm --prefix routes run build` собирает `bin/routes` собственным входом сборки `routes/scripts/build.mts`:
-общий протокол `shared/node/cliSeaBuild.ts`, Node 24.21.0 из закреплённого архива, сверка SHA256, esbuild, postject,
-проверка версии с пустым окружением и атомарная публикация. Сборщик печатает размер и SHA256.
-Пакет `routes/` владеет своим package.json, lock-файлом и build/node-runtime.json.
-Поддерживаются `--out-dir` и `--cache-dir`; кэш по умолчанию — `routes/.cache/`.
-Перед первой сборкой установите devDependencies пакета; системный Node нужен только для сборки.
-`--help`, `--version` и `--license` доступны без сервера и токена. Лицензия Node включена
-в SEA; `NODE_OPTIONS` не расширяет аргументы готового ELF.
+`bash tools/build-go-utilities.sh "$PWD/bin/utilities"` собирает команды из исходников
+с Go 1.27.4. Для сборки в checkout укажите абсолютный путь к его `bin`.
+`--help`, `--version` и `--license` доступны без сервера и токена.
 
-Исходный вход до сборки: `node routes/src/main.ts …`.
-`grigdesk-ctl build all` последовательно собирает tracker, pipeline и routes
-в одной tasks-цепочке, каждый CLI из своего пакета. Исходный `deploy/install.sh` собирает CLI и создаёт ссылку
-`~/.local/bin/routes`; отдельный повтор:
+`grigdesk-ctl build all` включает сборку утилит. Исходный `deploy/install.sh`
+создаёт ссылку `~/.local/bin/routes`. Для отдельного повтора используйте
 `bash deploy/lib/routes-cli.sh <корень-кода> <каталог-ссылок>`.
-`--unit-only` и установка готового серверного ELF сборку не выполняют.
-Обычный чужой файл вместо ссылки сохраняется. При окончательном отказе сборки прежняя ссылка
-сохраняется, установщик печатает предупреждение и команду повтора.
+`--unit-only` и установка готового серверного комплекта сборку не выполняют.
 
 Серверный компонент официальной поставки включает `bin/routes` с правами 0555,
 размером и SHA256 в подписанной описи. Агенты получают bin текущего серверного поколения в PATH.
@@ -43,7 +31,7 @@
 
 ## Команды
 
-| Команда после `bin/routes` | Действие |
+| Команда после `routes` | Действие |
 |---|---|
 | `list <профиль>` | Список черновиков |
 | `show <профиль> --draft <id>` | Полный снимок черновика |
@@ -78,14 +66,14 @@ severity: HTTP-отчёт с exit 0 может содержать ошибки, 
 Пример (ID, ревизии и хеши подставляются только из прочитанных ответов):
 
 ```bash
-bin/routes editor <профиль>
-bin/routes new <профиль> --from empty --title "Новый каталог"
-bin/routes show <профиль> --draft <id> > document.json
+bin/utilities/routes editor <профиль>
+bin/utilities/routes new <профиль> --from empty --title "Новый каталог"
+bin/utilities/routes show <профиль> --draft <id> > document.json
 # Изменить document.json, сохранив все пять полей контента.
-bin/routes apply <профиль> --draft <id> --file document.json --expected-revision <N>
-bin/routes validate <профиль> --draft <id> --expected-revision <новая-ревизия>
-bin/routes editor <профиль>
-bin/routes publish <профиль> --draft <id> --expected-revision <новая-ревизия> \
+bin/utilities/routes apply <профиль> --draft <id> --file document.json --expected-revision <N>
+bin/utilities/routes validate <профиль> --draft <id> --expected-revision <новая-ревизия>
+bin/utilities/routes editor <профиль>
+bin/utilities/routes publish <профиль> --draft <id> --expected-revision <новая-ревизия> \
   --expected-source-revision <source-revision> --expected-catalog-hash <hash-или-none> --yes
 ```
 
@@ -98,11 +86,17 @@ bin/routes publish <профиль> --draft <id> --expected-revision <новая
 rollback-копии проверьте list перед новым действием; копия могла сохраниться.
 Откат создаёт и публикует отдельный черновик, не меняя пины текущих попыток.
 
+В [пробной Go-сборке](../overview/go-utilities-build.md) любой HTTP 3xx на запрос записи
+завершает команду кодом 5. Запрос выполняется один раз. У `publish` и второй части
+`rollback` уже выданная подсказка позволяет прочитать квитанцию операции.
+Запросы чтения следуют перенаправлениям. CLI-токен передаётся только исходному
+origin, включая перенаправления внутри него.
+
 ## Конфигурация профиля
 
 ```bash
-bin/routes profile-config get <профиль>
-bin/routes profile-config set <профиль> --file profile.sh \
+bin/utilities/routes profile-config get <профиль>
+bin/utilities/routes profile-config set <профиль> --file profile.sh \
   --set PROFILE_LOOP_MAX_ROUNDS=40 --set PROFILE_TRIAGE_MARKERS="миграции, API"
 ```
 

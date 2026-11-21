@@ -7,9 +7,13 @@ import { fileURLToPath } from 'node:url';
 import { makeDraft } from '../fixtures/routes-editor.mjs';
 import { validateDraft } from '../../server/src/modules/routes/validation.ts';
 
-const ROUTE_TOOL = fileURLToPath(new URL('../../engine/bin/factory-route', import.meta.url));
+import { testFactoryBinary } from '../helpers/factoryBinary.mjs';
+
+const ROUTE_TOOL = testFactoryBinary();
 const ROOT = path.dirname(fileURLToPath(new URL('../../package.json', import.meta.url)));
 
+// Сверяет решение сервера с публичной командой редактора Go-фабрики.
+// Оба потребителя получают один и тот же JSON черновика.
 function engineCheck(draft) {
   const input = {
     profile: draft.profile,
@@ -17,12 +21,14 @@ function engineCheck(draft) {
     bootstrap: draft.bootstrap,
     bootstrapPrompts: draft.bootstrapPrompts,
   };
-  const result = spawnSync(ROUTE_TOOL, ['--profile', draft.profile, 'editor-check'], {
+  const args = ['route', '--profile', draft.profile, 'editor-check'];
+  const result = spawnSync(ROUTE_TOOL, args, {
     cwd: ROOT,
     input: JSON.stringify(input),
     encoding: 'utf8',
   });
   assert.equal(result.error, undefined);
+  assert.ok(result.stdout, `editor-check: rc=${result.status}, stderr=${result.stderr}`);
   const output = JSON.parse(result.stdout);
   assert.equal(result.status === 0, output.ok);
   return output;
@@ -216,7 +222,7 @@ test('RE-C2-03: reset, runKey, registry, достижимость и prompts и�
   }
 });
 
-test('RE-C2-04: исторический productFailure+rewind читается, новый draft не проходит', () => {
+test('RE-C2-04: новый draft с productFailure+rewind не проходит', () => {
   const draft = makeDraft();
   const check = draft.routes.quick.route.nodes[1];
   check.executor = 'agent';
@@ -231,21 +237,7 @@ test('RE-C2-04: исторический productFailure+rewind читается,
 
   const server = serverCheck(draft);
   const engine = engineCheck(draft);
-  const historical = spawnSync('python3', ['-c', [
-    'import json, sys',
-    'from route_model import validate_machine',
-    'value = json.load(sys.stdin)',
-    'validate_machine(value["route"], "sample", "quick", "route", set(value["prompts"]))',
-  ].join('\n')], {
-    cwd: ROOT,
-    env: {
-      ...process.env,
-      PYTHONPATH: path.join(ROOT, 'engine', 'lib'),
-    },
-    input: JSON.stringify(draft.routes.quick),
-    encoding: 'utf8',
-  });
-  assert.equal(historical.status, 0, historical.stderr);
+
   assert.equal(server.ok, false);
   assert.ok(server.issues.some((item) => item.code === 'product_failure_rewind'));
   assert.equal(engine.ok, false);

@@ -17,15 +17,6 @@ export const REPO_ROOT = fileURLToPath(new URL('../', import.meta.url));
 // Разница между ними только в том, кто нажимает кнопку: строковый путь одинаково
 // невидим компилятору во всех трёх случаях.
 export const ENTRYPOINTS: readonly string[] = [
-    // Единая команда: этот TS-вход запускает bin/grigdesk-ctl после проверки Node.
-    'cli/main.ts',
-    // Команда задач Б24: исходный вход и сборка единственного файла SEA.
-    'tracker/src/main.ts',
-    'tracker/scripts/build.mts',
-    'tracker/src/pipelineMain.ts',
-    'tracker/scripts/buildPipeline.mts',
-    'routes/src/main.ts',
-    'routes/scripts/build.mts',
     // Launcher и worker DeepSeek имеют отдельные SEA/Node точки входа.
     'deepseek/src/launcher/main.ts',
     'deepseek/src/launcher/workerBootstrap.ts',
@@ -37,9 +28,6 @@ export const ENTRYPOINTS: readonly string[] = [
     'server/src/lib/executors/_direct-ssh-policy-hook.js',
     'server/src/workers/grigdesk-update-worker.js',
     'server/src/lib/media/ingestWorker.ts',
-    // Node-помощник движка: его зовут shell-скрипты runner-launcher.sh и
-    // runtime-analytics.sh, и импортом это не видно вовсе.
-    'engine/lib/runtime-usage.mjs',
     // Конфигурация сборки интерфейса — тоже программа: её исполняет Vite.
     'web/vite.config.js',
     // Фикстуры, которые тест запускает отдельным процессом.

@@ -8,7 +8,7 @@ import { createInterface } from 'node:readline';
 import test from 'node:test';
 import { promisify } from 'node:util';
 
-import { buildMaintenance } from '../../tools/build-maintenance.mts';
+import { buildReleaseUtility } from '../../tools/goReleaseUtility.mts';
 import { runStages, type ReleaseRecipe } from '../../tools/releasePipeline.mts';
 import {
   configureDarwinBuildProcessHelper, readDarwinProcessIdentity, quiesceDarwinRunnerFile,
@@ -24,7 +24,7 @@ import { decodeCompleteFactoryOwnership } from '../../shared/runtime/factoryOwne
 
 const execute = promisify(execFile);
 
-test('MAC-SEA-CLI: отдельные сборщики выпускают автономные ARM64-команды',
+test('MAC-CLI: сборка выпускает автономные ARM64-команды',
   { timeout: 1200000 }, async (t) => {
     assert.equal(`${process.platform}-${process.arch}`, 'darwin-arm64');
 
@@ -37,29 +37,31 @@ test('MAC-SEA-CLI: отдельные сборщики выпускают авт
     t.after(() => fs.rm(work, { recursive: true, force: true }));
     await fs.mkdir(out);
 
-    const builders = [
-      ['tracker', 'tracker', 'build', '--cache-dir', ['--version']],
-      ['pipeline', 'tracker', 'build:pipeline', '--cache-dir', ['--version']],
-      ['routes', 'routes', 'build', '--cache-dir', ['--version']],
-      ['voice', 'voice', 'build', '--cache-dir', ['version']],
-      ['grigdesk-relay', 'relay', 'build', null, ['--version']],
-      ['deepseek', 'deepseek', 'build', '--node-cache-dir', ['--runtime-info', '--json']],
-    ] as const;
+    const version = (await fs.readFile(path.join(root, 'VERSION'), 'utf8')).trim();
+    const commands = ['tracker', 'pipeline', 'routes', 'voice', 'grigdesk-relay', 'grigdesk-ctl',
+      'grigdesk-maintenance', 'deepseek'] as const;
 
-    for (const [name, directory, script, cacheFlag, probe] of builders) {
+    for (const name of commands) {
       await t.test(name, async () => {
         if (name === 'deepseek') {
           await execute(process.execPath, ['tools/bundle.mts', '--prepare-deepseek', cache], {
             cwd: root, timeout: 360000,
           });
+          await execute('npm', ['--prefix', path.join(root, 'deepseek'), 'run', 'build', '--',
+            '--out-dir', out, '--node-cache-dir', cache], {
+            cwd: root,
+            timeout: 360000,
+            maxBuffer: 8 * 1024 * 1024,
+          });
+        } else {
+          await buildReleaseUtility(name, {
+            root,
+            output: path.join(out, name),
+            cache,
+            version,
+            env: process.env,
+          });
         }
-
-        await execute('npm', ['--prefix', path.join(root, directory), 'run', script, '--',
-          '--out-dir', out, ...(cacheFlag ? [cacheFlag, cache] : [])], {
-          cwd: root,
-          timeout: 360000,
-          maxBuffer: 8 * 1024 * 1024,
-        });
 
         const binary = path.join(out, name);
         const { stdout: architecture } = await execute('/usr/bin/file', ['-b', binary], { env });
@@ -67,7 +69,7 @@ test('MAC-SEA-CLI: отдельные сборщики выпускают авт
         assert.match(architecture, /Mach-O.*arm64/u);
         await execute('/usr/bin/codesign', ['--verify', '--strict', binary], { env });
 
-        const { stdout } = await execute(binary, [...probe], {
+        const { stdout } = await execute(binary, ['--runtime-info', '--json'], {
           cwd: work,
           env,
           timeout: 30000,
@@ -88,7 +90,15 @@ test('MAC-SEA-CLI: отдельные сборщики выпускают авт
 
           assert.equal(JSON.parse(proof.stdout).glmPlugin, true);
         } else {
-          assert.match(stdout, /darwin arm64/u);
+          assert.deepEqual(JSON.parse(stdout), {
+            schema: 1,
+            kind: name,
+            version,
+            runtime: 'go',
+            go: 'go1.27.4',
+            os: 'darwin',
+            arch: 'arm64',
+          });
         }
       });
     }
@@ -124,40 +134,6 @@ test('MAC-SERVER-STAGE: код, журнал и таймаут без GNU timeou
   }), { code: 124, cleanupConfirmed: true });
   assert.equal(await fs.readFile(marker, 'utf8'), '1');
   assert.equal(await fs.readFile(`${prefix}timeout.exit`, 'utf8'), '124\n');
-});
-
-test('MAC-SEA-HELPER: maintenance запускается с системным PATH', async (t) => {
-  assert.equal(process.platform, 'darwin');
-  assert.equal(process.arch, 'arm64');
-
-  const work = await fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-mac-sea-'));
-
-  t.after(() => fs.rm(work, { recursive: true, force: true }));
-
-  const binary = await buildMaintenance({
-    root: path.resolve(import.meta.dirname, '../..'),
-    outDir: path.join(work, 'out'),
-    cacheDir: path.join(work, 'cache'),
-  });
-  const options = {
-    cwd: work,
-    env: { HOME: work, PATH: '/usr/bin:/bin' },
-    timeout: 30_000,
-  };
-  const { stdout: info } = await execute('/usr/bin/file', ['-b', binary], options);
-
-  assert.match(info, /Mach-O.*arm64/u);
-  await execute('/usr/bin/codesign', ['--verify', '--strict', binary], options);
-
-  const { stdout } = await execute(binary, ['--runtime-info', '--json'], options);
-
-  assert.deepEqual(JSON.parse(stdout), {
-    kind: 'grigdesk-maintenance',
-    platform: 'darwin',
-    arch: 'arm64',
-    node: '24.21.0',
-    sea: true,
-  });
 });
 
 test('MAC-RECIPE-TIMEOUT: квитанция сохраняет 124 и блокирует независимую стадию',

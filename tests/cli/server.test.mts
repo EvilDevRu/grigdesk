@@ -5,11 +5,11 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import test from 'node:test';
 
-import { insideUnit, insideWindowScope, readSettings } from '../../cli/commands.ts';
-import { deriveServerState, gateReason, parseShow } from '../../cli/server.ts';
-import type { UnitInfo } from '../../cli/server.ts';
+import { insideUnit, insideWindowScope, readSettings } from '../../tests/fixtures/legacy-ctl/cli/commands.ts';
+import { deriveServerState, gateReason, parseShow } from '../../tests/fixtures/legacy-ctl/cli/server.ts';
+import type { UnitInfo } from '../../tests/fixtures/legacy-ctl/cli/server.ts';
 import type { GrigDeskProbe } from '../../shared/runtime/grigDeskReadiness.ts';
-import { parseArgs } from '../../cli/args.ts';
+import { parseArgs } from '../../tests/fixtures/legacy-ctl/cli/args.ts';
 import { completed, createSandbox } from './helpers/sandbox.mts';
 
 const unitName = 'grigdesk-server.service';
@@ -428,7 +428,7 @@ const { loadInstalledModule } = await import('../helpers/installedBuildFixture.m
   const created = await box.create();
   const hook = await pinnedKeyHook(box.temporary, box.release.publicKeyPem);
   const worker = path.join(box.temporary, 'prepare.mjs');
-  const nodeModule = new URL('../../shared/node/installedUpdateService.ts', import.meta.url).href;
+  const nodeModule = new URL('../../tests/fixtures/release-v2/installedUpdateService.ts', import.meta.url).href;
   const stubs = path.join(box.temporary, 'stubs');
 
   await fs.mkdir(stubs);
@@ -456,7 +456,7 @@ const { loadInstalledModule } = await import('../helpers/installedBuildFixture.m
   ].join('\n'), { mode: 0o700 });
   isolatedEnvironment(t, { PATH: `${stubs}:/usr/bin:/bin` });
 
-  const { runUpdateCommand } = await loadInstalledModule(t, 'cli/updates.ts', box.release.publicKeyPem);
+  const { runUpdateCommand } = await loadInstalledModule(t, 'tests/fixtures/legacy-ctl/cli/updates.ts', box.release.publicKeyPem);
   const output: string[] = [];
   const port = {
     write: (text: string) => output.push(text),

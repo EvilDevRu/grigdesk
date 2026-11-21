@@ -85,7 +85,7 @@ export async function runQwenFactory(argv = process.argv.slice(2), env = process
     return;
   }
 
-  const { required } = parseRunnerArguments(argv, LABEL, [
+  const { required, values } = parseRunnerArguments(argv, LABEL, [
     '--bin', '--cwd', '--run-dir', '--runtime-home', '--prompt-file', '--model', '--mode',
   ]);
   const args = await validateRunnerPaths({
@@ -105,9 +105,9 @@ export async function runQwenFactory(argv = process.argv.slice(2), env = process
 
   const config = { ...runnerConfig(args.bin, env), qwenRuntimeHome: args.runtimeHome };
   const snapshot = await resolveQwenSnapshot(config);
-  const model = required('--model');
+  const model = values.get('--model') || snapshot.models[0]?.id;
 
-  if (!snapshot.models.some((entry) => entry.id === model)) {
+  if (!model || !snapshot.models.some((entry) => entry.id === model)) {
     throw new Error(`${LABEL}: модель отсутствует в каталоге Qwen`);
   }
 
@@ -120,7 +120,7 @@ export async function runQwenFactory(argv = process.argv.slice(2), env = process
 
   await fs.mkdir(args.runtimeHome, { recursive: true, mode: 0o700 });
 
-  const status = await createQwenFactoryStatus(args.runtimeHome, env);
+  const status = await createQwenFactoryStatus(env);
 
   try {
     const adapter = externalCliAdapter(qwen, env);

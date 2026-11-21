@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
-import { copyFile, readFile, writeFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import test from 'node:test';
 
-import { cliJson, settingsFixture, sourceRoot } from '../helpers/stageRunnerSettingsFixture.mjs';
+import { cliJson, settingsFixture } from '../helpers/stageRunnerSettingsFixture.mjs';
 import { codexModelFixture } from '../helpers/factoryStageModelMetadata.mjs';
 import { runtimeInfoFixture } from '../helpers/deepseekMetadataFixture.mts';
 import { writeDeepSeekBinaryStub } from '../helpers/deepseekBinaryStub.mts';
@@ -14,15 +14,8 @@ import { glmCompatibilityIdentity } from '../../server/src/lib/glm/contract.ts';
 // К1/К6: native усилия пересекаются с каталогом раннера, registry чата не участвует.
 test('metadata-only-per-model-options', async (t) => {
   const fx = await codexModelFixture(t);
-  const ready = fx.shell([
-    'runner_registry_load "$FACTORY_RUNNERS_DIR"',
-    'runner_call codex probe && runner_call codex catalog',
-  ].join('\n'));
-
-  assert.equal(ready.status, 0, ready.stderr);
-
   const options = cliJson(fx.cli('options', ['--provider', 'codex']));
-  const expected = fx.native.slice(0, 2).map((model) => ({
+  const expected = fx.native.map((model) => ({
     id: model.id, efforts: model.supportedReasoningEfforts.map((item) => item.reasoningEffort),
   }));
 
@@ -67,17 +60,15 @@ test('metadata-revision-changes-with-model-capabilities', async (t) => {
 test('kimi-options-use-only-runner-models-and-accepted-efforts', async (t) => {
   const fx = await settingsFixture(t);
 
-  await copyFile(path.join(sourceRoot, 'engine/lib/runners/kimi.sh'),
-    path.join(fx.env.FACTORY_RUNNERS_DIR, 'kimi.sh'));
   await writeFile(path.join(fx.root, 'kimi'), '#!/usr/bin/env bash\necho "kimi 1.0.0"\n', { mode: 0o700 });
-  fx.env.PATH = `${fx.root}:${fx.env.PATH}`;
-  fx.env.FACTORY_FORBID_LIVE = '0';
+  await writeFile(fx.config, [
+    'RUNNERS_SCHEMA=1', 'CONFIG_REVISION=1', 'RUNNERS_COVERAGE=required',
+    'PROJECT_RUNNER_PRIMARY=kimi', 'PROJECT_RUNNER_FAILOVER=', '',
+  ].join('\n'));
+  fx.env.GRIGDESK_KIMI_BIN = path.join(fx.root, 'kimi');
 
-  const catalog = fx.shell('source "$FACTORY_HOME/lib/runners/kimi.sh"\nrunner_kimi_catalog');
-
-  assert.equal(catalog.status, 0);
-
-  const expected = catalog.stdout.trim().split('\n').map((line) => line.split('\t')[0]);
+  const expected = ['kimi-code/k3', 'kimi-code/k3-256k', 'kimi-code/kimi-for-coding',
+    'kimi-code/kimi-for-coding-highspeed'];
   const options = cliJson(fx.cli('options', ['--provider', 'kimi']));
 
   assert.deepEqual(options.models.map((model) => model.id), expected);
@@ -108,10 +99,9 @@ test('glm-options-use-factory-catalog-and-runtime-admission', async (t) => {
     compatibility: glmCompatibilityIdentity(generation.runtime, 'api'),
   }];
   await writeFile(metadataFile, JSON.stringify(metadata));
-  await copyFile(path.join(sourceRoot, 'engine/lib/runners/glm.sh'),
-    path.join(fx.env.FACTORY_RUNNERS_DIR, 'glm.sh'));
   await writeFile(fx.config, [
-    'RUNNERS_SCHEMA=1', 'CONFIG_REVISION=1', 'PROJECT_RUNNER_PRIMARY=glm', 'PROJECT_RUNNER_FAILOVER=',
+    'RUNNERS_SCHEMA=1', 'CONFIG_REVISION=1', 'RUNNERS_COVERAGE=required',
+    'PROJECT_RUNNER_PRIMARY=glm', 'PROJECT_RUNNER_FAILOVER=',
     'MODEL_DEFAULT_GLM_FAMILY=default', 'MODEL_DEFAULT_GLM_EFFORT=high', '',
   ].join('\n'));
   Object.assign(fx.env, {
@@ -123,10 +113,6 @@ test('glm-options-use-factory-catalog-and-runtime-admission', async (t) => {
     GRIGDESK_GLM_API_MODE: 'api',
   });
 
-  const ready = fx.shell('source "$FACTORY_HOME/lib/runners/glm.sh"\nrunner_glm_probe');
-
-  assert.equal(ready.status, 0, ready.stderr);
-
   const options = cliJson(fx.cli('options', ['--provider', 'glm']));
 
   assert.deepEqual(options.models.map(({ id, efforts }) => ({ id, efforts })),
@@ -136,6 +122,6 @@ test('glm-options-use-factory-catalog-and-runtime-admission', async (t) => {
 
   const rejected = fx.cli('options', ['--provider', 'glm']);
 
-  assert.notEqual(rejected.status, 0);
-  assert.match(`${rejected.stdout} ${rejected.stderr}`, /mode|режим|admi|допуск/i);
+  assert.equal(rejected.status, 69);
+  assert.match(rejected.stderr, /metadata_unavailable/);
 });

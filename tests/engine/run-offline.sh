@@ -9,16 +9,34 @@ HOST_NODE_BIN=$(command -v node 2>/dev/null || true)
 
 unset GRIGDESK_ENV_FILE GRIGDESK_UI_RELEASES_DIR GRIGDESK_LOG
 
+build_root=''
+if [[ -z "${FACTORY_TEST_CANDIDATE:-}" ]]; then
+  build_root=$(mktemp -d "${TMPDIR:-/tmp}/factory-cli.XXXXXXXX") || exit 1
+  if ! bash "$PROJECT_ROOT/tools/build-factory.sh" "$build_root"; then
+    rm -rf -- "$build_root"
+    exit 1
+  fi
+  export FACTORY_TEST_CANDIDATE="$build_root/factory"
+fi
+
 # Режим воркера: скрипт запускает сам себя по одному файлу на процесс. Изоляция
 # та же, что была у последовательного прогона (свой TEST_ROOT + `env -i`), поэтому
 # файлы не видят друг друга и порядок между ними ничего не значит.
 if [[ "${1:-}" == "--one" ]]; then
   test_file=${2:?test file}
+  candidate=${FACTORY_TEST_CANDIDATE:-}
+  if [[ "$candidate" != /* || ! -f "$candidate" || ! -x "$candidate" ]]; then
+    printf 'Некорректный путь к кандидату: %s\n' "$candidate" >&2
+    exit 2
+  fi
   test_root=$(mktemp -d /tmp/factory-offline.XXXXXX) || exit 1
   out_buf=$(mktemp /tmp/factory-offline-out.XXXXXX) || exit 1
   cleanup_worker() {
     case "$test_root" in /tmp/factory-offline.*) rm -rf -- "$test_root" ;; esac
     rm -f -- "$out_buf"
+    if [[ -n "$build_root" ]]; then
+      rm -rf -- "$build_root"
+    fi
   }
   trap cleanup_worker EXIT INT TERM
   mkdir -p "$test_root/config" "$test_root/state" "$test_root/xdg-config" \
@@ -29,6 +47,7 @@ if [[ "${1:-}" == "--one" ]]; then
     LC_ALL=C \
     GRIGDESK_HOME="$test_root/grigdesk-home" \
     FACTORY_HOME="$FACTORY_HOME" \
+    FACTORY_TEST_CANDIDATE="$candidate" \
     FACTORY_PROFILES_DIR="$test_root/profiles" \
     FACTORY_TESTS_HOME="$FACTORY_TESTS_HOME" \
     FACTORY_TESTING=1 \
@@ -92,7 +111,12 @@ JOBS=${TEST_JOBS:-$(nproc 2>/dev/null || echo 4)}
 
 OFFLINE_OUT_LOCK=$(mktemp /tmp/factory-offline-lock.XXXXXX) || exit 1
 export OFFLINE_OUT_LOCK
-cleanup_lock() { rm -f -- "$OFFLINE_OUT_LOCK"; }
+cleanup_lock() {
+  rm -f -- "$OFFLINE_OUT_LOCK"
+  if [[ -n "$build_root" ]]; then
+    rm -rf -- "$build_root"
+  fi
+}
 trap cleanup_lock EXIT INT TERM
 
 printf '%s\0' "${TEST_FILES[@]}" |

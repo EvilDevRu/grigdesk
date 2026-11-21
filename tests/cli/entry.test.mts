@@ -1,12 +1,16 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { existsSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
 import type { TestContext } from 'node:test';
 
-import { HELP_TEXT, parseArgs } from '../../cli/args.ts';
+import { HELP_TEXT, parseArgs } from '../../tests/fixtures/legacy-ctl/cli/args.ts';
+import { fixtureGo } from '../helpers/goBuildFixture.mts';
 import { completed, createSandbox } from './helpers/sandbox.mts';
+
+const go = process.env.GRIGDESK_CTL_TEST_GO === '1';
+const trackerEntry = go ? 'bin/utilities/tracker' : 'bin/tracker';
 
 test('CE-1 пустой argv и force', () => {
   assert.equal(parseArgs([]).kind, 'help');
@@ -102,7 +106,7 @@ test('CE-5 справка без эффектов', async (t) => {
 
   assert.equal(result.code, 0, result.stderr);
   assert.match(result.stdout, /grigdesk-ctl server start/);
-  assert.match(result.stdout, /grigdesk-ctl relay logs/);
+  assert.match(result.stdout, go ? /grigdesk-ctl relay status/ : /grigdesk-ctl relay logs/);
   assert.deepEqual(box.calls(), []);
 });
 
@@ -114,7 +118,13 @@ test('CE-6 версия из своего корня', async (t) => {
   const result = await box.run(['--version']);
 
   assert.equal(result.code, 0, result.stderr);
-  assert.equal(result.stdout, 'GrigDesk 9.8.7\n');
+
+  if (go) {
+    assert.match(result.stdout, /^grigdesk-ctl 9\.8\.7 \(Go go[^,]+, \w+ \w+\)\n$/u);
+  } else {
+    assert.equal(result.stdout, 'GrigDesk 9.8.7\n');
+  }
+
   assert.deepEqual(box.calls(), []);
 });
 
@@ -133,16 +143,25 @@ test('CE-8 ссылка из каталога с пробелами, cwd /', asy
   const link = path.join(directory, 'grigdesk');
 
   mkdirSync(directory);
-  symlinkSync(path.join(box.root, 'bin/grigdesk-ctl'), link);
+
+  const [file, script] = box.argv();
+
+  symlinkSync(go ? file! : script!, link);
   writeFileSync(path.join(box.root, 'VERSION'), '9.8.7\n');
 
-  const result = await completed(spawn('bash', [link, '--version'], {
+  const command = go ? [link, '--version'] : ['bash', link, '--version'];
+  const result = await completed(spawn(command[0]!, command.slice(1), {
     cwd: '/',
     env: box.environment,
   }));
 
   assert.equal(result.code, 0, result.stderr);
-  assert.equal(result.stdout, 'GrigDesk 9.8.7\n');
+
+  if (go) {
+    assert.match(result.stdout, /^grigdesk-ctl 9\.8\.7 \(Go go[^,]+, \w+ \w+\)\n$/u);
+  } else {
+    assert.equal(result.stdout, 'GrigDesk 9.8.7\n');
+  }
 });
 
 test('CE-9 старые скрипты получают argv и возвращают код', async (t) => {
@@ -156,15 +175,22 @@ test('CE-9 старые скрипты получают argv и возвраща
   }
 });
 
-test('CE-10 старый Node отвергается до TypeScript', async (t) => {
+test('CE-10 совместимость режима справки со старым Node', async (t) => {
   const box = await createSandbox(t);
 
   writeFileSync(path.join(box.home, 'stubs/node'), '#!/bin/bash\necho 20.0.0\n', { mode: 0o755 });
 
   const result = await box.run(['--help']);
 
-  assert.equal(result.code, 1);
-  assert.match(result.stderr, /GrigDesk требует Node/);
+  if (go) {
+    assert.equal(result.code, 0);
+    assert.equal(result.stdout, HELP_TEXT);
+    assert.equal(result.stderr, '');
+  } else {
+    assert.equal(result.code, 1);
+    assert.match(result.stderr, /GrigDesk требует Node/);
+  }
+
   assert.deepEqual(box.calls(), []);
 });
 
@@ -218,12 +244,19 @@ async function b24Sandbox(t: TestContext) {
   };
 }
 
-test('CE-TRACKER-1: без бинарника grigdesk запускает source и передаёт argv', async (t) => {
+test('CE-TRACKER-1: отсутствие файла tracker проверяет разрешённую ветку исполнения', async (t) => {
   const { box, marker } = await b24Sandbox(t);
 
-  rmSync(path.join(box.root, 'bin/tracker'));
+  rmSync(path.join(box.root, trackerEntry));
 
   const result = await box.run(['tracker', 'comment', '42', 'два слова', '']);
+
+  if (go) {
+    assert.equal(result.code, 1);
+    assert.equal(existsSync(marker), false);
+
+    return;
+  }
 
   assert.equal(result.code, 7, result.stderr);
   assert.equal(result.stdout, `${JSON.stringify(['comment', '42', 'два слова', ''])}\n`);
@@ -235,7 +268,7 @@ test('CE-TRACKER-2: готовый tracker не требует Node', async (t) 
   const { box, marker } = await b24Sandbox(t);
 
   // Заглушка готового файла печатает каждый аргумент отдельной строкой: так видно точный argv.
-  writeFileSync(path.join(box.root, 'bin/tracker'), '#!/bin/bash\nprintf \'<%s>\\n\' "$@"\nexit 5\n', {
+  writeFileSync(path.join(box.root, trackerEntry), '#!/bin/bash\nprintf \'<%s>\\n\' "$@"\nexit 5\n', {
     mode: 0o755,
   });
   writeFileSync(path.join(box.home, 'stubs/node'), [
@@ -256,7 +289,7 @@ test('CE-TRACKER-2: готовый tracker не требует Node', async (t) 
 test('CE-TRACKER-3: ошибка готового tracker не запускает fallback', async (t) => {
   const { box, marker } = await b24Sandbox(t);
 
-  writeFileSync(path.join(box.root, 'bin/tracker'), '#!/bin/bash\necho "Запрос к GrigDesk" >&2\nexit 22\n',
+  writeFileSync(path.join(box.root, trackerEntry), '#!/bin/bash\necho "Запрос к GrigDesk" >&2\nexit 22\n',
     { mode: 0o755 });
 
   const result = await box.run(['tracker', 'start', '42']);
@@ -281,12 +314,17 @@ test('CLI-ENTRY: pipeline делегирует source и не повторяет
 
     const source = await box.run(['pipeline', 'doc', '7', 'plan']);
 
-    assert.equal(source.code, 0, source.stderr);
-    assert.deepEqual(JSON.parse(source.stdout), ['doc', '7', 'plan']);
+    if (go) {
+        assert.equal(source.code, 1, source.stderr);
+        assert.equal(source.stdout, '');
+    } else {
+        assert.equal(source.code, 0, source.stderr);
+        assert.deepEqual(JSON.parse(source.stdout), ['doc', '7', 'plan']);
+    }
 
     const executable = '#!/bin/bash\nprintf "неизвестный результат" >&2\nexit 22\n';
 
-    writeFileSync(path.join(box.root, 'bin/pipeline'), executable, {
+    writeFileSync(path.join(box.root, go ? 'bin/utilities/pipeline' : 'bin/pipeline'), executable, {
         mode: 0o755
     });
 
@@ -297,12 +335,12 @@ test('CLI-ENTRY: pipeline делегирует source и не повторяет
     assert.equal(binary.stderr, 'неизвестный результат');
 });
 
-test('DIST-HELP: новый вход доступен без сборки и установки', async (t) => {
+test('DIST-HELP: готовый вход показывает подсказку без рабочего окружения', async (t) => {
   const box = await createSandbox(t);
   const repository = path.resolve(import.meta.dirname, '../..');
-  const result = await completed(spawn('/bin/bash', ['bin/grigdesk-ctl', 'dist', '--help'], {
-    cwd: repository,
-    env: box.environment,
+  const result = await completed(spawn(fixtureGo('grigdesk-ctl'), ['dist', '--help'], {
+    cwd: box.home,
+    env: { ...box.environment, GRIGDESK_CTL_CHECKOUT_ROOT: repository },
     stdio: ['ignore', 'pipe', 'pipe'],
   }));
 
@@ -339,4 +377,56 @@ test('DIST-SOURCE: установленный ELF не перехватывае�
   assert.equal(result.stdout, 'dist-source-ok\n');
   assert.equal(existsSync(marker), false);
   assert.deepEqual(box.requests(), []);
+});
+
+test('CE-PORTABLE-GO: portable запускает только соседние agent CLI и не читает checkout', async (t) => {
+  const box = await createSandbox(t);
+  const candidate = fixtureGo('grigdesk-ctl');
+  const command = path.join(box.root, 'bin/grigdesk-ctl');
+
+  // Именно физический файл в portable/bin выбирает раскладку.
+  const { copyFile, chmod } = await import('node:fs/promises');
+
+  rmSync(command, { force: true });
+  await copyFile(candidate, command);
+  await chmod(command, 0o755);
+  await chmod(path.dirname(command), 0o755);
+  writeFileSync(path.join(box.root, 'bin/bundle.json'), '{"format":1,"kind":"portable"}', { mode: 0o644 });
+
+  for (const name of ['tracker', 'pipeline', 'voice']) {
+    const program = path.join(box.root, 'bin', name);
+
+    writeFileSync(program, '#!/bin/sh\nprintf "<%s>\\n" "$@"\nexit 17\n', { mode: 0o755 });
+
+    const run = await completed(spawn(command, [name, 'раздельный аргумент', ''], {
+      cwd: '/',
+      env: box.environment,
+    }));
+
+    assert.equal(run.code, 17, run.stderr);
+    assert.equal(run.stdout, '<раздельный аргумент>\n<>\n');
+  }
+
+  rmSync(path.join(box.root, 'bin/tracker'));
+
+  const missing = await completed(spawn(command, ['tracker', 'list'], { cwd: '/', env: box.environment }));
+
+  assert.equal(missing.code, 1, missing.stderr);
+  assert.equal(missing.stdout, '');
+});
+
+test('CE-CHECKOUT-GO: CLI через ссылку находит checkout и tracker в bin/utilities', async (t) => {
+  const box = await createSandbox(t, { go: true });
+  const executable = path.join(box.root, 'bin/utilities/ctl');
+  const launcher = path.join(box.home, 'grigdesk-ctl');
+  const env = { ...box.environment };
+
+  delete env.GRIGDESK_CTL_CHECKOUT_ROOT;
+  copyFileSync(fixtureGo('grigdesk-ctl'), executable);
+  symlinkSync(executable, launcher);
+
+  const result = await completed(spawn(launcher, ['tracker', 'users'], { cwd: '/', env }));
+
+  assert.equal(result.code, 7, result.stderr);
+  assert.deepEqual(box.calls(), ['tracker users']);
 });

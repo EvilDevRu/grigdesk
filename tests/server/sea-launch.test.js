@@ -6,6 +6,7 @@ import path from 'node:path';
 import test from 'node:test';
 import { promisify } from 'node:util';
 
+import { fixtureGo } from '../helpers/goBuildFixture.mts';
 import { auditStage } from '../../server/scripts/sea/stage.mts';
 
 const runFile = promisify(execFile);
@@ -32,16 +33,16 @@ async function fixture(t, name = 'R') {
 
   await mkdir(home);
   await mkdir(stubs);
-  await cp(path.join(SOURCE, 'bin/grigdesk-ctl'), path.join(root, 'bin/grigdesk-ctl'));
+  await cp(fixtureGo('grigdesk-ctl'), path.join(root, 'bin/grigdesk-ctl'));
   await writeFile(path.join(root, 'server/scripts/dataHomeCheck.mts'), 'process.exitCode = 0;\n');
-  await writeFile(path.join(root, 'release.json'), '{"schema":1}\n');
-  await writeFile(path.join(root, 'bin/b24'), '#!/bin/bash\nexit 0\n', { mode: 0o755 });
+  await writeFile(path.join(root, 'release.json'), '{"schema":1}\n', { mode: 0o644 });
+  await writeFile(path.join(root, 'bin/tracker'), '#!/bin/bash\nexit 0\n', { mode: 0o755 });
   // Fast-тест проверяет shell argv; настоящий helper/execve проверяется отдельно.
   await writeFile(path.join(root, 'server/runtime/helpers/launch-sea-server.mjs'), [
     'import { fileURLToPath } from "node:url";',
     'const binary = fileURLToPath(new URL("../../grigdesk-server", import.meta.url));',
     'process.execve(binary, [binary, ...process.argv.slice(2)], process.env);',
-  ].join('\n'));
+  ].join('\n'), { mode: 0o644 });
   await writeFile(path.join(root, 'runtime/node/bin/node'), [
     '#!/bin/bash',
     '[[ -z "${NODE_OPTIONS+x}" ]] || exit 42',
@@ -83,11 +84,20 @@ ${['node', 'npm', 'python3'].includes(command) ? 'exit 97' : 'exit 0'}
     home,
     env,
     calls: () => readFile(calls, 'utf8').catch(() => ''),
-    run: (script, args = [], extra = {}) => runFile('bash', [path.join(root, script), ...args], {
-      env: { ...env, ...extra },
-      cwd: '/',
-      timeout: 30000,
-    }),
+    /**
+     * CLI запускается напрямую, а скрипты deploy исполняются своим Bash.
+     * В обоих случаях cwd и окружение принадлежат фикстуре.
+     */
+    run(script, args = [], extra = {}) {
+      const file = path.join(root, script);
+      const executable = script === 'bin/grigdesk-ctl';
+
+      return runFile(executable ? file : '/bin/bash', executable ? args : [file, ...args], {
+        env: { ...env, ...extra },
+        cwd: '/',
+        timeout: 30000,
+      });
+    },
   };
 }
 

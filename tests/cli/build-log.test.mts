@@ -9,7 +9,7 @@ import { terminalBuildFixture, launchBuild } from './helpers/buildFixture.mts';
 
 for (const override of [false, true]) {
   test(`BL-ROTATE: 12 → 10 + latest, D override=${override}, чужое сохранено`, async (t) => {
-    const open = await requiredApi('cli/buildLog.ts', 'openBuildLog');
+    const open = await requiredApi('tests/fixtures/legacy-ctl/cli/buildLog.ts', 'openBuildLog');
     const home = await mkdtemp(path.join(os.tmpdir(), 'ctl-build-log-'));
     const data = path.join(home, override ? 'override-data' : '.grigdesk');
     const directory = path.join(data, 'artifacts/ctl-build');

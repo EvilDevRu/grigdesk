@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import type { RouteDraft, RouteDraftContent, RoutePublication,
   RouteRebaseResolution } from '../../../../shared/pipeline/routesEditorContracts.ts';
 import { listProjects } from '../../lib/profiles.ts';
+import type { FactoryCommands } from '../../lib/factoryRuntime.ts';
 import type { ProjectsPrefsPort } from '../../lib/profiles.ts';
 
 import { DraftStore, RoutesEditorStoreError } from './draftStore.ts';
@@ -19,6 +20,7 @@ export interface RoutesEditorServiceOptions {
   draftStore: DraftStore;
   profilesDir: string;
   prefs: ProjectsPrefsPort;
+  runtime?: FactoryCommands;
 }
 
 export class RoutesEditorService {
@@ -32,12 +34,15 @@ export class RoutesEditorService {
 
   readonly publication: RoutesPublicationCoordinator;
 
-  constructor({ routesStore, draftStore, profilesDir, prefs }: RoutesEditorServiceOptions) {
+  readonly runtime?: FactoryCommands;
+
+  constructor({ routesStore, draftStore, profilesDir, prefs, runtime }: RoutesEditorServiceOptions) {
     this.routesStore = routesStore;
     this.draftStore = draftStore;
     this.profilesDir = profilesDir;
     this.prefs = prefs;
-    this.publication = new RoutesPublicationCoordinator(routesStore, draftStore, profilesDir);
+    this.runtime = runtime;
+    this.publication = new RoutesPublicationCoordinator(routesStore, draftStore, profilesDir, runtime);
   }
 
   /**
@@ -64,7 +69,10 @@ export class RoutesEditorService {
    */
   async info(profile: string) {
     await this.ensureProject(profile);
-    const snapshot = await readEditorCapabilities(profile, { profilesDir: this.profilesDir });
+
+    const snapshot = await readEditorCapabilities(profile, {
+      profilesDir: this.profilesDir, runtime: this.runtime,
+    });
     const current = await this.routesStore.readCurrent(profile);
     const source = await this.publication.source(profile);
     return {

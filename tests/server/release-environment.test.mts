@@ -22,6 +22,7 @@ function probesWith(overrides: {
   userManager?: boolean;
 }): EnvironmentProbes {
   const outputs = new Map<string, string>([
+    ['go', 'go1.27.4'],
     ['ffmpeg', `ffmpeg version ${overrides.ffmpeg ?? '7.0.1'}`],
     ['ffprobe', 'ffprobe version 7.0.1'],
     ['rg', 'ripgrep 14.1.0'],
@@ -198,4 +199,26 @@ test('ENVIRONMENT-DOCTOR-CLI: doctor не меняет исходное дере
 
   assert.equal(result.code, 0, result.stderr);
   assert.equal(typeof JSON.parse(result.stdout).format, 'number');
+});
+
+test('Linux переносит каталог закреплённого Go в изолированную сборку', async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'release-go-'));
+  const bin = path.join(root, 'bin');
+  const go = path.join(bin, 'go');
+
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  await fs.mkdir(bin);
+
+  const { resolveReleaseGoDirectory } = await import('../../tools/releaseEnvironment.mts');
+  const version = (value: string) => '#!/bin/sh\nprintf "%s\\n" '
+    + "'" + JSON.stringify({ GOROOT: root, GOVERSION: value }) + "'\n";
+
+  await fs.writeFile(go, version('go1.27.4'), { mode: 0o700 });
+
+  assert.equal(typeof resolveReleaseGoDirectory, 'function');
+  assert.equal(await resolveReleaseGoDirectory({ PATH: bin }), bin);
+
+  await fs.writeFile(go, version('go1.27.3'));
+
+  await assert.rejects(resolveReleaseGoDirectory({ PATH: bin }), /Go 1\.27\.4/u);
 });

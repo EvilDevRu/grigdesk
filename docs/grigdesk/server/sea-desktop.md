@@ -22,7 +22,7 @@ serverCommand/serverArgs; IPC, журнал, VPN-ворота и код пере
 После установки обновлённого окна через прежний `grigdesk-ctl desktop install`:
 
 ```bash
-GRIGDESK_HOME=/data/grigdesk bin/grigdesk-ctl desktop use-server /path/to/release
+GRIGDESK_HOME=/data/grigdesk bin/utilities/ctl desktop use-server /path/to/release
 ```
 
 Команда проверяет marker `runtime-version=3` установленного окна, физический R,

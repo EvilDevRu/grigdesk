@@ -115,7 +115,7 @@ const { promisify } = await import('node:util');
   const box = await installedFixture(t, { mode: 'server' });
   const hook = await pinnedKeyHook(box.temporary, box.release.publicKeyPem);
   const entry = path.join(box.temporary, 'headless-status.mjs');
-  const cliUrl = new URL('../../cli/installedCli.ts', import.meta.url).href;
+  const cliUrl = new URL('../../tests/fixtures/legacy-ctl/cli/installedCli.ts', import.meta.url).href;
 
   await writeFile(entry, [
     'globalThis.fetch = async () => { throw new Error("Неожиданная сеть status"); };',

@@ -8,12 +8,27 @@ import { promisify } from 'node:util';
 
 import { buildHelper, loadHelpers } from '../../../server/scripts/sea/helpers.mts';
 import type { HelperDefinition } from '../../../server/scripts/sea/helpers.mts';
-import { sha256File } from '../../../shared/node/hash.ts';
+import { cachedRuntime } from '../../../server/scripts/buildSea.mts';
 import { readNodeRuntime } from '../../../shared/node/nodeRuntime.ts';
 import { nodeArchive } from '../../../shared/node/seaBuild.ts';
 
 export const SOURCE_ROOT = path.resolve(fileURLToPath(new URL('../../../', import.meta.url)));
 export const runFile = promisify(execFile);
+
+/**
+ * Берёт закреплённый архив из того же кэша, что сборка серверного комплекта.
+ * Хеш проверяется до извлечения файлов фикстуры.
+ */
+export async function pinnedRuntime() {
+  const runtime = readNodeRuntime(JSON.parse(await readFile(
+    path.join(SOURCE_ROOT, 'server/build/node-runtime.json'), 'utf8',
+  )), 'server runtime');
+  const cache = process.env.GRIGDESK_SEA_CACHE_DIR ??
+    path.join(process.env.XDG_CACHE_HOME || path.join(os.homedir(), '.cache'), 'grigdesk/server-sea');
+  const archive = await cachedRuntime(cache, SOURCE_ROOT);
+
+  return { runtime, archive };
+}
 
 /**
  * Собирает настоящие helper-ы под закреплённым runtime в одноразовый комплект.
@@ -26,14 +41,7 @@ export async function helperFixture(t: TestContext, ids: string[], extra: Helper
 
   const root = path.join(temporary, 'R with space');
   const helpers = path.join(root, 'server/runtime/helpers');
-  const runtime = readNodeRuntime(JSON.parse(await readFile(
-    path.join(SOURCE_ROOT, 'server/build/node-runtime.json'), 'utf8',
-  )), 'server runtime');
-  const archive = path.join(SOURCE_ROOT, 'tracker/.cache', nodeArchive(runtime).name);
-
-  if (await sha256File(archive) !== runtime.sha256) {
-    throw new Error('Повреждён кэш закреплённого Node');
-  }
+  const { runtime, archive } = await pinnedRuntime();
 
   await mkdir(path.join(root, 'runtime/node'), { recursive: true });
   await mkdir(helpers, { recursive: true });

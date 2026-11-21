@@ -81,7 +81,7 @@ export async function acceptanceBox(t: TestContext) {
         + `"version":"${identity.version}"}'\n`
       : `#!/bin/sh\nprintf '%s\\n' '${JSON.stringify(identity)}'\n`,
   });
-  const moduleFile = await builtModule(t, 'tools/maintenance.mts', release.publicKeyPem);
+  const moduleFile = await builtModule(t, 'tests/fixtures/release-v2/maintenance.mts', release.publicKeyPem);
   const entry = `import { runMaintenance } from ${JSON.stringify('file://' + moduleFile)};
     process.execPath = process.argv[1];
     process.exitCode = await runMaintenance(process.argv.slice(2));`;

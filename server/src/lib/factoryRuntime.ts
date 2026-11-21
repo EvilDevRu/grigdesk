@@ -4,14 +4,66 @@ import path from 'node:path';
 import { dataPath } from '../../../shared/runtime/dataHome.ts';
 import { profilesDirFor } from './runtimeLayout.ts';
 import type { RuntimeKind } from './runtimePaths.ts';
+import { FACTORY_GO_BINARY, readFactoryGoDescriptor } from './factoryGoDescriptor.ts';
 
 export type FactoryEngineMode = 'source' | 'bundled' | 'external';
+
+export type FactoryEngineProtocol = 'go-v1';
+
+export interface FactoryCommands {
+  home: string;
+  bin: string;
+  protocol: FactoryEngineProtocol;
+}
+
+export type FactoryHelper = 'route' | 'context' | 'profile-check' | 'stage-progress' | 'stage-result';
+
+/**
+ * Строит команду для выбранного поколения. Наличие других файлов или отказ
+ * выбранного helper-а не меняет протокол посреди операции.
+ */
+export function factoryHelper(
+  runtime: FactoryCommands, helper: FactoryHelper, args: readonly string[],
+): { command: string; args: string[] } {
+  return { command: runtime.bin, args: [helper, ...args] };
+}
+
+export const FACTORY_STATUS_ENGINE_ENV = [
+  'FACTORY_STATUS_ENGINE_PROTOCOL', 'FACTORY_STATUS_BIN', 'FACTORY_STATUS_ENGINE_HOME',
+  'FACTORY_RUN_ATTEMPT',
+] as const;
+
+function absoluteEnginePath(value: string | undefined): value is string {
+  return Boolean(value && path.isAbsolute(value) && path.normalize(value) === value
+    && !/[\0\n\r]/u.test(value));
+}
+
+/**
+ * Определяет writer для host status context. Долгоживущий broker получает эти
+ * поля от оркестратора данного запуска.
+ */
+export function factoryStatusCommands(env: NodeJS.ProcessEnv): FactoryCommands {
+  const protocol = env.FACTORY_STATUS_ENGINE_PROTOCOL;
+  const home = env.FACTORY_STATUS_ENGINE_HOME;
+
+  if (protocol === 'go-v1' && absoluteEnginePath(env.FACTORY_STATUS_BIN) && absoluteEnginePath(home)
+    && /^a_[a-f0-9]{32}$/u.test(env.FACTORY_RUN_ATTEMPT ?? '')) {
+    return {
+      home,
+      bin: env.FACTORY_STATUS_BIN,
+      protocol,
+    };
+  }
+
+  throw new Error('factory status engine descriptor invalid');
+}
 
 export interface FactoryRuntime {
   mode: FactoryEngineMode;
   home: string;
   bin: string;
   ignored: string[];
+  protocol: 'go-v1';
 }
 
 export interface ProfilesFileSystem {
@@ -39,7 +91,7 @@ function factoryConfigError(message: string, code: string): Error {
 }
 
 /**
- * Выбирает движок фабрики: source прежний, packaged — движок поставки R/engine.
+ * Выбирает Go-фабрику из bin checkout или из собственного каталога поставки.
  * Старые FACTORY_HOME/GRIGDESK_FACTORY_BIN не возвращают packaged к checkout;
  * внешний движок включается только явным GRIGDESK_ENGINE_MODE=external с абсолютными путями.
  */
@@ -55,18 +107,6 @@ export function factoryRuntimePaths(input: {
       'factory_engine_mode_unsupported');
   }
 
-  if (input.kind === 'source') {
-    // Исходники сохраняют прежние переопределения независимо от режима.
-    const home = input.env.FACTORY_HOME || path.join(input.root, 'engine');
-
-    return {
-      mode: 'source',
-      home,
-      bin: input.env.GRIGDESK_FACTORY_BIN || path.join(home, 'bin', 'factory'),
-      ignored: [],
-    };
-  }
-
   if (mode === 'external') {
     const home = input.env.FACTORY_HOME ?? '';
     const bin = input.env.GRIGDESK_FACTORY_BIN || path.join(home, 'bin', 'factory');
@@ -80,16 +120,32 @@ export function factoryRuntimePaths(input: {
       mode: 'external',
       home,
       bin,
+      protocol: 'go-v1',
+      ignored: [],
+    };
+  }
+
+  if (input.kind === 'source') {
+    return {
+      mode: 'source',
+      home: input.env.FACTORY_HOME || path.join(input.root, 'engine'),
+      bin: input.env.GRIGDESK_FACTORY_BIN || path.join(input.root, 'bin/factory'),
+      protocol: 'go-v1',
       ignored: [],
     };
   }
 
   const home = path.join(input.root, 'engine');
 
+  if (!readFactoryGoDescriptor(input.root)) {
+    throw factoryConfigError('В комплекте отсутствует Go-фабрика', 'factory_runtime_engine_invalid');
+  }
+
   return {
     mode: 'bundled',
     home,
-    bin: path.join(home, 'bin', 'factory'),
+    bin: path.join(input.root, FACTORY_GO_BINARY),
+    protocol: 'go-v1',
     ignored: ENGINE_OVERRIDES.filter((key) => Boolean(input.env[key])),
   };
 }

@@ -53,6 +53,7 @@ export async function installedPair(t, options = {}) {
   await writeInstallationJson(box.root, 'generations/0.2.0/release.json', old.envelope);
 
   const moduleUrl = (name) => JSON.stringify(path.join(repository, `shared/node/${name}.ts`));
+  const worker = JSON.stringify(path.join(repository, 'tests/fixtures/release-v2/installedUpdateWorker.ts'));
   const contents = [
     "import fs from 'node:fs/promises';",
     "import path from 'node:path';",
@@ -67,7 +68,7 @@ export async function installedPair(t, options = {}) {
     `import { readUpdateProcess } from ${moduleUrl('updateProcessOwner')};`,
     `import { inspectInstalledServer } from ${moduleUrl('installedServer')};`,
     `import { createUpdateHandoff, launchUpdateWorker, waitUpdateWorker,`,
-    `  runInstalledUpdateWorker, writeDesktopBootProof } from ${moduleUrl('installedUpdateWorker')};`,
+    `  runInstalledUpdateWorker, writeDesktopBootProof } from ${worker};`,
     `const root = ${JSON.stringify(box.root)};`,
     'const receipt = await readInstallation(root);',
     "const env = parseEnv(await fs.readFile(path.join(receipt.dataHome, '.env'), 'utf8'));",

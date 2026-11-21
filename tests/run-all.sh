@@ -93,10 +93,11 @@ NODE_TEST_HEAP_MB=2048 NODE_TEST_MAX_RSS_MB=4096 \
   bash "$PROJECT_ROOT/tests/run-node-tests-safe.sh" --test \
   "$PROJECT_ROOT/tests/server/chat-list-benchmark.test.mjs" || RC=1
 npm --prefix "$PROJECT_ROOT/web" test || RC=1
-npm --prefix "$PROJECT_ROOT/relay" test || RC=1
-npm --prefix "$PROJECT_ROOT/tracker" test || RC=1
-npm --prefix "$PROJECT_ROOT/routes" test || RC=1
-npm --prefix "$PROJECT_ROOT/voice" test || RC=1
+(
+  cd "$PROJECT_ROOT" || exit 1
+  GOTOOLCHAIN=local GOWORK=off go test -count=1 -p=2 ./utilities/...
+) || RC=1
+bash "$PROJECT_ROOT/tests/run-go-utilities.sh" || RC=1
 NODE_TEST_MAX_RSS_MB=4096 bash "$PROJECT_ROOT/tests/run-node-tests-safe.sh" --test \
   --test-concurrency=2 "$PROJECT_ROOT"/tests/mobile/*.test.js || RC=1
 NODE_TEST_MAX_RSS_MB=4096 bash "$PROJECT_ROOT/tests/run-node-tests-safe.sh" --test \

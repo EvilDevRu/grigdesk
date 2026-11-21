@@ -179,6 +179,8 @@ engine/bin/factory-check <name> --quick
 ~~~
 
 Она проверяет capability и hooks, canonical runner config и форму хоста стенда.
+Для исходной сборки Go та же структурная проверка вызывается через
+`bin/factory profile-check <name> --quick`. Бинарник выбирается вместе с поколением поставки.
 Определения маршрутов, prompts, переходы и no-ship topology проверяет локальный тест source-каталога
 профиля до публикации.
 
@@ -191,6 +193,8 @@ node profiles/<name>/routes/publish.mjs --validate
 ~~~bash
 RUN_HOST_PREFLIGHT=1 engine/bin/factory-check <name> --host-preflight
 ~~~
+
+В исходной сборке Go форма вызова — `RUN_HOST_PREFLIGHT=1 bin/factory profile-check <name> --host-preflight`.
 
 Preflight не отправляет model prompt. Live-пилот требует отдельного разрешения человека и не
 должен автоматически создавать delivery, запускать shared-стенд или очищать чужой checkout.

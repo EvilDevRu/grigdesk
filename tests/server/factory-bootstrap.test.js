@@ -10,6 +10,8 @@ import os from 'node:os';
 
 import factoryModule from '../../server/src/modules/factory/index.ts';
 import { FactoryStateAdapter } from '../../server/src/adapters/factoryState.ts';
+import { testFactoryBinary } from '../helpers/factoryBinary.mjs';
+import { publishCommandRoute } from './helpers/factoryGoRuntime.mts';
 
 const exec = promisify(execFile);
 const root = path.resolve(new URL('../..', import.meta.url).pathname);
@@ -30,86 +32,117 @@ async function fixture(t, outcome = 'failed') {
   const routesDir = path.join(directory, 'routes');
   const profilesDir = path.join(directory, 'profiles');
   const workspace = path.join(directory, 'workspace');
+  const source = path.join(directory, 'repository');
 
-  await Promise.all([stateDir, controlDir, routesDir, workspace,
+  await Promise.all([stateDir, controlDir, routesDir, workspace, source,
     path.join(profilesDir, 'demo-profile')].map((dir) => mkdir(dir, { recursive: true, mode: 0o700 })));
-  await exec('git', ['init', '-q', workspace]);
-  await exec('git', ['-C', workspace, 'config', 'user.email', 'fixture@example.invalid']);
-  await exec('git', ['-C', workspace, 'config', 'user.name', 'Fixture']);
+
+  for (const checkout of [source, workspace]) {
+    await exec('git', ['init', '-qb', 'fixture', checkout], {
+      env: { HOME: directory, PATH: '/usr/bin:/bin' },
+    });
+  }
+
   await writeFile(path.join(workspace, 'source.txt'), 'baseline\n');
-  await exec('git', ['-C', workspace, 'add', 'source.txt']);
-  await exec('git', ['-C', workspace, 'commit', '-qm', 'baseline']);
+  await publishCommandRoute(routesDir, false, false, 0, 'required');
 
-  const { stdout: published } = await exec(process.execPath, [
-    path.join(root, 'tests/engine/fixtures/routes-catalog-publish.mjs'), routesDir, 'null',
-  ]);
-  const catalog = JSON.parse(published);
-  const script = path.join(directory, 'prepare.sh');
+  const profile = path.join(profilesDir, 'demo-profile');
+  const codex = path.join(directory, 'codex');
+  const ticket = path.join(directory, 'ticket.json');
+  const factoryBin = testFactoryBinary();
+  const factoryHome = path.join(root, 'engine');
 
-  await writeFile(script, `#!/usr/bin/env bash
-set -uo pipefail
-export FACTORY_HOME=$1 STATE_DIR=$2 FACTORY_STATE=$2 FACTORY_ROUTE_STATE_DIR=$2
-export FACTORY_CONTROL_ROOT=$3 FACTORY_PROFILES_DIR=$4 FACTORY_TESTING=1 FACTORY_FORBID_LIVE=1
-routes=$5 workspace=$6 outcome=$7
-source "$FACTORY_HOME/lib/route-runtime.sh"
-route_v2_workspace_roots() { printf '%s\\n' "$workspace"; }
-v2_log() { :; }
-route_v2_context_for_node() {
-  cat >"$5" <<JSON
-{"task":{"id":"$1"},"attempt":{"id":"$2"},"project":{"profile":"demo-profile"},
-"workspace":{"service":{"path":"$workspace"}},"services":{},"artifacts":{"root":"$STATE_DIR"},
-"diagnosis":{},"instrumentation":{},"evidence":{},"decisions":{},
-"delivery":{"mode":"disabled","actions":[],"targetBranches":{}},
-"routeCatalog":{"debug":"fixture"},"stage":{"id":"scout","runKey":"SCOUT"}}
-JSON
+  await writeFile(path.join(profile, 'profile.sh'), String.raw`
+PROFILE_NAME=demo-profile
+PROFILE_SERVICE_HOST=127.0.0.1
+profile_workspace_mode() { printf 'isolated\n'; }
+profile_repositories() { printf 'fixture\t%s\t%s\n' "${source}" "${workspace}"; }
+profile_source_branch() { printf 'fixture\n'; }
+profile_container() { printf 'bootstrap-fixture\n'; }
+profile_stand_alive() { return 0; }
+profile_service_ports() { printf '8830\t8830\n'; }
+profile_exclusive_resources() { printf 'workspace:%s\n' "${workspace}"; }
+profile_project_context() { printf '%s\n' '{"stack":["fixture"],"guardrails":[]}'; }
+profile_route_command() {
+  printf '%s\n' '{"schema":1,"outcome":"done","comment":"fixture","failureOwner":null,"findings":[]}'
 }
-run_agent() {
-  MULTI_LAST_RUN_ID=bootstrap-fixture
-  MULTI_LAST_RUN_EPOCH=1
-  run_state_begin "$1" SCOUT "$MULTI_LAST_RUN_ID" 1 fixture-token
-  if [[ "$outcome" == failed ]]; then
-    FACTORY_STATUS_FD=7 bash "$FACTORY_HOME/lib/stage-result.sh" --task "$1" --stage SCOUT \\
-      --run-id "$MULTI_LAST_RUN_ID" --epoch 1 --failure-owner human \\
-      --finding 'owner-choice=Какой вариант выбрать?' failed 'Нужен выбор владельца' 7<<<fixture-token
-  else
-    FACTORY_STATUS_FD=7 bash "$FACTORY_HOME/lib/stage-result.sh" --task "$1" --stage SCOUT \\
-      --run-id "$MULTI_LAST_RUN_ID" --epoch 1 --finding-deferred 'external-check=Внешняя проверка' \\
-      done 'Разведка завершена' 7<<<fixture-token
-  fi
-}
-attempt=$(attempt_state_begin_v2 7 demo-profile "$routes") || exit $?
-attempt_state_select_route_v2 7 "$attempt" debug >/dev/null || exit $?
-set +e
-result=$(route_v2_dispatch_bootstrap 7 "$attempt")
-rc=$?
-set -e
-[[ "$rc" == 0 || "$rc" == 22 ]] || exit "$rc"
-printf '%s\\n' "$attempt"
-printf '%s\\n' "$result"
 `);
-
-  const { stdout } = await exec('bash', [script, path.join(root, 'engine'), stateDir, controlDir,
-    profilesDir, routesDir, workspace, outcome]);
-  const [attempt, ...resultLines] = stdout.trim().split('\n');
-  const result = JSON.parse(resultLines.join('\n'));
-  const attemptDir = path.join(controlDir, 'protocol-v2/tasks/t7/attempts', attempt);
-
-  await writeFile(path.join(attemptDir, 'artifacts/profile-contract.tsv'), [
-    'schema\t1', 'repos-mode\tgeneric', 'workspace-mode\tisolated', 'stand-ownership\ttask',
-    'source-branch\tfixture', 'container\tfixture', 'service-host\t127.0.0.1',
-    `repo\tfixture\t${workspace}\t${workspace}\tfixture`, '',
-  ].join('\n'), { mode: 0o400 });
-  await writeFile(path.join(stateDir, 't7.pipeline'), [
-    'PROFILE=demo-profile', 'ROUTE=debug', 'RUN_PROTOCOL=2', 'CATALOG_PROTOCOL=route-v2',
-    `ATTEMPT_ID=${attempt}`, `CATALOG_HASH=${catalog.catalogHash}`,
-    `ROUTE_HASH=${catalog.routeHashes.debug}`, 'QUEUE_DISPATCH_ID=', 'RUNNER_OVERRIDE_PRIMARY=',
-    'WF_STATUS=running', 'STALLED_HUMAN=0', 'SCOUT=failed', '',
+  await writeFile(path.join(profile, 'up.sh'), String.raw`#!/bin/bash
+cat >"$STATE_DIR/t$1.env" <<EOF
+TASK=$1
+WORKSPACE_MODE=isolated
+STAND_OWNERSHIP=task
+SB_K=0
+API_PORT=8830
+FE_PORT=8830
+SOURCE_BRANCH=fixture
+REPO_COUNT=1
+REPO_0_NAME=fixture
+REPO_0_SOURCE=${source}
+REPO_0_WT=${workspace}
+REPO_0_BRANCH=fixture
+EOF
+`);
+  await writeFile(path.join(profile, 'graph.json'), '{"capabilities":["route-v2"]}');
+  await writeFile(path.join(profile, 'runners.env'), [
+    'RUNNERS_SCHEMA=1', 'CONFIG_REVISION=1', 'RUNNERS_COVERAGE=required',
+    'PROJECT_RUNNER_PRIMARY=codex', 'PROJECT_RUNNER_FAILOVER=', '',
   ].join('\n'));
+  await writeFile(codex, String.raw`#!/bin/bash
+set -eu
+if [[ "$1" == --version ]]; then
+  echo 'codex-cli 0.106.0'
+  exit 0
+fi
+cat >/dev/null
+[[ "$FACTORY_RUN_STAGE" == SCOUT ]]
+args=()
+case "${outcome}" in
+  failed) args=(--failure-owner human --finding 'owner-choice=Какой вариант выбрать?');;
+  done) args=(--finding-deferred 'external-check=Внешняя проверка');;
+esac
+"$FACTORY_STATUS_BIN" stage-result --task "$FACTORY_RUN_TASK" --stage SCOUT \
+  --run-id "$FACTORY_RUN_ID" --epoch "$FACTORY_RUN_EPOCH" "${'$'}{args[@]}" \
+  "${outcome}" 'Нужен выбор владельца'
+`, { mode: 0o700 });
+  await writeFile(ticket, JSON.stringify({
+    schema: 1,
+    taskId: '7',
+    title: 'Fixture',
+    description: 'Разведка',
+    acceptanceCriteria: ['Сохранён точный вопрос'],
+    sourceUrl: 'https://example.test/7',
+  }));
+
+  /**
+   * Запускает Go с изолированным профилем и локальной подменой Codex.
+   * Сетевые ключи и окружение пользователя дочерний процесс не получает.
+   */
+  function factory(operation, ...options) {
+    return exec(factoryBin, ['7', operation, '--profile', 'demo-profile',
+      '--state-dir', stateDir, '--control-dir', controlDir, '--routes-dir', routesDir, ...options], {
+      env: {
+        HOME: directory,
+        PATH: `${path.dirname(process.execPath)}:/usr/bin:/bin`,
+        NODE_BIN: process.execPath,
+        FACTORY_HOME: factoryHome,
+        FACTORY_PROFILES_DIR: profilesDir,
+        GRIGDESK_CODEX_BIN: codex,
+      },
+      timeout: 15000,
+    });
+  }
+
+  await factory('start', '--route', 'command', '--ticket-json', ticket);
+
+  const attempts = path.join(controlDir, 'protocol-v2/tasks/t7');
+  const { attemptId: attempt } = JSON.parse(await readFile(path.join(attempts, 'active-attempt.json')));
+  const attemptDir = path.join(attempts, 'attempts', attempt);
 
   const config = {
     rootDir: root,
-    factoryHome: path.join(root, 'engine'),
-    factoryBin: path.join(root, 'engine/bin/factory'),
+    factoryHome,
+    factoryBin,
     factoryConfigRoot: path.join(directory, 'config'),
     factoryControlDir: controlDir,
     routesDir,
@@ -143,7 +176,8 @@ printf '%s\\n' "$result"
     adapter,
     attempt,
     attemptDir,
-    result,
+    factory,
+    result: (await adapter.readTrustedAttempt(7)).bootstrapStop,
   };
 }
 
@@ -397,30 +431,8 @@ test('PIPE-PRELUDE-TERMINAL-LEDGER: abandon до cursor наблюдается �
     assert.equal(old.code, 0, old.stderr);
 
     const expectedPrelude = JSON.parse(old.stdout).identity;
-    const command = [
-        'set -uo pipefail',
-        'source "$FACTORY_HOME/lib/attempt-state.sh" || exit $?',
-        'attempt_state_abandon_v2 7 "$1" "Fixture terminal"',
-    ].join('\n');
 
-    await exec('/bin/bash', [
-        '--noprofile', '--norc', '-c', command, 'pipeline-terminal-fixture', fx.attempt,
-    ], {
-        env: {
-            PATH: process.env.PATH || '/usr/bin:/bin',
-            HOME: fx.directory,
-            NODE_BIN: process.execPath,
-            FACTORY_HOME: fx.config.factoryHome,
-            FACTORY_CONTROL_ROOT: fx.config.factoryControlDir,
-            FACTORY_CONFIG_ROOT: fx.config.factoryConfigRoot,
-            FACTORY_PROFILES_DIR: fx.config.profilesDir,
-            FACTORY_STATE: fx.config.stateDir,
-            STATE_DIR: fx.config.stateDir,
-            FACTORY_TESTING: '1',
-            FACTORY_FORBID_LIVE: '1',
-        },
-        timeout: 15000,
-    });
+    await fx.factory('abandon', '--attempt', fx.attempt, '--reason', 'Fixture terminal');
 
     const trusted = await fx.adapter.readTrustedAttempt('7');
 

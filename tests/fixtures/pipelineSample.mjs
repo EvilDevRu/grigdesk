@@ -4,6 +4,8 @@ import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
+import { testFactoryBinary } from '../helpers/factoryBinary.mjs';
+
 export const ROOT = path.resolve(import.meta.dirname, '../..');
 export const SAMPLE = path.join(ROOT, 'server/seed/pipeline-sample');
 export const ENGINE = path.join(ROOT, 'engine');
@@ -256,7 +258,7 @@ export function hook(f, name, args = []) {
 }
 
 export const configure = (f) => run('python3', [path.join(f.profile, 'configure.py'),
-  '--factory', path.join(ENGINE, 'bin/factory')], { cwd: f.root, env: f.env });
+  '--factory', testFactoryBinary()], { cwd: f.root, env: f.env });
 
 /**
  * Публикует образец исключительно во временный store, затем читает его настоящим движком.
@@ -270,8 +272,8 @@ export async function published(f) {
   ok(run(process.execPath, [publisher, '--publish', '--base-dir', routes,
     '--expected-catalog-hash', 'null'], { env: f.env, cwd: f.root }));
 
-  const cli = (...args) => run(path.join(ENGINE, 'bin/factory-route'),
-    ['--routes-dir', routes, '--profile', f.project.id, ...args], { env: f.env });
+  const cli = (...args) => run(testFactoryBinary(),
+    ['route', '--routes-dir', routes, '--profile', f.project.id, ...args], { env: f.env });
   const current = JSON.parse(ok(cli('current')));
   const args = ['--catalog-hash', current.catalogHash];
   const describe = (route) => JSON.parse(ok(cli('describe-route', ...args, '--route', route))).machine;
@@ -299,7 +301,7 @@ export async function context(f, route = 'small', workspace = f.source) {
     acceptanceCriteria: ['Ответ равен 42', 'Правила сохранены'],
     sourceUrl: 'https://example.test/task/42',
   }));
-  const result = run(path.join(ENGINE, 'bin/factory-context'), [
+  const result = run(testFactoryBinary(), ['context',
     '--task', TASK, '--profile', f.project.id, '--attempt', ATTEMPT,
     '--catalog-hash', 'a'.repeat(64), '--route', route, '--route-hash', 'b'.repeat(64),
     '--node', 'build', '--run-key', 'BUILD', '--ticket-json', ticket,
@@ -318,19 +320,13 @@ export async function context(f, route = 'small', workspace = f.source) {
 
 /**
  * Вызывает command hook по commandId из опубликованного определения.
- * Stdout проверяется тем же parser, который принимает вердикт в реальном запуске.
+ * Результат разбирается здесь, а граница приёма вердикта проверяется тестами Go.
  */
 export async function command(f, value, node) {
   const commandContext = { ...value, stage: { id: node.id, runKey: node.runKey } };
   const file = await put(f.root, 'context.json', JSON.stringify(commandContext));
   const result = hook(f, 'profile_route_command', [TASK, value.attempt.routeId || 'small',
     node.id, node.runKey, node.commandId, file]);
-  const verdictFile = await put(f.root, 'verdict.json', result.stdout);
-  const parsed = run('bash', ['-c',
-    'source "$FACTORY_HOME/lib/route-runtime.sh"; _route_v2_command_result "$1"',
-    'fixture', verdictFile], { env: f.env });
 
-  ok(parsed);
-
-  return JSON.parse(result.stdout);
+  return JSON.parse(ok(result));
 }

@@ -12,9 +12,28 @@ const digest = (value) => createHash('sha256').update(value).digest('hex');
  */
 export function relayRelease(options = {}) {
   const channel = options.channel ?? 'release';
-  const signer = signedIndex({ channel });
-  const relay = Buffer.from('#!/bin/sh\nprintf "%s\\n" '
-    + `'grigdesk-relay ${signer.identity.version} (Node ${process.versions.node}, linux x64)'\n`);
+  const signer = signedIndex({
+    channel,
+    version: options.version,
+    keys: options.keys,
+  });
+  const info = {
+    schema: 1,
+    kind: 'grigdesk-relay',
+    version: signer.identity.version,
+    runtime: 'go',
+    go: 'go1.27.4',
+    os: 'linux',
+    arch: 'amd64',
+  };
+  const relay = options.binary ?? Buffer.from(`#!/bin/sh
+case "$*" in
+  '--runtime-info --json') printf '%s\\n' '${JSON.stringify(info)}' ;;
+  '--version') printf '%s\\n' 'grigdesk-relay ${info.version} (Go ${info.go}, linux amd64)' ;;
+  '--healthcheck') exit 0 ;;
+  *) exit 2 ;;
+esac
+`);
   const files = [
     { path: 'bin/grigdesk-server', bytes: Buffer.from('#!/bin/sh\nexit 0\n') },
     ...options.missingRelay ? [] : [{ path: 'bin/grigdesk-relay', bytes: relay }],

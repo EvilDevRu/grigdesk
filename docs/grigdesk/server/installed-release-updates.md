@@ -3,18 +3,16 @@
 Официальный вход `tools/bundle.mts` использует `executeInstalledBundle`. Выход
 `release-artifacts/` содержит shell `grigdesk-install`, отдельный `grigdesk-maintenance.gz`,
 его суммы/подпись, `desktop.tar.gz`,
-`server.tar.gz`, `release-acceptance.json` и индекс выбранного канала. Исторический
+`server.tar.gz`, `control.tar.gz`, `release-acceptance.json` и индекс выбранного канала. Исторический
 локальный сборщик portable-комплекта сохранён без публикации; официальный выпуск
 не создаёт переносимый комплект и не собирает исходники при установке.
 
 Серверный архив включает отдельные `bin/grigdesk-server`, `bin/tracker`, `bin/pipeline`,
 `bin/routes`, `bin/voice`,
-`bin/grigdesk-relay` и `bin/deepseek`. Stage voice собирает самостоятельный SEA без
-речевых моделей; все файлы поколения имеют права 0555 и входят в подписанную опись
-с размером и SHA256. `installationBin` текущего поколения уже входит в PATH агентов,
-поэтому [ядро озвучки](../media/voice-core.md) доступно по имени `voice`,
-а [авторинг маршрутов](../pipeline/routes-cli.md) — по имени `routes`.
-Stage routes вызывает сборщик пакета routes/ и создаёт отдельный ELF routes.
+`bin/grigdesk-relay` и `bin/deepseek`. Утилиты tracker, pipeline, routes, voice и relay собираются Go.
+По пути `control/bin/grigdesk-ctl` собирается отдельный Go CLI, а стабильный Go helper
+поступает через `grigdesk-maintenance.gz`. Исходники речевых моделей в архив не входят.
+Подписанная опись закрепляет размер, SHA256 и права каждого файла.
 
 ## Номер и доверие
 
@@ -26,9 +24,9 @@ Inputs workflow включают channel, publish=false, ручной test_mode=
 
 Индексы разделены: `/api/releases/v1/release.json` и `/api/releases/v1/dev.json` —
 единственная версия API каналов (прежний переносной `channel.json` удалён до первого
-выпуска). Payload содержит identity, notes, API, платформу и оба компонента.
+выпуска). Payload содержит identity, notes, API, платформу и три компонента формата v3.
 Опись включает пути, размеры, SHA256 и права. Ed25519 подписывает domain separator,
-LF, canonical JSON payload и завершающий LF. Общие reader/verifier — в shared/node;
+LF, canonical JSON payload и завершающий LF. Общие проверяющие находятся в `shared/node` и `utilities/internal/installation`;
 пустой pinned key запрещает доверие.
 
 Сеть ограничена HTTPS, запретом redirects, пятью секундами на источник и 1 MiB документа.
@@ -48,6 +46,23 @@ Publisher сайта принимает Linux x64. Нативная приёмк
 Новый [лёгкий установщик](lightweight-installer.md) скачивает helper и только выбранные
 компоненты. Архивы больше не встроены в ELF. Проверка кандидата — `dist check --from`
 или `--local-run`; прежний tail-reader сохранён для исторических файлов.
+
+## Указатель v2 и переход на Go
+
+В новом корне `current.json` формата 2 фиксирует роли desktop/server, путь control
+и версию первого Go-поколения в поле `floor`. Установщик готовит приватный соседний
+каталог и записывает intent до атомарного появления корня. `current` становится
+доступен после регистрации launchers и службы. Служба после чистой установки
+не запускается автоматически.
+
+Для зарегистрированного прежнего helper нужен отдельный допуск `--migrate-to-go`.
+В автоматизации он используется вместе с `--yes --expected-current-sha <sha256>`.
+SHA относится к исходным байтам всего `current.json`, включая обе роли.
+Go helper служит границей перехода. Старые канонические пути уходят в quarantine,
+а переключение продолжает сохранённую цель. Для применения после переключения
+нужны нативные доказательства запуска.
+
+Остальная часть документа описывает протокол прежних зарегистрированных выпусков v2.
 
 ## Установка
 
@@ -76,7 +91,7 @@ Launchers вызывают удержанный update/maintenance и читаю
 При переходе с прежнего descriptor требуется закрыть старый сервер; descriptor сохраняется
 в программе как резерв. Данные и старую portable-папку установщик не удаляет.
 
-Local создаёт descriptor v5. Remote не создаёт descriptor, серверный компонент или unit.
+Local создаёт descriptor v5 с идентификатором установки. Каталог команд определяется по current. Remote не создаёт descriptor, серверный компонент или unit.
 Local/server получают user-unit с каноническим ExecStart, WorkingDirectory=I,
 EnvironmentFile из D, KillMode=mixed и бюджетом слива 60 секунд. Регистрация не делает
 самовольный enable/start; без user-systemd ctl использует manual launcher с PID/starttime lease.
@@ -85,8 +100,21 @@ I определяется из физического бинарника и п�
 
 ## Подготовка и применение
 
-InstalledUpdateManager хранит один installation-bound journal под PID/starttime lock.
-Job фиксирует requestId, подписанный envelope/digest, scope, previous/target и исход.
+Go maintenance хранит журнал под блокировкой установки. Job фиксирует requestId,
+подписанный envelope/digest, scope, previous/target и исход. Desktop читает статус,
+готовит handoff, подтверждает запуск и восстанавливает запись через закрытый JSON IPC.
+При восстановлении helper проверяет инкарнацию нового владельца окна и сбрасывает
+старое подтверждение worker перед новой попыткой.
+На Linux helper связывает окно с AppImage своего поколения. Если процесс Electron
+убрал `APPIMAGE` из начального окружения, helper проверяет FUSE-монтирование и
+удержанный дескриптор AppImage. Путь, inode и версия должны совпасть с установкой.
+Перед принятием handoff процесс обновления оставляет из унаследованных
+дескрипторов только стандартные потоки. Служебная труба старого AppImage
+тогда освобождает FUSE при выходе окна, а новое окно получает дескриптор
+своего образа.
+После подтверждённой остановки updater ждёт выхода оставшихся процессов
+прежнего поколения. При гонке с закрытием FUSE он повторяет проверку процессов.
+Указатель меняется после полного обхода без прежних владельцев.
 
 Офлайн receipt v2 закрепляет исходный вид выпуска и SHA нормализованного публичного
 ключа. Скачанный кандидат сохраняет maintenance от установленного поколения A.
@@ -100,7 +128,13 @@ installation lock. Повтор продолжает тот же job. Сетев
 ordinary files. Links, лишние записи, traversal и превышение объёма запрещены.
 Пробы работают в отдельной HOME/D, до ready current и процессы остаются прежними.
 Проба подтверждает identity: версию, releaseId desktop либо packageId server и валидный
-JSON на stdout. Шум запуска в stderr (например, ERROR dbus/bus.cc у Electron пробы
+JSON на stdout. У server метаданные `runtime` содержат объект Node ABI.
+Строка `go` проверяется у `grigdesk-ctl` из control.
+На Linux проба подписанного type-2 AppImage распаковывает его штатным
+`--appimage-extract` в собственную временную папку и запускает оттуда
+`AppRun`. Проверка identity получает stdout приложения отдельно от вывода
+распаковщика. Для этой стадии FUSE не нужен.
+Шум запуска в stderr (например, ERROR dbus/bus.cc у Electron пробы
 без DBUS-адреса) подмену не доказывает и провалом не считается: фактический вывод
 сохраняется в update/<job>/probe-<компонент>.log до любого отказа, включая отказ запуска.
 

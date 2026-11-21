@@ -54,7 +54,7 @@ test('SEA-SELECT-HELPER: собранный CLI выбирает пакет из
 
   const backup = await readFile(`${descriptor}.previous`, 'utf8');
   const sourceCli = await runFile('bash', [
-    path.join(SOURCE_ROOT, 'bin/grigdesk-ctl'), 'desktop', 'use-server', root,
+    path.join(SOURCE_ROOT, 'bin/utilities/ctl'), 'desktop', 'use-server', root,
   ], {
     cwd: '/',
     env: {

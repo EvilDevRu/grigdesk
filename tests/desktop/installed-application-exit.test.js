@@ -4,6 +4,7 @@ import path from 'node:path';
 import test from 'node:test';
 
 import { installedFixture } from '../helpers/installedUpdateFixture.mjs';
+import { legacyControlStub } from '../helpers/legacyControlStub.mts';
 import { loadInstalledModule } from '../helpers/installedBuildFixture.mjs';
 
 /**
@@ -28,13 +29,12 @@ async function applicationExit(t) {
 
   const { createInstalledApplication } = await loadInstalledModule(t,
     'desktop/src/installedApplication.ts', box.release.publicKeyPem, {
-      'shared/node/installedUpdateWorker.ts': `
+      ...legacyControlStub,
+      'shared/node/installedControl.ts': legacyControlStub['shared/node/installedControl.ts']
+        .replace('return createUpdateHandoff(root, input.jobId, input);',
+          "globalThis.__installedExit.calls.push('handoff'); return { jobId: input.jobId };"),
+      'shared/node/installedUpdateProcess.ts': `
         const f = globalThis.__installedExit;
-        export async function createUpdateHandoff(root, id) {
-          f.calls.push('handoff');
-
-          return { jobId: id };
-        }
         export async function launchUpdateWorker() {
           f.calls.push('worker');
         }
@@ -45,10 +45,6 @@ async function applicationExit(t) {
             f.draining.resolve();
             await f.drained.promise;
           }
-        }
-        export async function writeDesktopBootProof() {}
-        export async function resumeDesktopHandoff() {
-          throw new Error('Неожиданное восстановление');
         }
       `,
     });

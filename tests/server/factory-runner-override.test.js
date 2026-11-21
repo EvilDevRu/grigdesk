@@ -1,11 +1,11 @@
 // Stage-level override исполнителя: POST /api/tasks/:id/runner/override.
 // Guard'ы — как у runner/switch (managed registry, terminal, активный этап),
-// сама запись идёт ТОЛЬКО через CLI движка (`factory <task> runner set|clear`).
+// Мутация требует доступного exact API настроек узла.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import {
-  access, mkdir, mkdtemp, readFile, rm, writeFile,
+  access, mkdir, mkdtemp, rm, writeFile,
 } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import os from 'node:os';
@@ -139,19 +139,12 @@ async function fixture(t) {
   const profilesDir = path.join(root, 'profiles');
   const binDir = path.join(root, 'bin');
   const controlDir = path.join(root, 'control');
-  const runnersDir = path.join(root, 'lib', 'runners');
   await Promise.all([
     mkdir(path.join(stateDir, 'logs'), { recursive: true }),
     mkdir(routesDir, { recursive: true }),
     mkdir(path.join(profilesDir, 'demo'), { recursive: true }),
     mkdir(binDir, { recursive: true }),
-    mkdir(runnersDir, { recursive: true }),
   ]);
-  // Kimi остаётся валидным, но не установленным именем; DeepSeek уже поставлен.
-  for (const name of ['claude.sh', 'codex.sh', 'deepseek.sh', 'index.sh']) {
-    await writeFile(path.join(runnersDir, name), '# адаптер\n');
-  }
-
   // Legacy реестр: виден, но недоступен для мутаций.
   await writeFile(path.join(stateDir, 't7.pipeline'), [
     'PROFILE=demo',
@@ -169,7 +162,14 @@ async function fixture(t) {
 
   const callsLog = path.join(root, 'factory.calls');
   const factoryBin = path.join(binDir, 'factory');
-  await writeFile(factoryBin, `#!/usr/bin/env bash\nprintf '%s\\n' "$*" >> "${callsLog}"\n`, { mode: 0o755 });
+
+  await writeFile(factoryBin, `#!/usr/bin/env bash
+if [[ "$*" == runners ]]; then
+  printf '%s\n' claude codex deepseek
+else
+  printf '%s\n' "$*" >> "${callsLog}"
+fi
+`, { mode: 0o755 });
 
   const config = {
     factoryHome: root,
@@ -263,7 +263,7 @@ test('override на этапе с активным запуском отправ
   assert.equal(await missing(callsLog), true);
 });
 
-test('остановленный run со старым runner.actual принимает override для следующего resume', async (t) => {
+test('override без подтверждённого движка возвращает отказ до команды', async (t) => {
   const { app, graph, callsLog } = await fixture(t);
   graph.daemonAlive = false;
   graph.statuses.build = 'run';
@@ -273,9 +273,9 @@ test('остановленный run со старым runner.actual прини�
     method: 'POST', url: '/api/tasks/8/runner/override', payload: { stage: 'BUILD', primary: 'codex' },
   });
 
-  assert.equal(response.statusCode, 200, response.body);
-  assert.equal(response.json().ok, true);
-  assert.match(await readFile(callsLog, 'utf8'), /^8 runner set BUILD codex$/m);
+  assert.equal(response.statusCode, 503, response.body);
+  assert.equal(response.json().error, 'settings_unavailable');
+  assert.equal(await missing(callsLog), true);
 });
 
 test('live-switch остановленного run отвечает понятной ошибкой до вызова движка', async (t) => {
@@ -294,7 +294,7 @@ test('live-switch остановленного run отвечает понятн
   assert.equal(await missing(callsLog), true);
 });
 
-test('live-switch живого run вызывает canonical runner switch', async (t) => {
+test('live-switch без подтверждённого движка возвращает отказ до команды', async (t) => {
   const { app, graph, callsLog } = await fixture(t);
   graph.daemonAlive = true;
   graph.statuses.build = 'run';
@@ -304,9 +304,9 @@ test('live-switch живого run вызывает canonical runner switch', as
     method: 'POST', url: '/api/tasks/8/runner/switch', payload: { stage: 'BUILD', target: 'codex' },
   });
 
-  assert.equal(response.statusCode, 200, response.body);
-  assert.equal(response.json().ok, true);
-  assert.match(await readFile(callsLog, 'utf8'), /^8 runner switch BUILD codex$/m);
+  assert.equal(response.statusCode, 503, response.body);
+  assert.equal(response.json().error, 'settings_unavailable');
+  assert.equal(await missing(callsLog), true);
 });
 
 test('override отклоняет этап вне маршрута попытки', async (t) => {
@@ -329,25 +329,7 @@ test('override отклоняет неустановленного исполн�
   assert.equal(await missing(callsLog), true);
 });
 
-test('валидный override пишется через runner set движка', async (t) => {
-  const { app, callsLog } = await fixture(t);
-  const response = await app.inject({
-    method: 'POST', url: '/api/tasks/8/runner/override', payload: { stage: 'BUILD', primary: 'codex' },
-  });
-  assert.equal(response.statusCode, 200, response.body);
-  assert.equal(response.json().ok, true);
-  assert.match(await readFile(callsLog, 'utf8'), /^8 runner set BUILD codex$/m);
-});
-
-test('DeepSeek доступен для override, а его точный binary pin доезжает в Factory env', async (t) => {
-  const { app, callsLog } = await fixture(t);
-  const response = await app.inject({
-    method: 'POST', url: '/api/tasks/8/runner/override',
-    payload: { stage: 'BUILD', primary: 'deepseek' },
-  });
-  assert.equal(response.statusCode, 200, response.body);
-  assert.match(await readFile(callsLog, 'utf8'), /^8 runner set BUILD deepseek$/m);
-
+test('точный binary pin DeepSeek передаётся в Go-движок', () => {
   const bin = '/opt/grigdesk/deepseek/install/current/node_modules/.bin/dsh';
   const env = routeLaunchEnv({
     rootDir: '/opt/grigdesk', factoryHome: '/opt/grigdesk/engine',
@@ -357,15 +339,4 @@ test('DeepSeek доступен для override, а его точный binary p
     deepseekBinOverride: bin,
   });
   assert.equal(env.GRIGDESK_DEEPSEEK_BIN, bin);
-});
-
-test('пустой primary снимает override через runner clear, идемпотентно', async (t) => {
-  const { app, callsLog } = await fixture(t);
-  for (const payload of [{ stage: 'BUILD', primary: '' }, { stage: 'BUILD' }]) {
-    const response = await app.inject({ method: 'POST', url: '/api/tasks/8/runner/override', payload });
-    assert.equal(response.statusCode, 200, `${JSON.stringify(payload)}: ${response.body}`);
-    assert.equal(response.json().ok, true);
-  }
-  const calls = (await readFile(callsLog, 'utf8')).trim().split('\n');
-  assert.deepEqual(calls, ['8 runner clear BUILD', '8 runner clear BUILD']);
 });

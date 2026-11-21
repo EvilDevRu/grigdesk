@@ -1,3 +1,4 @@
+import { FACTORY_STATUS_ENGINE_ENV } from './factoryRuntime.ts';
 import { factoryBrowserReady } from './browser/factoryBrowserCapability.ts';
 
 import { promises as fs } from 'node:fs';
@@ -27,6 +28,7 @@ export interface FactoryRunIdentity {
 
 // Статусный MCP получает только identity этапа и каналы движка, без модельных ключей.
 export const FACTORY_STATUS_ENV_NAMES: readonly string[] = Object.freeze([
+  ...FACTORY_STATUS_ENGINE_ENV,
   'FACTORY_RUN_TASK',
   'FACTORY_RUN_STAGE',
   'FACTORY_RUN_ID',

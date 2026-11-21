@@ -1,5 +1,4 @@
 import { spawn } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
 
 import { isRecord } from '../../../../shared/lib/objects.ts';
 
@@ -8,7 +7,30 @@ import type {
   RouteDraft, RouteSimulationStepRequest, RouteSimulationStepResponse,
 } from '../../../../shared/pipeline/routesEditorContracts.ts';
 
-const ROUTE_TOOL = fileURLToPath(new URL('../../../../engine/bin/factory-route', import.meta.url));
+import { factoryHelper, factoryRuntimePaths } from '../../lib/factoryRuntime.ts';
+import type { FactoryCommands } from '../../lib/factoryRuntime.ts';
+import { runtimeKind, runtimeRoot } from '../../lib/runtimePaths.ts';
+
+interface EditorOptions {
+  runtime?: FactoryCommands;
+  toolPath?: string;
+  timeoutMs?: number;
+}
+
+/**
+ * Строит argv редактора для уже выбранной установки.
+ * Прямой вызов без descriptor берёт текущую Go-фабрику checkout или поставки.
+ */
+export function editorRouteCommand(runtime: FactoryCommands | undefined, args: string[]) {
+  const selected = runtime ?? factoryRuntimePaths({
+    kind: runtimeKind(),
+    root: runtimeRoot(),
+    env: process.env,
+  });
+
+  return factoryHelper(selected, 'route', args);
+}
+
 const MAX_OUTPUT = 16 * 1024 * 1024;
 
 export class RoutesEditorEngineError extends Error {
@@ -35,26 +57,26 @@ export interface EditorPreviewResult {
  */
 function invokeEditorTool(
   draft: RouteDraft,
-  command: 'editor-render' | 'editor-step',
+  command: 'editor-check' | 'editor-render' | 'editor-step',
   request: object,
-  options: { toolPath?: string; timeoutMs?: number } = {},
+  options: EditorOptions = {},
 ): Promise<{ code: number; value: unknown }> {
-  const payload = JSON.stringify({
-    catalogInput: {
-      profile: draft.profile,
-      routes: draft.routes,
-      bootstrap: draft.bootstrap,
-      bootstrapPrompts: draft.bootstrapPrompts,
-    },
-    ...request,
-  });
+  const catalogInput = {
+    profile: draft.profile,
+    routes: draft.routes,
+    bootstrap: draft.bootstrap,
+    bootstrapPrompts: draft.bootstrapPrompts,
+  };
+  const payload = JSON.stringify(command === 'editor-check' ? catalogInput : { catalogInput, ...request });
   if (Buffer.byteLength(payload) > ROUTES_EDITOR_LIMITS.draftBytes) {
     throw new RoutesEditorEngineError('Вход движка превышает лимит');
   }
+
   return new Promise((resolve, reject) => {
-    const child = spawn(options.toolPath ?? ROUTE_TOOL, [
-      '--profile', draft.profile, command,
-    ], { stdio: ['pipe', 'pipe', 'pipe'], shell: false });
+    const args = ['--profile', draft.profile, command];
+    const helper = options.toolPath ? { command: options.toolPath, args }
+      : editorRouteCommand(options.runtime, args);
+    const child = spawn(helper.command, helper.args, { stdio: ['pipe', 'pipe', 'pipe'], shell: false });
     const chunks: Buffer[] = [];
     let size = 0;
     let failed = false;
@@ -92,11 +114,14 @@ function invokeEditorTool(
   });
 }
 
-/** Рендерит точный текст из сохранённой ревизии черновика. */
+/**
+ * Рендерит текст из точной ревизии черновика.
+ * Проверяет формат текста и диагностики перед передачей редактору.
+ */
 export async function renderDraftPreview(
   draft: RouteDraft,
   request: EditorPreviewRequest,
-  options: { toolPath?: string; timeoutMs?: number } = {},
+  options: EditorOptions = {},
 ): Promise<EditorPreviewResult> {
   const { code, value } = await invokeEditorTool(draft, 'editor-render', request, options);
   if (!isRecord(value) || typeof value.text !== 'string'
@@ -114,11 +139,14 @@ export async function renderDraftPreview(
   return value as unknown as EditorPreviewResult;
 }
 
-/** Вычисляет один переход без создания runtime-попытки и профильных команд. */
+/**
+ * Вычисляет один переход той же машиной, что проверяет опубликованный маршрут.
+ * Команда читает черновик и возвращает симуляцию без создания попытки.
+ */
 export async function stepDraftSimulation(
   draft: RouteDraft,
   request: Omit<RouteSimulationStepRequest, 'expectedRevision'>,
-  options: { toolPath?: string; timeoutMs?: number } = {},
+  options: EditorOptions = {},
 ): Promise<Omit<RouteSimulationStepResponse, 'draftRevision'>> {
   const { code, value } = await invokeEditorTool(draft, 'editor-step', request, options);
   if (!isRecord(value) || typeof value.ok !== 'boolean'
@@ -134,4 +162,17 @@ export async function stepDraftSimulation(
     throw new RoutesEditorEngineError('Неверный ответ движка');
   }
   return value as unknown as Omit<RouteSimulationStepResponse, 'draftRevision'>;
+}
+
+
+/**
+ * Проверяет снимок черновика перед записью бандлов.
+ * Публикация требует подтверждения выбранного движка.
+ */
+export async function checkDraftEngine(draft: RouteDraft, runtime?: FactoryCommands): Promise<void> {
+  const { code, value } = await invokeEditorTool(draft, 'editor-check', {}, { runtime });
+
+  if (code !== 0 || !isRecord(value) || value.ok !== true) {
+    throw new RoutesEditorEngineError('Движок не подтвердил черновик');
+  }
 }

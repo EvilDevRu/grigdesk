@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
-import { execFile } from 'node:child_process';
+import { execFile, execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import test from 'node:test';
+import test, { after, before } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 import { readProcessOwner, runtimeOwnerState } from '../../server/src/binary/leases.ts';
@@ -11,6 +12,36 @@ import { readProcessOwner, runtimeOwnerState } from '../../server/src/binary/lea
 import { inspectFactoryRuntimePins, reserveFactoryRuntime } from '../../server/src/lib/factoryRuntimePins.ts';
 
 const ROOT = fileURLToPath(new URL('../..', import.meta.url));
+
+let goDriver;
+let suiteDir;
+
+before(async () => {
+  suiteDir = await fs.mkdtemp(path.join(os.tmpdir(), 'runtime bind go '));
+
+  const output = path.join(suiteDir, 'begin');
+
+  execFileSync('go', ['test', '-c', '-o', output, './utilities/factory/internal/state'], {
+    cwd: ROOT,
+    env: {
+      ...process.env,
+      GOTOOLCHAIN: 'local',
+      GOWORK: 'off',
+    },
+    encoding: 'utf8',
+  });
+  goDriver = await fs.realpath(output);
+
+  const sha = createHash('sha256').update(await fs.readFile(goDriver)).digest('hex');
+
+  console.log(`factory state begin: ${goDriver}, SHA256=${sha}`);
+});
+
+after(async () => {
+  if (suiteDir) {
+    await fs.rm(suiteDir, { recursive: true, force: true });
+  }
+});
 
 /**
  * Настоящий begin движка работает в отдельном control/state без provider и живых данных.
@@ -65,11 +96,23 @@ async function fixture(t) {
 
 /**
  * Env передаётся явным списком и FACTORY_FORBID_LIVE не может потеряться при запуске.
- * Shell создаёт только synthetic route bundle и immutable begin без вызова модели.
+ * Драйвер создаёт immutable begin над одним synthetic bundle без вызова модели.
  */
 async function begin(input, hostEnv, observe) {
+  execFileSync(process.execPath, [
+    path.join(ROOT, 'tests/engine/fixtures/routes-publish.mjs'),
+    path.join(input.root, 'routes'),
+    'Синтетический маршрут runtime pin',
+    'null',
+  ], {
+    env: {
+      PATH: process.env.PATH,
+      HOME: input.root,
+    },
+  });
+
   return new Promise((resolve) => {
-    const child = execFile('bash', [path.join(ROOT, 'tests/engine/unit/runtime-pin-bind.sh')], {
+    const child = execFile(goDriver, [], {
       env: {
         PATH: process.env.PATH,
         HOME: input.root,
@@ -83,6 +126,7 @@ async function begin(input, hostEnv, observe) {
         STATE_DIR: input.stateRoot,
         FACTORY_PROFILES_DIR: input.profileRoot,
         NODE_BIN: process.execPath,
+        FACTORY_TEST_GO_BEGIN: '1',
         ...hostEnv,
       },
       timeout: 30000,
@@ -135,7 +179,7 @@ for (const missing of ['RESERVATION', 'NODE', 'PIN_HELPER']) {
   });
 }
 
-test('SB17b all-absent сохраняет legacy begin', async (t) => {
+test('SB17b Go из исходников открывает попытку без packaged reservation', async (t) => {
   const input = await fixture(t);
   const result = await begin(input, {});
 
@@ -166,33 +210,6 @@ test('SB17c отказ bind сохраняет orphan attempt и reservation д�
   assert.equal(providerStarted, false);
   assert.equal((await fs.readdir(path.join(input.controlRoot, 'protocol-v2/tasks/t42/attempts'))).length, 1);
   assert.equal(await fs.access(input.reservation).then(() => true, () => false), true);
-});
-
-test('SB17 регресс: настоящий контракт attempt-state остаётся зелёным', async (t) => {
-  const input = await fixture(t);
-  const lock = path.join(input.root, 'offline.lock');
-
-  await fs.writeFile(lock, '');
-
-  const result = await new Promise((resolve) => {
-    execFile('bash', [path.join(ROOT, 'tests/engine/run-offline.sh'), '--one',
-      path.join(ROOT, 'tests/engine/unit/attempt-state.sh')], {
-      env: {
-        PATH: process.env.PATH,
-        HOME: input.root,
-        OFFLINE_OUT_LOCK: lock,
-      },
-      timeout: 120000,
-      maxBuffer: 4 * 1024 * 1024,
-    }, (error, stdout, stderr) => resolve({
-      code: error?.code ?? 0,
-      output: `${stdout}${stderr}`,
-    }));
-  });
-
-  assert.equal(result.code, 0, result.output);
-  assert.doesNotMatch(result.output, /^not ok/mu);
-  assert.match(result.output, /^1\.\.[1-9][0-9]*$/mu);
 });
 
 test('SB17c SIGKILL после final directory сохраняет reservation без active/provider', async (t) => {

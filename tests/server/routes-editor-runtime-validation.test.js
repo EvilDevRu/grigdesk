@@ -3,7 +3,6 @@ import { spawnSync } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 
 import { makeDraft } from '../fixtures/routes-editor.mjs';
@@ -14,7 +13,9 @@ import {
   validateDraftCapabilities,
 } from '../../server/src/modules/routes/editorCapabilities.ts';
 
-const TOOL = fileURLToPath(new URL('../../engine/bin/factory-route', import.meta.url));
+import { testFactoryBinary } from '../helpers/factoryBinary.mjs';
+
+const TOOL = testFactoryBinary();
 
 function engineCheck(draft) {
   const input = {
@@ -23,7 +24,7 @@ function engineCheck(draft) {
     bootstrap: draft.bootstrap,
     bootstrapPrompts: draft.bootstrapPrompts,
   };
-  const result = spawnSync(TOOL, ['--profile', draft.profile, 'editor-check'], {
+  const result = spawnSync(TOOL, ['route', '--profile', draft.profile, 'editor-check'], {
     input: JSON.stringify(input),
     encoding: 'utf8',
   });

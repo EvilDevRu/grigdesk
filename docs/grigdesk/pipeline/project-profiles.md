@@ -15,6 +15,9 @@
 в [контракте профиля](../../engine/PROFILE-CONTRACT.md), порядок подключения — в
 [инструкции нового проекта](../../engine/NEW-PROJECT.md).
 
+Для проверки профиля используется `bin/factory profile-check <PROFILE> --quick`.
+Проверка и запуск используют один физический каталог профилей текущей установки.
+
 ## Файлы и хранение
 
 Поставляемый [образец профиля](profile-sample.md) находится в
@@ -183,8 +186,16 @@ primary/failover и нормализуется uppercase с `-` → `_`. Все 
 | `profile_agent_control_stop TASK RUN_KEY RC` | Парный cleanup после любого результата runner; `RC` — его код возврата. Проверяет завершение брокера и освобождает канал. |
 | `profile_agent_control_darwin_v1 TASK RUN_KEY` | Канал macOS объявляет брокер и закрытие через JSON v1. Движок открывает канал, ждёт признак готовности и сверяет завершение перед продолжением. |
 
-Пара `profile_agent_control_start/stop` используется на Linux. Для общего
-стенда macOS профиль объявляет `profile_instrumentation_restore_mode`.
+На Linux Go-движок вызывает `profile_agent_control_start/stop` в одной оболочке.
+Пара обслуживает весь визит узла, включая повтор и перезапуск исполнителя.
+Движок проверяет каталог до запуска исполнителя и закрывает канал до перехода
+графа. После штатного Stop хук получает код `130`.
+
+Go создаёт файл разрешений Claude перед запуском этапа. Общие правила профиля
+и `profile_stage_agent_allow RUN_KEY` входят в него вместе с защитой служебного
+каталога. Запрос результата адресован точному запуску в очереди этапа.
+
+Для общего стенда macOS профиль объявляет `profile_instrumentation_restore_mode`.
 Режим `live-checkout` выполняет проверку здоровья на исходном checkout.
 В режиме `copy-snapshot` команда `profile_instrumentation_restored_from_snapshot`
 получает подтверждённые bytes отдельно от checkout и возвращает хеш
@@ -240,7 +251,7 @@ primary/failover и нормализуется uppercase с `-` → `_`. Все 
 | `RUNNERS_SCHEMA` | Обязательная версия формата, сейчас `1`. |
 | `CONFIG_REVISION` | Обязательное неотрицательное целое; CLI увеличивает при записи и проверяет ожидаемую ревизию. Это не версия маршрута. |
 | `RUNNERS_COVERAGE` | Для рабочего профиля требуется `required`: перед вызовом модели проверяется совместимость runner/model policy с хостом. |
-| `PROJECT_RUNNER_PRIMARY` | Обязательный ID основного установленного исполнителя. Список узнаётся через `engine/bin/factory runners`, по имени проекта исполнитель не угадывается. |
+| `PROJECT_RUNNER_PRIMARY` | Обязательный ID основного установленного исполнителя. Список узнаётся через `bin/factory runners`, по имени проекта исполнитель не угадывается. |
 | `PROJECT_RUNNER_FAILOVER` | Упорядоченный список резервных исполнителей через запятую. Отсутствие/пустая строка — автоматического резерва нет. |
 | `STAGE_<RUN_KEY>_PRIMARY` | Основной исполнитель отдельной роли, например `STAGE_REVIEW_PRIMARY`. Без непустого значения используется проектная пара primary/failover. |
 | `STAGE_<RUN_KEY>_FAILOVER` | Резерв этой роли, список через запятую. Применяется вместе с её primary; пустое значение не наследует проектный резерв. |
@@ -293,13 +304,13 @@ metadata-only host preflight. Уже работающий процесс не м
 Пример чтения и изменения политики:
 
 ```bash
-engine/bin/factory profile <PROFILE> runner show
-engine/bin/factory profile <PROFILE> runner set codex --failover claude
-engine/bin/factory profile <PROFILE> runner set REVIEW claude --failover codex
-engine/bin/factory profile <PROFILE> model set DEFAULT codex \
+bin/factory profile <PROFILE> runner show
+bin/factory profile <PROFILE> runner set codex --failover claude
+bin/factory profile <PROFILE> runner set REVIEW claude --failover codex
+bin/factory profile <PROFILE> model set DEFAULT codex \
   family=<FAMILY> version=latest variant=auto effort=high
-engine/bin/factory profile <PROFILE> model set REVIEW codex effort=<EFFORT>
-RUN_HOST_PREFLIGHT=1 engine/bin/factory-check <PROFILE> --host-preflight
+bin/factory profile <PROFILE> model set REVIEW codex effort=<EFFORT>
+RUN_HOST_PREFLIGHT=1 bin/factory profile-check <PROFILE> --host-preflight
 ```
 
 ### Порог автосжатия: текущее ограничение
@@ -453,19 +464,23 @@ RUN_HOST_PREFLIGHT=1 engine/bin/factory-check <PROFILE> --host-preflight
 | `PROFILE_LOOP_MAX_ROUNDS` | Можно поднять для продолжения остановки на потолке; resume без подъёма не запускает ещё один круг. |
 | Debug-профиль | Отдельная настройка `factory profile <PROFILE> debug ...`, не runner config. Не меняет routing revision и права агента. |
 
+Go-фабрика хранит настройки debug в файлах с отдельной ревизией. Действующая
+настройка попытки имеет приоритет над профилем до истечения TTL. Глобальный уровень
+ограничивает обе области. На границе запуска и выхода хост сохраняет уровень и код
+процесса в типизированной трассировке без текста запроса к модели.
+
 Общий безопасный порядок: проверить исходники и промпты → опубликовать во временное
 хранилище и перечитать → проверить профиль и runner readiness → переключить live current
 через CAS → отдельным последним действием включить `route-v2` у нового профиля.
 
 ```bash
-engine/bin/factory-check <PROFILE> --quick
-RUN_HOST_PREFLIGHT=1 engine/bin/factory-check <PROFILE> --host-preflight
+bin/factory profile-check <PROFILE> --quick
+RUN_HOST_PREFLIGHT=1 bin/factory profile-check <PROFILE> --host-preflight
 ```
 
 Обе проверки обходятся без model prompt. `--quick` не доказывает, что lifecycle умеет
 поднять живую песочницу; реальные проверки стенда выполняются отдельно на ресурсах пробы.
 
-Источники справочника: `engine/lib/profile-config.sh`, `routing.sh`, `multi-runner.sh`,
-`dispatcher.sh`, `core.sh`, `route_model.py`, `dashboard.py`, `engine/bin/factory`,
-`factory-check`, `server/src/lib/analysis/profile.ts`, `analysis/routePolicy.ts`,
-`runtimeLayout.ts`, `factoryGraph.ts`, `profiles.ts` и `server/src/modules/factory/index.ts`.
+Источники справочника находятся в `utilities/factory/internal/{cli,hooks,runner,route}`,
+`server/src/lib/{profileConfig,profiles,factoryGraph}.ts` и
+`server/src/modules/factory/index.ts`.

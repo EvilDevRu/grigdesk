@@ -1,8 +1,8 @@
 # Ядро озвучки voice: облако Qwen и локальные движки
 
-`voice/` — самостоятельный TypeScript-пакет одноразового синтеза речи. `bin/voice` —
-его Linux x64 ELF Node SEA. Каталог `bin/` уже стоит первым в PATH агента, поэтому
-агент вызывает `voice`, человек из checkout — `bin/voice` либо `grigdesk-ctl voice`.
+`utilities/voice/` — Go-утилита одноразового синтеза речи. `bin/utilities/voice` —
+его нативный бинарник для Linux x64 и Apple Silicon. Каталог `bin/utilities/` входит в PATH агента, поэтому
+агент вызывает `voice`, человек из checkout — `bin/utilities/voice` либо `grigdesk-ctl voice`.
 Команда не требует перезапуска сервера и не читает его файловые хранилища ключей.
 
 ## Команды и результат
@@ -123,7 +123,7 @@ ffmpeg или Python для облачного профиля не нужны. �
 ## Установка и хранение локальных движков
 
 Нужны Python3 с venv, tar для Piper, сеть и свободное место. Каталог пакетов,
-контрольные суммы и зависимости принадлежат `voice/src/local/catalogs.ts`; Python-ассеты
+контрольные суммы и зависимости принадлежат `utilities/voice/internal/local/packages.json`; Python-ассеты
 также принадлежат пакету voice. Серверные потребители вызывают CLI и не хранят копий
 каталога или установщиков. Runtime-импортов серверного showcase нет.
 
@@ -167,20 +167,11 @@ SIGINT/SIGTERM отменяют собственную операцию. SIGKILL
 
 ## Сборка и границы проверки
 
-```sh
-npm --prefix voice ci --include=dev
-npm --prefix voice test
-npm --prefix voice run build
-```
-
-Сборщик использует закреплённый официальный Node из `voice/build/node-runtime.json`,
-проверяет SHA архива, вшивает оба Python-ассета и проверяет `version` с пустым env.
-Выход checkout — `bin/voice` 0755, вне Git. Цель «Всё» собирает voice отдельным
-четвёртым треком (`voice.deps`, `voice.build`), не устанавливая речевые модели.
-[Эффекты полной сборки](../server/ctl-build.md) включают установку окна и привязку сервера.
-Bundle вызывает stage voice; подписанный серверный архив содержит `bin/voice` 0555,
-который попадает в installationBin и PATH агентов текущего поколения.
-В full workflow обязательны `voice_tests` и его успешный outcome в серверных воротах.
+`voice` собирается вместе с остальными утилитами командой
+`bash tools/build-go-utilities.sh "$PWD/bin/utilities"` на Go 1.27.4. В бинарник
+встроены Python-скрипты Piper и Silero. Синтез извлекает нужный скрипт в закрытый
+временный каталог. Серверный архив включает `bin/voice` с правами 0555 в подписанной
+описи. Команда доступна агентам текущего серверного поколения.
 
 Автоматические проверки используют loopback HTTP и поддельный executable Python;
 installer, tar, WAV, checksum, блокировки и файловая публикация остаются настоящими.

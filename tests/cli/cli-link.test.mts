@@ -27,8 +27,8 @@ function fixture(t: TestContext) {
     recursive: true,
     force: true,
   }));
-  mkdirSync(path.join(root, 'bin'), { recursive: true });
-  writeFileSync(path.join(root, 'bin/grigdesk-ctl'), '#!/bin/bash\nexit 0\n');
+  mkdirSync(path.join(root, 'bin/utilities'), { recursive: true });
+  writeFileSync(path.join(root, 'bin/utilities/ctl'), '#!/bin/bash\nexit 0\n');
 
   return {
     root,
@@ -43,7 +43,7 @@ test('CL-1 каталог создаётся и ссылка ведёт в те�
   const result = await box.run();
 
   assert.equal(result.code, 0, result.stderr);
-  assert.equal(readlinkSync(path.join(box.bin, 'grigdesk-ctl')), path.join(box.root, 'bin/grigdesk-ctl'));
+  assert.equal(readlinkSync(path.join(box.bin, 'grigdesk-ctl')), path.join(box.root, 'bin/utilities/ctl'));
 });
 
 test('CL-2 ссылка на другую копию заменяется', async (t) => {
@@ -55,7 +55,7 @@ test('CL-2 ссылка на другую копию заменяется', asyn
   const result = await box.run();
 
   assert.equal(result.code, 0, result.stderr);
-  assert.equal(readlinkSync(path.join(box.bin, 'grigdesk-ctl')), path.join(box.root, 'bin/grigdesk-ctl'));
+  assert.equal(readlinkSync(path.join(box.bin, 'grigdesk-ctl')), path.join(box.root, 'bin/utilities/ctl'));
 });
 
 test('CL-3 чужой обычный файл сохраняется', async (t) => {

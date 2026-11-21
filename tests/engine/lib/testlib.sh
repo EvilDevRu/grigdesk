@@ -3,6 +3,26 @@
 TEST_COUNT=0
 TEST_FAILED=0
 
+fixture_factory() {
+  printf 'factory\n' >>"${TEST_ROOT:?}/candidate.calls"
+  "${FACTORY_TEST_CANDIDATE:?}" "$@"
+}
+
+fixture_route() {
+  printf 'route\n' >>"${TEST_ROOT:?}/candidate.calls"
+  "${FACTORY_TEST_CANDIDATE:?}" route "$@"
+}
+
+fixture_context() {
+  printf 'context\n' >>"${TEST_ROOT:?}/candidate.calls"
+  "${FACTORY_TEST_CANDIDATE:?}" context "$@"
+}
+
+fixture_profile_check() {
+  printf 'profile-check\n' >>"${TEST_ROOT:?}/candidate.calls"
+  "${FACTORY_TEST_CANDIDATE:?}" profile-check "$@"
+}
+
 test_note() {
   printf '# %s\n' "$*"
 }

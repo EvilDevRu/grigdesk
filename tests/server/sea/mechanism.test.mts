@@ -24,6 +24,7 @@ import {
 } from '../../../server/scripts/sea/buildSteps.mts';
 import type { NodeRuntime } from '../../../shared/node/nodeRuntime.ts';
 import { nodeArchive } from '../../../shared/node/seaBuild.ts';
+import { pinnedRuntime } from './helperFixture.mts';
 
 const ROOT = fileURLToPath(new URL('../../../', import.meta.url));
 const FIXTURES = path.join(ROOT, 'tests/server/sea/fixtures/mechanism');
@@ -42,33 +43,6 @@ async function scratch(t: TestContext): Promise<string> {
   }));
 
   return root;
-}
-
-/**
- * Читает закреплённый runtime сервера и проверяет, что архив уже есть в кэше.
- * Отсутствие архива — отказ, а не skip: механизм обязан проверяться на нём.
- */
-async function pinnedRuntime(): Promise<{ runtime: NodeRuntime; archive: string }> {
-  const runtime = JSON.parse(
-    await readFile(path.join(ROOT, 'server/build/node-runtime.json'), 'utf8'),
-  ) as NodeRuntime;
-  const { name } = nodeArchive(runtime);
-
-  for (const cache of ['tracker/.cache', 'relay/.cache']) {
-    const archive = path.join(ROOT, cache, name);
-
-    try {
-      if ((await stat(archive)).isFile()) {
-        return { runtime, archive };
-      }
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
-        throw error;
-      }
-    }
-  }
-
-  throw new Error(`Нет проверенного архива ${name}: сначала положите его в tracker/.cache`);
 }
 
 /**

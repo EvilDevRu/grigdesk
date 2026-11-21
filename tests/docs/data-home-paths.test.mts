@@ -29,8 +29,6 @@ const exceptions: Array<[string, string, string]> = [
   ['server/src/lib/kimi/sandbox.ts', 'const legacyEnv =', 'Защита настоящей старой раскладки.'],
   ['server/src/lib/dataHomeBoot.ts', 'server/.state', 'Сторож прежней раскладки.'],
   ['server/src/lib/dataHomeBoot.ts', "codeRoot, '.env'", 'Сторож прежнего файла настроек.'],
-  ['cli/commands.ts', 'server/.state', 'Переходное чтение до ручного переноса.'],
-  ['cli/commands.ts', "root, '.env'", 'Переходное чтение до ручного переноса.'],
   ['server/src/lib/grigDeskUpdate.ts', "'--work-root'", 'Рабочая копия обновления на диске кода.'],
   ['server/scripts/glmLiveSmoke.mts', "chatsDir: path.join(root, 'chats')", 'Временная тестовая область.'],
 ];
@@ -93,13 +91,12 @@ test('DP-1 данные не вычисляются от дерева кода',
     ...codeFiles('server/src', /\.(?:ts|js|mjs)$/, true),
     ...codeFiles('server/scripts', /\.(?:mts|mjs)$/),
     ...['cli', 'shared', 'desktop/src'].flatMap((dir) => codeFiles(dir, /\.ts$/, dir === 'shared')),
-    ...codeFiles('tracker/src', /\.ts$/, true),
     ...codeFiles('deploy', /\.sh$/, true),
     ...codeFiles('tools', /\.(?:ts|mts|mjs)$/),
     ...codeFiles('tools/mobile-phone', /\.mts$/),
     ...codeFiles('web/scripts', /\.(?:mjs|mts)$/),
     ...codeFiles('desktop/scripts', /\.mts$/),
-    'deploy/grigdesk-server.service', 'bin/grigdesk-ctl', 'tools/mobile', 'tools/relay',
+    'deploy/grigdesk-server.service', 'tools/build-go-utilities.sh', 'tools/mobile', 'tools/relay',
     'web/vite.config.js',
   ];
   const findings = pathFindings(root, files);

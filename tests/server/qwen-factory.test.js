@@ -1,58 +1,24 @@
 import assert from 'node:assert/strict';
-import { access, mkdir, readFile, stat, symlink, writeFile } from 'node:fs/promises';
+import { execFile } from 'node:child_process';
+import { access, chmod, mkdir, readFile, readdir, stat, symlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { promisify } from 'node:util';
 
 import { spawnRouteEngine } from '../../server/src/lib/factoryRouteCli.ts';
 import { buildHelper, loadHelpers } from '../../server/scripts/sea/helpers.mts';
 import { compareInventory, scanProject } from '../../server/scripts/sea/inventory.mts';
+import { stageFactoryCandidate } from '../../server/scripts/binary/factoryCandidate.mts';
+import { testFactoryBinary } from '../helpers/factoryBinary.mjs';
 import { cliJson, sourceRoot } from '../helpers/stageRunnerSettingsFixture.mjs';
 import { qwenFactoryFixture, qwenRouteFixture, routePublicOutput } from '../helpers/qwenFactoryFixture.mjs';
 import {
   QWEN_KEY, SECOND_KEY, qwenAdapter, qwenFixture, shellRun, until,
 } from '../helpers/qwenFixture.mjs';
+import { expectAttempt, prepareCommandServer } from './helpers/factoryGoRuntime.mts';
 
-/**
- * Новый раннер вызывается через общий shell registry с настоящими probe/catalog.
- * Дефолт проверяется по именованным полям, порядок строк не является контрактом.
- */
-function runnerScript(body) {
-  return [
-    'set -e',
-    'source "$FACTORY_HOME/lib/runners/index.sh"',
-    'runner_registry_load "$FACTORY_RUNNERS_DIR"',
-    body,
-  ].join('\n');
-}
-
-test('qwen-runner-catalog-and-default', async (t) => {
-  const { stage } = await qwenFactoryFixture(t);
-  const ready = stage.shell(runnerScript('runner_call qwen probe\nrunner_contract_check qwen'));
-
-  assert.equal(ready.status, 0, ready.stderr);
-
-  const catalog = stage.shell(runnerScript('runner_call qwen catalog'));
-
-  assert.equal(catalog.status, 0, catalog.stderr);
-
-  const rows = catalog.stdout.trim().split('\n').map((line) => line.split('\t'));
-
-  assert.equal(rows.length, 2);
-  assert.ok(rows.every((row) => row.length === 11));
-  assert.ok(rows.some((row) => row[0] === 'shared-model(openai)'));
-  assert.ok(rows.some((row) => row[0] === 'shared-model(anthropic)'));
-  assert.ok(rows.every((row) => row[1] === 'qwen'));
-  assert.equal(rows.find((row) => row[0] === 'shared-model(openai)')[2], 'default');
-
-  const policy = stage.shell(runnerScript('runner_call qwen default_policy'));
-  const fields = Object.fromEntries(policy.stdout.trim().split('\n').map((line) => line.split('=')));
-
-  assert.equal(policy.status, 0, policy.stderr);
-  assert.equal(fields.FAMILY, 'default');
-  assert.equal(fields.VERSION, 'latest');
-  assert.equal(fields.VARIANT, 'auto');
-});
+const execute = promisify(execFile);
 
 test('qwen-runner-model-options-refresh', async (t) => {
   const { qwen, stage } = await qwenFactoryFixture(t);
@@ -82,6 +48,87 @@ test('qwen-runner-model-options-refresh', async (t) => {
 
   assert.notEqual(invalid.status, 0);
   assert.match(`${invalid.stdout} ${invalid.stderr}`, /unavailable|недоступ|настро|конфиг|JSON/i);
+});
+
+test('Go проводит Qwen через metadata, ворота и один результат ACP', {
+  skip: process.platform !== 'linux',
+  timeout: 60_000,
+}, async (t) => {
+  const qwen = await qwenFixture(t);
+  const binary = testFactoryBinary();
+  const fx = await prepareCommandServer(t, qwen.root, binary, true);
+  const { config } = fx;
+  const trace = path.join(config.stateDir, 'qwen-trace.jsonl');
+  const profile = path.join(config.profilesDir, 'demo-profile/runners.env');
+  const ticket = path.join(qwen.root, 'ticket.json');
+
+  await chmod(config.stateDir, 0o700);
+  await qwen.fake({
+    status: true,
+    trace,
+    metadataTraceOptional: true,
+  });
+  await writeFile(profile, (await readFile(profile, 'utf8')).replace(
+    'PROJECT_RUNNER_PRIMARY=deepseek', 'PROJECT_RUNNER_PRIMARY=qwen',
+  ));
+  await writeFile(path.join(qwen.root, 'release-command'), '');
+  await writeFile(ticket, JSON.stringify({
+    schema: 1,
+    taskId: '71',
+    title: 'Factory Qwen',
+    description: 'Локальный ACP',
+    acceptanceCriteria: ['Один результат этапа'],
+    sourceUrl: 'https://example.test/71',
+  }));
+
+  const paths = [
+    '--profile', 'demo-profile', '--routes-dir', config.routesDir,
+    '--state-dir', config.stateDir, '--control-dir', config.factoryControlDir,
+  ];
+  const env = {
+    PATH: `${path.dirname(process.execPath)}:/usr/bin:/bin`,
+    SHELL: '/bin/bash',
+    HOME: qwen.home,
+    GRIGDESK_HOME: qwen.dataHome,
+    GRIGDESK_QWEN_HOME: qwen.qwenHome,
+    GRIGDESK_QWEN_BIN: qwen.bin,
+    FACTORY_HOME: path.join(sourceRoot, 'engine'),
+    FACTORY_PROFILES_DIR: config.profilesDir,
+    NODE_BIN: process.execPath,
+    TMPDIR: '/tmp',
+    FACTORY_QWEN_CREDENTIAL_NAMES: 'QWEN_TEST_KEY,SECOND_QWEN_KEY',
+    QWEN_TEST_KEY: QWEN_KEY,
+    SECOND_QWEN_KEY: SECOND_KEY,
+  };
+  const invoke = (operation, ...args) => execute(binary, ['71', operation, ...paths, ...args], {
+    env,
+    timeout: 25_000,
+  });
+
+  try {
+    await execute(process.execPath, [path.join(sourceRoot, 'server/scripts/qwenRunner.mts'),
+      '--metadata', 'options', '--bin', qwen.bin], { env, timeout: 10_000 });
+    await invoke('start', '--route', 'command', '--ticket-json', ticket);
+
+    const waiting = await expectAttempt(fx.adapter, (attempt) => attempt.cursor?.node === 'gate_accept');
+
+    await invoke('gate', '--attempt', waiting.attempt, '--node', 'gate_accept',
+      '--decision', 'approved', '--commit-only');
+    await invoke('resume', '--attempt', waiting.attempt);
+    await expectAttempt(fx.adapter, (attempt) => attempt.terminal === 'completed');
+  } catch (error) {
+    const dir = path.join(config.stateDir, 'logs/runs/t71/BUILD');
+    const runs = await readdir(dir).catch(() => []);
+    const diagnostics = await Promise.all(runs.map((run) =>
+      readFile(path.join(dir, run, 'stderr.log'), 'utf8').catch(() => '')));
+
+    throw new Error(diagnostics.join('\n') || String(error), { cause: error });
+  }
+
+  const records = (await readFile(trace, 'utf8')).trim().split('\n').map((line) => JSON.parse(line));
+
+  assert.equal(records.filter((row) => row.event === 'status-current').length, 1);
+  assert.equal(records.find((row) => row.event === 'status-current').response.result.isError, false);
 });
 
 test('qwen-secrets-systemd-and-detached', async (t) => {
@@ -202,154 +249,6 @@ test('qwen-secret-repeat-and-invalid', async (t) => {
   }
 });
 
-/**
- * Настоящий launcher владеет run identity и каналом stage_result.
- * Fake модели получает статусный MCP из wrapper, самостоятельно его не изобретает.
- */
-async function launchQwen(t, { mode = 'workspace-write', options = {}, timeout = 8 } = {}) {
-  const { qwen, stage } = await qwenFactoryFixture(t);
-  const runDir = path.join(stage.env.STATE_DIR, 'logs/runs/t43/CHECK/run-qwen');
-
-  if (mode === 'state-only') {
-    qwen.trace = path.join(stage.env.STATE_DIR, 'fake-trace.jsonl');
-  }
-
-  const own = path.join(mode === 'state-only' ? stage.env.STATE_DIR : qwen.workspace, 'own-effect');
-  const denied = [
-    path.join(stage.root, 'sibling-canary'),
-    path.join(stage.env.FACTORY_CONTROL_ROOT, 'private-canary'),
-    ...(mode === 'state-only' ? [path.join(qwen.workspace, 'code-canary')] : []),
-  ];
-
-  for (const file of denied) {
-    await mkdir(path.dirname(file), { recursive: true });
-    await writeFile(file, 'original');
-  }
-
-  await qwen.fake({
-    status: true,
-    trace: qwen.trace,
-    bounds: { allowed: [own], denied },
-    ...(options.partial ? {
-      eofAfterTool: true,
-      effect: own,
-      stderr: QWEN_KEY,
-      tool: { name: 'run_shell_command', args: { command: 'printf allowed > own-effect' } },
-    } : {}),
-    ...options,
-  });
-
-  const result = await shellRun([
-    'set -uo pipefail',
-    'source "$FACTORY_HOME/lib/core.sh"',
-    'source "$FACTORY_HOME/lib/pipeline-store.sh"',
-    'source "$FACTORY_HOME/lib/run-state.sh"',
-    'source "$FACTORY_HOME/lib/runners/index.sh"',
-    'source "$FACTORY_HOME/lib/runner-launcher.sh"',
-    'pipeline_store_route_init 43 CHECK || exit $?',
-    'factory_control_init synthetic-control || exit $?',
-    'run_state_begin 43 CHECK run-qwen 1 synthetic-status-token || exit $?',
-    'runner_registry_load "$FACTORY_RUNNERS_DIR" || exit $?',
-    'runner_call qwen probe || exit $?',
-    'runner_launch qwen 43 "Выполни этап" CHECK "shared-model(openai)" "" \\',
-    `  ${timeout} "$QWEN_TEST_RUN_DIR" run-qwen 1 synthetic-status-token`,
-    'rc=$?',
-    'printf "CLASSIFICATION=%s\\n" "$(runner_call qwen classify "$QWEN_TEST_RUN_DIR" "$rc")"',
-    'exit "$rc"',
-  ].join('\n'), {
-    cwd: qwen.workspace,
-    env: {
-      ...stage.env,
-      FACTORY_ROUTE_FILESYSTEM_POLICY: mode,
-      QWEN_TEST_RUN_DIR: runDir,
-    },
-    timeout: 45000,
-  });
-
-  return {
-    qwen,
-    stage,
-    runDir,
-    result,
-    own,
-    denied,
-  };
-}
-
-test('qwen-node-never-status-and-bounds', async (t) => {
-  for (const mode of ['state-only', 'workspace-write']) {
-    const { qwen, stage, runDir, result, own, denied } = await launchQwen(t, {
-      mode,
-      options: {
-        ask: true,
-        askDeniedContinues: true,
-        tool: { name: 'ask_user_question', args: { question: 'Можно?' } },
-      },
-    });
-
-    assert.equal(result.status, 0, `${result.stdout}${result.stderr}`);
-    assert.match(result.stdout, /CLASSIFICATION=ok/);
-    assert.equal(await readFile(path.join(runDir, 'last.md'), 'utf8'), 'Новый ответ');
-    assert.match(await readFile(path.join(stage.env.STATE_DIR, 't43.pipeline'), 'utf8'), /CHECK=done/);
-
-    const frames = (await qwen.records()).filter((item) => item.frame?.method === 'session/new');
-
-    assert.ok(frames.length > 0);
-
-    const expectedCwd = mode === 'state-only' ? stage.env.STATE_DIR : qwen.workspace;
-
-    assert.equal(frames.at(-1).frame.params.cwd, expectedCwd);
-    assert.equal(JSON.stringify(await qwen.records()).includes(QWEN_KEY), false);
-    assert.equal(await readFile(own, 'utf8'), 'allowed');
-
-    for (const file of denied) {
-      assert.equal(await readFile(file, 'utf8'), 'original');
-    }
-
-    const attempts = (await qwen.records()).filter((item) => item.event === 'bounds');
-
-    assert.equal(attempts.length, denied.length, 'Проверяются эффекты внутри child, а не только argv');
-    assert.ok(attempts.every((attempt) => attempt.denied));
-
-    const permission = (await qwen.records()).find((item) => item.frame?.id === 'permission-1'
-      && !item.frame.method);
-
-    assert.ok(permission, 'Wrapper обязан ответить на запрос разрешения');
-    assert.notEqual(permission.frame.result?.outcome?.optionId, 'allow_once');
-
-    const status = (await qwen.records()).filter((item) => item.event.startsWith('status-'));
-
-    assert.equal(status.length, 2, 'MCP должен отклонить stale и принять текущий статус');
-  }
-});
-
-test('qwen-timeout-cleans-own-tree', async (t) => {
-  const { qwen, runDir, result } = await launchQwen(t, { options: { hold: true }, timeout: 1 });
-
-  assert.equal(result.status, 124, `${result.stdout}${result.stderr}`);
-  assert.match(result.stdout, /CLASSIFICATION=timeout/);
-
-  const meta = await readFile(path.join(runDir, 'meta.env'), 'utf8');
-  const pid = Number(/^PID=(\d+)$/m.exec(meta)?.[1]);
-
-  assert.ok(pid > 0);
-  assert.throws(() => process.kill(pid, 0), { code: 'ESRCH' });
-
-  const prompts = (await qwen.records()).filter((item) => item.frame?.method === 'session/prompt');
-
-  assert.equal(prompts.length, 1, 'Timeout не запускает повторный ход');
-});
-
-test('qwen-partial-failure-not-replayed', async (t) => {
-  const { qwen, result, own } = await launchQwen(t, { options: { partial: true } });
-
-  assert.notEqual(result.status, 0);
-  assert.match(result.stdout, /CLASSIFICATION=unknown/);
-  assert.equal((await qwen.records()).filter((item) => item.frame?.method === 'session/prompt').length, 1);
-  assert.equal(await readFile(own, 'utf8'), 'effect', 'Сбой воспроизводится после выполненного эффекта');
-  assert.equal(`${result.stdout}${result.stderr}`.includes(QWEN_KEY), false);
-});
-
 test('qwen-source-and-packaged-helper', async (t) => {
   const fixture = await qwenFixture(t);
   const helpers = await loadHelpers(path.join(sourceRoot, 'server/build/helpers.json'), sourceRoot);
@@ -364,11 +263,11 @@ test('qwen-source-and-packaged-helper', async (t) => {
 
   const inventory = JSON.parse(await readFile(path.join(sourceRoot, 'server/build/sea-inventory.json')));
   const belongsToQwen = (point) => point.file === helper.entry
-    || point.file === 'engine/lib/runners/qwen.sh' || point.file.startsWith('server/src/lib/qwen/');
+    || point.file.startsWith('server/src/lib/qwen/');
   const scanned = await scanProject(sourceRoot, {
     codeRoots: ['server/scripts', 'server/src/lib/qwen'],
     codeExtensions: ['.ts', '.mts', '.js', '.mjs'],
-    shellRoots: ['engine/lib/runners'],
+    shellRoots: [],
     shellExtensions: ['.sh'],
   });
 
@@ -387,6 +286,13 @@ test('qwen-source-and-packaged-helper', async (t) => {
   await symlink(process.execPath, path.join(bundleRoot, 'runtime/node/bin/node'));
   await symlink(path.join(sourceRoot, 'server/node_modules'), path.join(bundleRoot, 'node_modules'));
   await writeFile(path.join(helpersDirectory, 'helpers.json'), JSON.stringify(helpers));
+  await stageFactoryCandidate({
+    root: bundleRoot,
+    binary: testFactoryBinary(),
+    profileAbi: path.join(sourceRoot, 'engine/lib/delivery_contract.py'),
+    os: process.platform,
+    arch: process.arch,
+  });
 
   const built = await buildHelper({
     manifestPath: path.join(sourceRoot, 'server/build/helpers.json'),

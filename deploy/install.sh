@@ -137,11 +137,14 @@ echo "→ GrigDesk: $GRIGDESK_DIR"
 echo "→ node:   $NODE_BIN ("$("$NODE_BIN" -v)")"
 
 if [[ ! -f "$GRIGDESK_DIR/release.json" && -z "$_grigdesk_server_binary" ]]; then
+  echo "→ Сборка Go-фабрики…"
+  bash "$GRIGDESK_DIR/tools/build-factory.sh" "$GRIGDESK_DIR/bin"
+
   echo "→ Зависимости сервера…"
   ( cd "$GRIGDESK_DIR/server" && npm install --no-audit --no-fund )
   # DeepSeek — один из исполнителей: без компилятора или сети установка GrigDesk продолжается.
   ( cd "$GRIGDESK_DIR/server" && npm run deepseek:prepare ) || \
-    echo "⚠ DeepSeek не подготовлен; повтор после установки: bin/grigdesk-ctl deps" >&2
+    echo "⚠ DeepSeek не подготовлен; повтор после установки: grigdesk-ctl deps" >&2
 
   echo "→ Зависимости web + сборка…"
   ( cd "$GRIGDESK_DIR/web" && npm install --no-audit --no-fund && npm run build )

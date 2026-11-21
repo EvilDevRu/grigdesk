@@ -124,6 +124,7 @@ function sendError(reply: FastifyReply, error: unknown) {
     not_found: 404,
     session_not_found: 404,
     challenge_not_found: 404,
+    deployment_busy: 409,
     duplicate_selector: 409,
     trust_required: 409,
     origin_mismatch: 409,

@@ -10,7 +10,9 @@ import { sha256 } from './hash.ts';
  * Заключительный LF входит в подписанные байты и digest сохранённого задания.
  */
 export function releaseSignedBytes(envelope: ReleaseEnvelope): Buffer {
-  return Buffer.from(`GrigDesk release v2\n${canonicalJson(envelope.payload)}\n`, 'utf8');
+  const format = envelope.format === 3 ? 3 : 2;
+
+  return Buffer.from(`GrigDesk release v${format}\n${canonicalJson(envelope.payload)}\n`, 'utf8');
 }
 
 /**

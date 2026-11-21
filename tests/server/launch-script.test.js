@@ -21,7 +21,7 @@ function sandbox(t, suffix = 'repo') {
   const log = path.join(home, 'calls.log');
 
   t.after(() => rmSync(home, { recursive: true, force: true }));
-  mkdirSync(path.join(repo, 'bin'), { recursive: true });
+  mkdirSync(path.join(repo, 'bin/utilities'), { recursive: true });
   mkdirSync(path.join(repo, 'deploy/lib'), { recursive: true });
   mkdirSync(stubs);
 
@@ -31,7 +31,7 @@ function sandbox(t, suffix = 'repo') {
   }
 
   writeFileSync(path.join(repo, '.env'), 'GRIGDESK_PORT=18149\n');
-  writeFileSync(path.join(repo, 'bin/grigdesk-ctl'), `#!/bin/bash
+  writeFileSync(path.join(repo, 'bin/utilities/ctl'), `#!/bin/bash
 printf 'grigdesk-ctl %s\\n' "$*" >> "$STUB_LOG"
 printf 'first-path %s\\n' "\${PATH%%:*}" >> "$STUB_LOG"
 printf '%s' "\${STUB_STDERR:-}" >&2

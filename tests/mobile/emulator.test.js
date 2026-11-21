@@ -151,6 +151,10 @@ test('MV-02: allowlist исключает чужие URL, traversal и спец�
   assert.equal(allowedRequest('POST', '/api/mobile/v1/tasks/7/gate'), true);
   assert.equal(allowedRequest('GET', '/api/mobile/v1/chat-options'), true);
   assert.equal(allowedRequest('GET', '/api/mobile/v1/attention'), true);
+  assert.equal(allowedRequest('GET', '/api/mobile/v1/tracker/tasks'), true);
+  assert.equal(allowedRequest('GET', '/api/mobile/v1/tracker/tasks/7/launch-options'), true);
+  assert.equal(allowedRequest('POST', '/api/mobile/v1/tracker/tasks/7/launch'), true);
+  assert.equal(allowedRequest('POST', '/api/mobile/v1/tracker/tasks/7/launch/extra'), false);
   assert.equal(allowedRequest('POST', '/api/mobile/v1/chats'), true);
   assert.equal(allowedRequest('POST', '/api/mobile/v1/chats/abc/settings'), true);
   assert.equal(allowedRequest('POST', '/api/mobile/v1/chats/abc/read'), true);

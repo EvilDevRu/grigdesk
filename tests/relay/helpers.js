@@ -6,9 +6,59 @@ import path from 'node:path';
 import tls from 'node:tls';
 import { promisify } from 'node:util';
 
-import { createLineReader } from '../../relay/src/protocol.ts';
+import { buildTestGo, fixtureGo } from '../helpers/goBuildFixture.mts';
+import { freePort, startRelay } from './binary/helpers.js';
 
 const execute = promisify(execFile);
+
+/**
+ * Выбирает Go-посредника для локальных интеграционных тестов.
+ * Подготовленный файл проверяется тем же helper, что кандидаты выпуска.
+ */
+export function relayBinary() {
+  return fixtureGo('grigdesk-relay');
+}
+
+/**
+ * Проверяет TLS и доказательство установки на Go-процессе.
+ * Тестовый запуск принимает только назначенный loopback и синтетическую квитанцию.
+ */
+export function managedRelayFixture(t, env, host, port, proofFile) {
+  return startRelay(t, {
+    binary: buildTestGo('managed-fixture', ['test', '-c', '-trimpath'], './utilities/relay/internal/managed'),
+    env,
+    args: ['-test.run=^TestServeFixture$', '-fixture-address', `${host}:${port}`,
+      '-fixture-proof', proofFile],
+  });
+}
+
+/**
+ * Запускает Go с переданным синтетическим relay.env.
+ * Закрытие ждёт завершения собственного процесса.
+ */
+export async function relayFromEnv(t, env) {
+  const fixture = await startRelay(t, { binary: relayBinary(), env });
+
+  return {
+    port: Number(env.RELAY_PORT),
+    output: fixture.output,
+    close: async () => {
+      fixture.child.kill('SIGTERM');
+      await fixture.exited;
+    },
+  };
+}
+
+/**
+ * Запускает поставочный Go-файл с синтетическими TLS и токенами.
+ * Выбирает свободный порт, на котором затем подключаются тестовые клиенты.
+ */
+export async function relayFixture(t, cert, overrides = {}) {
+  return relayFromEnv(t, relayEnv({
+    cert,
+    overrides: { ...overrides, RELAY_PORT: String(await freePort()) },
+  }));
+}
 
 /**
  * Выдаёт каждому тесту собственный каталог с синтетическими ключами.
@@ -124,7 +174,7 @@ export function connect(port, fp) {
  */
 export function readLine(socket, timeoutMs = 3000) {
   return new Promise((resolve, reject) => {
-    const reader = createLineReader();
+    let pending = Buffer.alloc(0);
     const timer = setTimeout(() => finish(new Error('line_timeout')), timeoutMs);
 
     /**
@@ -153,18 +203,18 @@ export function readLine(socket, timeoutMs = 3000) {
     }
 
     /**
-     * Дроблёная строка проходит тот же bounded decoder, что рабочий протокол.
-     * Ошибка parser завершает ожидание с обязательной очисткой listeners.
+     * Соединяет части до LF и ограничивает размер на случай обрыва протокола.
+     * Байты после LF возвращаются следующему чтению.
      */
     function receive(chunk) {
-      try {
-        const result = reader.push(chunk);
+      pending = Buffer.concat([pending, chunk]);
 
-        if (result) {
-          finish(null, result);
-        }
-      } catch (error) {
-        finish(error);
+      const end = pending.indexOf(10);
+
+      if (end >= 0 && end <= 8192) {
+        finish(null, { line: pending.subarray(0, end).toString(), rest: pending.subarray(end + 1) });
+      } else if (pending.length > 8192) {
+        finish(new Error('line_too_long'));
       }
     }
 

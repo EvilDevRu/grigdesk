@@ -81,7 +81,6 @@ import {
 } from '../../lib/factoryRouteCli.ts';
 import {
   FactoryRunnerControl,
-  RunnerControlCommandError,
   RunnerControlInputError,
 } from '../../lib/runnerControl.ts';
 import { listInstalledRunners } from '../../lib/runnersCatalog.ts';
@@ -351,13 +350,7 @@ async function factoryModule(
     arbiterLive = null, factoryAdmission,
   } = opts;
   const cfg = { factoryHome: config.factoryHome, stateDir: config.stateDir };
-  const runnerControl = new FactoryRunnerControl({
-    factoryBin: config.factoryBin,
-    stateDir: config.stateDir,
-    configRoot: config.factoryConfigRoot,
-    profilesDir: config.profilesDir,
-    routeConfig: config,
-  });
+  const runnerControl = new FactoryRunnerControl(config);
   // Все start одной задачи проходят через один promise-tail.
   // Detached engine может не успеть опубликовать trusted identity до ответа HTTP, поэтому
   // одного хвоста недостаточно: для такого bootstrap сохраняем process-local fail-closed
@@ -1220,6 +1213,17 @@ async function factoryModule(
       });
 
       if (!confirmed.ok) {
+        // Короткий Go resume может завершить маршрут внутри окна запуска.
+        // Успех подтверждает terminal ledger той же попытки.
+        if (config.factoryEngineProtocol === 'go-v1' && confirmed.outcome === 'exited') {
+          const terminal = await factoryState.readTrustedAttempt(id).catch(() => null);
+
+          if (terminal?.attempt === attempt
+            && terminal.terminal === 'completed' && terminal.cursor?.stop === 'done') {
+            return { ...launch, ok: true };
+          }
+        }
+
         const failure = routeFailure(confirmed.message);
 
         fastify.log.warn(
@@ -1566,6 +1570,35 @@ async function factoryModule(
   }
 
   /**
+   * Короткий запуск Go может закончить работу между опросами PID.
+   * Только завершение или пауза на воротах в доверенном журнале того же
+   * dispatch подтверждают старт после выхода процесса.
+   */
+  async function confirmedShortGoLaunch(
+    id: string, registry: Registry | null, expected: Parameters<typeof startRegistryIdentity>[1],
+  ): Promise<boolean> {
+    if (config.factoryEngineProtocol !== 'go-v1' || registry?.ORCH_PID !== ''
+      || typeof factoryState.readTrustedAttempt !== 'function') {
+      return false;
+    }
+
+    const trusted = await factoryState.readTrustedAttempt(id, registry).catch(() => null);
+
+    if (!trusted || trusted.queueDispatchId !== expected.queueDispatchId
+      || trusted.profile !== expected.profile || trusted.route !== expected.route
+      || trusted.catalogHash !== expected.expectedCatalogHash
+      || (trusted.runnerPrimaryOverride ?? '') !== (expected.runnerPrimaryOverride ?? '')) {
+      return false;
+    }
+
+    const cursor = trusted.cursor;
+
+    return Boolean(cursor && (trusted.terminal === 'completed' && cursor.stop === 'done'
+      || trusted.terminal === null && cursor.state === 'paused'
+        && cursor.pauseReason === `human gate: ${cursor.node}`));
+  }
+
+  /**
    * Старт после общего preflight начинает git/slot/ticket/engine side effects.
    * Отказ подготовки до spawn допускает повтор только после сверки оставшихся артефактов.
    */
@@ -1721,7 +1754,12 @@ async function factoryModule(
         launchIdentity = '';
         launchConfirmations = 0;
       }
-      if (launchConfirmations >= 4 && registry) {
+
+      const unitExited = launchConfirmations < 4 && launch.unit && !await routeUnitActive(id);
+      const shortLaunch = launchConfirmations < 4 && !holdStart && (unitExited || !launch.unit)
+        && await confirmedShortGoLaunch(id, registry, identityArgs);
+
+      if ((launchConfirmations >= 4 || shortLaunch) && registry) {
         await accessService({ stateDir: config.stateDir })?.sealPipeline(
           id, dispatchId, String(registry.ATTEMPT_ID),
         );
@@ -1758,7 +1796,7 @@ async function factoryModule(
       }
       // Hold-юнит завершается штатно: мёртвый юнит с полной held-identity — не отказ,
       // а нормальный путь к подтверждению. Без identity быстрый выход = отказ создания.
-      if (launch.unit && !(await routeUnitActive(id)) && !(holdStart && identity)) {
+      if (unitExited && !(holdStart && identity)) {
         if (slot.source === 'new') releaseSlot({ stateDir: config.stateDir, task: id });
         const tail = await readLogSince(launch.logFile, launch.logOffset, { lines: 10, limit: 2000 });
         const failure = routeFailure(tail);
@@ -2946,12 +2984,20 @@ async function factoryModule(
       await accessService({ stateDir: config.stateDir })?.admitPipelineProvider(target, id,
         managed.trusted.attempt, graph.daemonAlive);
 
-      return await runnerControl.switch({
+      const identity = {
         task: id,
+        attempt: managed.trusted.attempt,
+        profile: managed.trusted.profile,
         stage,
-        target,
-        identity: managed.trusted,
-      });
+        node: nodeId,
+      };
+      const capability = await probeFactoryStageRunnerSettingsCapability(config, identity);
+
+      if (capability.status !== 'supported') {
+        return reply.code(503).send({ error: 'settings_unavailable', message: capability.message });
+      }
+
+      return await runnerControl.changeStageProvider(identity, target, 'restart');
     } catch (err) {
       const failure = runtimeLaunchFailure(err);
 
@@ -2961,17 +3007,15 @@ async function factoryModule(
       if (err instanceof RunnerControlInputError) {
         return reply.code(400).send({ error: 'bad_runner_switch', message: errorMessage(err) });
       }
-      if (err instanceof RunnerControlCommandError) {
+      if (err instanceof StageRunnerCommandError) {
         return reply.code(409).send({ error: 'runner_switch_rejected', message: errorMessage(err) });
       }
       return reply.code(500).send({ error: 'runner_switch_failed', message: errorMessage(err) });
     }
   });
 
-  // Stage-level override исполнителя: set пишет RUNNER_OVERRIDE_STAGE_<STAGE> через
-  // CLI движка и вступает в силу на СЛЕДУЮЩЕМ запуске этапа. Активный этап меняется
-  // только через runner/switch — иначе override и фактический процесс разъедутся.
-  // Пустой primary — снять override (идемпотентно).
+  // Настройка исполнителя относится к следующему запуску узла.
+  // Активный этап перезапускается через runner/switch с точной identity.
   fastify.post<FactoryRoute>('/api/tasks/:id/runner/override', async (request, reply) => {
     const id = String(request.params.id).replace(/[^0-9]/g, '');
     const stage = String(request.body?.stage || '').toUpperCase();
@@ -3018,20 +3062,22 @@ async function factoryModule(
 
         await accessService({ stateDir: config.stateDir })?.admitPipelineProvider(primary, id,
           managed.trusted.attempt, graph.daemonAlive);
-
-        return await runnerControl.setStage({
-          task: id,
-          stage,
-          primary,
-          identity: managed.trusted,
-        });
       }
 
-      return await runnerControl.clearStage({
+      const identity = {
         task: id,
+        attempt: managed.trusted.attempt,
+        profile: managed.trusted.profile,
         stage,
-        identity: managed.trusted,
-      });
+        node: nodeId,
+      };
+      const capability = await probeFactoryStageRunnerSettingsCapability(config, identity);
+
+      if (capability.status !== 'supported') {
+        return reply.code(503).send({ error: 'settings_unavailable', message: capability.message });
+      }
+
+      return await runnerControl.changeStageProvider(identity, primary || null, 'next');
     } catch (err) {
       const failure = runtimeLaunchFailure(err);
 
@@ -3041,7 +3087,7 @@ async function factoryModule(
       if (err instanceof RunnerControlInputError) {
         return reply.code(400).send({ error: 'bad_runner_override', message: errorMessage(err) });
       }
-      if (err instanceof RunnerControlCommandError) {
+      if (err instanceof StageRunnerCommandError) {
         return reply.code(409).send({ error: 'runner_override_rejected', message: errorMessage(err) });
       }
       return reply.code(500).send({ error: 'runner_override_failed', message: errorMessage(err) });

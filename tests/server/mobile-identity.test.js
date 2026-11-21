@@ -10,7 +10,6 @@ import {
   fingerprintOf,
   renderRelayEnv,
 } from '../../server/src/lib/mobile/identity.ts';
-import { readConfig } from '../../relay/src/config.ts';
 import { temporary } from '../relay/helpers.js';
 
 test('MB-01…MB-04: постоянная личность, приватные файлы и совместимый relay.env без токенов', async (t) => {
@@ -49,7 +48,7 @@ test('MB-01…MB-04: постоянная личность, приватные �
       }),
   );
 
-  assert.equal(readConfig(env).cert, relay.certPem);
+  assert.equal(Buffer.from(env.RELAY_TLS_CERT_B64, 'base64').toString(), relay.certPem);
   assert.equal(
     env.RELAY_BRAIN_TOKEN_SHA256,
     createHash('sha256').update(relay.brainToken).digest('hex'),

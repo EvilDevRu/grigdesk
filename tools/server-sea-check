@@ -7,7 +7,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 if [[ $# == 0 ]]; then
   CHECK_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/grigdesk-server-sea-check.XXXXXX")
   OUT_DIR=${GRIGDESK_SEA_RELEASE_DIR:-"$CHECK_ROOT/release"}
-  CACHE_DIR=${GRIGDESK_SEA_CACHE_DIR:-"$CHECK_ROOT/cache"}
+  CACHE_DIR=${GRIGDESK_SEA_CACHE_DIR:-"${XDG_CACHE_HOME:-$HOME/.cache}/grigdesk/server-sea"}
 elif [[ $# == 2 && -n "$1" && -n "$2" ]]; then
   OUT_DIR=$1
   CACHE_DIR=$2
@@ -18,6 +18,7 @@ fi
 
 OUT_DIR=$(realpath -m -- "$OUT_DIR")
 CACHE_DIR=$(realpath -m -- "$CACHE_DIR")
+export GRIGDESK_SEA_CACHE_DIR="$CACHE_DIR"
 export npm_config_cache=${npm_config_cache:-"$CACHE_DIR/npm"}
 
 npm --prefix "$ROOT/server" run build:sea -- --out-dir "$OUT_DIR" --cache-dir "$CACHE_DIR"

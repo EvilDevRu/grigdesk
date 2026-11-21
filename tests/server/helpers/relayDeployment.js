@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -249,6 +250,37 @@ export async function startDeployment(f, job, requestId = `start-${job.id}`) {
   assert.equal(response.statusCode, 202, response.body);
 
   return response;
+}
+
+/**
+ * Возобновляет тот же job с новой квитанцией и повторным вводом тестового пароля.
+ * Доверенный отпечаток остаётся прежним, поэтому повтор возвращается к credentials.
+ */
+export async function retrySetup(f, previous, password = f.ssh.password) {
+  const current = await deploymentRequest(f, 'POST', `/${previous.id}/retry`, {
+    requestId: randomUUID(),
+    revision: previous.revision,
+  });
+
+  assert.equal(current.statusCode, 202, current.body);
+
+  const probed = await deploymentRequest(f, 'POST', `/${previous.id}/probe`, {
+    revision: current.json().revision,
+  });
+
+  assert.equal(probed.statusCode, 200, probed.body);
+
+  const awaiting = await waitDeployment(f, previous.id, ['awaiting_credentials']);
+  const response = await deploymentRequest(f, 'POST', `/${previous.id}/credentials`,
+    Buffer.from(JSON.stringify({
+      revision: awaiting.revision,
+      attemptId: randomUUID(),
+      password,
+    })), { 'content-type': 'application/octet-stream' });
+
+  assert.equal(response.statusCode, 202, response.body);
+
+  return waitDeployment(f, previous.id, ['awaiting_confirmation']);
 }
 
 /**

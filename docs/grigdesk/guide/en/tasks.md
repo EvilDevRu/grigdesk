@@ -112,7 +112,7 @@ Board status and read access do not prove write access; only creation's response
 Attachments require driver support; the agent reports screenshots it could not attach.
 
 Installed agents receive the CLI through their installation's PATH. Restore a missing distribution rather than
-substituting another tracker. From source, `bin/grigdesk-ctl tracker` accepts the same arguments,
+substituting another tracker. From source, `bin/utilities/ctl tracker` accepts the same arguments,
 using the binary or falling back to source when absent.
 
 ## Result

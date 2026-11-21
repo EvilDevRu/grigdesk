@@ -274,7 +274,7 @@ async function verifyHelperGunzip(file: string, metadata: BootstrapMetadata): Pr
  */
 function assertDownloadBytes(metadata: BootstrapMetadata, envelope: ReleaseEnvelope): void {
   const artifacts = envelope.payload.artifacts;
-  const base = metadata.indexSize + metadata.compressedSize;
+  const base = metadata.indexSize + metadata.compressedSize + (artifacts.control?.size ?? 0);
   const expected = {
     local: base + artifacts.desktop.size + artifacts.server.size,
     remote: base + artifacts.desktop.size,

@@ -20,7 +20,7 @@ const SQLITE_WARNING_ALLOWED = new Set<string>();
 // Где действительно запускают собственные программы: лаунчеры, юнит, установщик,
 // команды пакетов и общий прогон. Приватные каталоги и сборку сюда не включаем.
 const LAUNCH_FILES = [
-  'bin/grigdesk-ctl',
+  'tools/build-go-utilities.sh',
   'deploy/restart.sh',
   'deploy/lib/runtime-env.sh',
   'deploy/install.sh',
@@ -29,7 +29,6 @@ const LAUNCH_FILES = [
   'desktop/src/serverProcess.ts',
   'server/package.json',
   'web/package.json',
-  'tracker/package.json',
   'tests/run-all.sh',
 ];
 

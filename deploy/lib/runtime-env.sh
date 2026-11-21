@@ -345,6 +345,7 @@ grigdesk_add_cli_paths() {
   local grigdesk_root=${1:-}
   local cli_bin_dir
   local cli_path_entry
+  local utilities_bin
   local -a cli_path_entries
   if [[ -z "$grigdesk_root" ]]; then
     grigdesk_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P) || return 1
@@ -363,8 +364,15 @@ grigdesk_add_cli_paths() {
   # пользовательский симлинк может всё ещё вести в другой checkout.
   IFS=: read -r -a cli_path_entries <<<"${PATH:-}"
   PATH="$grigdesk_root/bin"
+  if [[ ! -f "$grigdesk_root/release.json" && -f "$grigdesk_root/tools/build-go-utilities.sh" ]]; then
+    utilities_bin="$grigdesk_root/bin/utilities"
+    PATH="$utilities_bin:$PATH"
+  fi
   for cli_path_entry in "${cli_path_entries[@]}"; do
-    [[ "$cli_path_entry" == "$grigdesk_root/bin" ]] && continue
+    if [[ "$cli_path_entry" == "$grigdesk_root/bin" ||
+      -n "${utilities_bin:-}" && "$cli_path_entry" == "$utilities_bin" ]]; then
+      continue
+    fi
     PATH+=":$cli_path_entry"
   done
 

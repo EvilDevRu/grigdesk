@@ -78,7 +78,7 @@ fs.rm = async (...args) => {
 `);
 
   const session = startPty(t, {
-    argv: [process.execPath, '--import', preload, path.join(box.root, 'cli/main.ts'),
+    argv: [process.execPath, '--import', preload, path.join(box.root, 'tests/fixtures/legacy-ctl/cli/main.ts'),
       ...mode === 'delete' && !menu ? ['artifacts-cleanup', ...json ? ['--json'] : []] : []],
     env: {
       ...box.environment,

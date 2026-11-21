@@ -5,11 +5,13 @@ import test from 'node:test';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 
+import { fixtureGo } from '../helpers/goBuildFixture.mts';
+
 const root = path.resolve(import.meta.dirname, '../..');
 const execute = promisify(execFile);
 
 test('INSTALL-GUIDE: обе редакции используют shell и разделяют два источника доверия', async () => {
-  const help = await execute('bash', ['bin/grigdesk-ctl', 'dist', '--help'], { cwd: root });
+  const help = await execute(fixtureGo('grigdesk-ctl'), ['dist', '--help'], { cwd: root });
 
   for (const language of ['ru', 'en']) {
     const guide = await fs.readFile(path.join(root,

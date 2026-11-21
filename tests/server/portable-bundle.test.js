@@ -85,14 +85,14 @@ async function fixture(t) {
   t.after(() => fs.rm(temporary, { recursive: true, force: true }));
   await fs.writeFile(path.join(root, 'VERSION'), '0.1.0\n');
 
-  for (const relative of [...sentinels, 'bin/grigdesk-ctl', 'deploy/lib/runtime-env.sh']) {
+  for (const relative of [...sentinels, 'bin/utilities/ctl', 'deploy/lib/runtime-env.sh']) {
     const file = path.join(root, relative);
 
     await fs.mkdir(path.dirname(file), { recursive: true });
     await fs.writeFile(file, `PRIVATE:${relative}`);
   }
 
-  for (const relative of ['bin/grigdesk-ctl', 'deploy/lib/runtime-env.sh']) {
+  for (const relative of ['bin/utilities/ctl', 'deploy/lib/runtime-env.sh']) {
     await fs.copyFile(path.join(repository, relative), path.join(root, relative));
   }
 

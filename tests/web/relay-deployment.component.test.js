@@ -359,6 +359,25 @@ for (const locale of ['ru', 'en']) {
       }
     });
   }
+
+  test(`RD-UI-05: продолжение выбранного выпуска после обрыва, ${locale}`, async (t) => {
+    const h = await relayUi(t, { locale, jobs: [{
+      id: 'resume-job',
+      revision: 8,
+      state: 'recovery_required',
+      mode: 'restore',
+      error: { code: 'relay_resume_required' },
+      steps: [],
+    }] });
+
+    const reopen = locale === 'ru' ? /^Продолжить настройку\s*$/u : /^Continue setup\s*$/u;
+
+    assert.ok(h.button(reopen), 'Открытие задания подписано отдельно от продолжения установки по SSH');
+    await h.click(reopen);
+    assert.match(h.text(), locale === 'ru'
+      ? /Продолжить установку по SSH/u : /Resume installation over SSH/u);
+    assert.match(h.text(), locale === 'ru' ? /тому же VPS/u : /the same VPS/u);
+  });
 }
 
 test('RD-UI-06: завершение ожидания требует подтверждения и не удаляет ключи', async (t) => {

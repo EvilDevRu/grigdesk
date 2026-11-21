@@ -1,7 +1,7 @@
-import { copyFile, mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
-import { settingsFixture, sourceRoot } from './stageRunnerSettingsFixture.mjs';
+import { settingsFixture } from './stageRunnerSettingsFixture.mjs';
 
 /**
  * Настоящий Codex adapter получает каталог раннера и отдельные native model/list metadata.
@@ -38,8 +38,6 @@ export async function codexModelFixture(t) {
   await mkdir(binDir);
   await mkdir(fx.env.GRIGDESK_HOME, { recursive: true });
   await writeFile(path.join(fx.env.GRIGDESK_HOME, 'models.json'), 'sentinel-owner-registry');
-  await copyFile(path.join(sourceRoot, 'engine/lib/runners/codex.sh'),
-    path.join(fx.env.FACTORY_RUNNERS_DIR, 'codex.sh'));
   await writeFile(cache, JSON.stringify({ models: native.slice(0, 2).map((model, priority) => ({
     slug: model.id,
     visibility: 'list',
@@ -66,7 +64,8 @@ export async function codexModelFixture(t) {
     '});',
   ].join('\n'), { mode: 0o700 });
   await writeFile(fx.config, [
-    'RUNNERS_SCHEMA=1', 'CONFIG_REVISION=1', 'PROJECT_RUNNER_PRIMARY=codex', 'PROJECT_RUNNER_FAILOVER=',
+    'RUNNERS_SCHEMA=1', 'CONFIG_REVISION=1', 'RUNNERS_COVERAGE=required',
+    'PROJECT_RUNNER_PRIMARY=codex', 'PROJECT_RUNNER_FAILOVER=',
     'MODEL_DEFAULT_CODEX_EXACT=gpt-9.1-sol', 'MODEL_DEFAULT_CODEX_EFFORT=high', '',
   ].join('\n'));
   Object.assign(fx.env, {

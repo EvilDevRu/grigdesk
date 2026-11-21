@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { realpath } from 'node:fs/promises';
 
 import { createAcpClient } from '../acp/client.ts';
 import { createWorkIpc } from '../executors/workIpc.ts';
@@ -10,7 +11,7 @@ import { record } from './transport.ts';
  * Статусный helper работает на хосте с выданной движком identity.
  * Модель получает только приватный IPC: control-root и ключи API ей не выдаются.
  */
-export async function createQwenFactoryStatus(root: string, env: NodeJS.ProcessEnv) {
+export async function createQwenFactoryStatus(env: NodeJS.ProcessEnv) {
   const command = helperCommand('factory-status-mcp', []);
   const statusEnv = Object.fromEntries(factoryStatusEnvironment(env).map(({ name, value }) => [name, value]));
   const child = spawn(command.command, command.args, {
@@ -40,7 +41,8 @@ export async function createQwenFactoryStatus(root: string, env: NodeJS.ProcessE
 
     const tools = record(await client.request('tools/list', {}));
     const ipc = await createWorkIpc({
-      root,
+      // У Unix socket предел адреса. Каталог запуска этапа может быть длиннее.
+      root: await realpath('/tmp'),
       workTools: {
         descriptors: tools.tools,
         async invoke(name, input) {

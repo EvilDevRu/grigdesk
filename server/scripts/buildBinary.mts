@@ -209,13 +209,36 @@ async function buildBinaryWithSignal(options: BinaryBuildOptions, signal?: Abort
       streamOutput,
       signal,
     }),
-    prepare: async (work) => {
+    factory: async (work) => {
+      const output = path.join(work, 'factory-bin');
+
+      await loggedStage({
+        name: 'factory',
+        file: '/usr/bin/bash',
+        args: [path.join(sourceRoot, 'tools/build-factory.sh'), output],
+        cwd: sourceRoot,
+        env: {
+          ...env,
+          PATH: process.env.PATH || env.PATH,
+          GOCACHE: path.join(options.cacheDir, 'go'),
+          GOMODCACHE: path.join(options.cacheDir, 'go-modules'),
+          GOPROXY: 'off',
+        },
+        prefix,
+        streamOutput,
+        signal,
+      });
+
+      return path.join(output, 'factory');
+    },
+    prepare: async (work, input) => {
       await writeFile(path.join(work, 'build-input.json'), JSON.stringify({
         sourceRoot,
         work,
         cacheDir: options.cacheDir,
         archive,
         buildInputs,
+        factoryCandidate: input.factoryCandidate,
       }));
       await nodeStage('prepare', work);
     },

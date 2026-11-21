@@ -12,12 +12,35 @@ import {
 import { assertDeepSeekGlmApiAdmission } from '../shared/node/glmCompatibility.ts';
 import { writeBuildStepEvent } from '../shared/node/buildStepEvents.ts';
 import { configureDarwinBuildProcessHelper } from '../shared/node/processIdentity.ts';
+import { buildReleaseUtility } from './goReleaseUtility.mts';
 import { buildDesktopRelease } from './buildDesktopRelease.mts';
 import { executeInstalledBundle, stageInstalledBundle } from './installedBundle.mts';
 import type { BundleBuildInput, BundleOptions } from './bundleSteps.mts';
 
 const execute = promisify(execFile);
 const root = fileURLToPath(new URL('..', import.meta.url));
+
+/**
+ * Бинарники Go собираются по закреплённому VERSION из того же build scope.
+ * Все команды поставки переиспользуют локальный кэш одной сборки.
+ */
+function goBuilder(name: Parameters<typeof buildReleaseUtility>[0]) {
+  return async (input: BundleBuildInput): Promise<string> => {
+    const output = path.join(input.outDir, name);
+    const version = input.env.GRIGDESK_RELEASE_VERSION
+      ?? (await readFile(path.join(root, 'VERSION'), 'utf8')).trim();
+
+    await buildReleaseUtility(name, {
+      root,
+      output,
+      version,
+      env: input.env,
+      cache: path.join(path.dirname(input.cacheDir), 'go'),
+    });
+
+    return output;
+  };
+}
 
 /**
  * Реальные команды сборки получают только изолированное окружение своего этапа.
@@ -129,40 +152,11 @@ async function main(): Promise<void> {
 
         return path.join(input.outDir, 'grigdesk-server');
       },
-      async tracker(input) {
-        await run('npm', ['--prefix', path.join(root, 'tracker'), 'run', 'build', '--',
-          '--out-dir', input.outDir, '--cache-dir', input.cacheDir], input);
-
-        return path.join(input.outDir, 'tracker');
-      },
-      async pipeline(input) {
-        await run('npm', ['--prefix', path.join(root, 'tracker'), 'run', 'build:pipeline', '--',
-          '--out-dir', input.outDir, '--cache-dir', input.cacheDir], input);
-
-        return path.join(input.outDir, 'pipeline');
-      },
-      async routes(input) {
-        await run('npm', ['--prefix', path.join(root, 'routes'), 'run', 'build', '--',
-          '--out-dir', input.outDir, '--cache-dir', input.cacheDir], input);
-
-        return path.join(input.outDir, 'routes');
-      },
-      /**
-       * Автономный voice собирается своим pinned Node в отдельный выход bundle.
-       * Синтез, модели и установочные эффекты для сборки команды не требуются.
-       */
-      async voice(input) {
-        await run('npm', ['--prefix', path.join(root, 'voice'), 'run', 'build', '--',
-          '--out-dir', input.outDir, '--cache-dir', input.cacheDir], input);
-
-        return path.join(input.outDir, 'voice');
-      },
-      async relay(input) {
-        await run('npm', ['--prefix', path.join(root, 'relay'), 'run', 'build', '--',
-          '--out-dir', input.outDir], input);
-
-        return path.join(input.outDir, 'grigdesk-relay');
-      },
+      tracker: goBuilder('tracker'),
+      pipeline: goBuilder('pipeline'),
+      routes: goBuilder('routes'),
+      voice: goBuilder('voice'),
+      relay: goBuilder('grigdesk-relay'),
       async deepseek(input) {
         await run(process.execPath, [fileURLToPath(import.meta.url),
           '--prepare-deepseek', input.cacheDir], input);

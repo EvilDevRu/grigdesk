@@ -8,10 +8,16 @@ import type { NodeRuntime } from '../../../shared/node/nodeRuntime.ts';
 import { stageDarwinProcessAssets } from '../../../shared/node/processIdentity.ts';
 import { readDarwinBuildSetsid } from '../../../tools/darwinBuildTools.mts';
 import { bundlePayloadServer } from '../sea/bundle.mts';
+import type { CompatibilityManifest } from '../sea/compatibility.mts';
 import { collectLicenses } from '../sea/dependencies.mts';
 import { prepareRelease } from '../sea/prepare.mts';
 import { auditStage, type PackageFile } from '../sea/stage.mts';
 import { prepareOfflineDependencies } from './offlineDependencies.mts';
+import { stageFactoryCandidate } from './factoryCandidate.mts';
+import {
+  FACTORY_GO_DESCRIPTOR, FACTORY_PROFILE_ABI, readFactoryGoDescriptor,
+} from '../../src/lib/factoryGoDescriptor.ts';
+import type { ResourceManifest } from '../sea/resources.mts';
 
 export interface PayloadAuditOptions {
   helperIds: readonly string[];
@@ -27,13 +33,20 @@ export interface PayloadAuditOptions {
  * Внешние утилиты, исходники и UI не становятся скрытой зависимостью одного ELF.
  */
 export async function auditPayload(root: string, options: PayloadAuditOptions): Promise<PackageFile[]> {
+  const factory = readFactoryGoDescriptor(root);
+
+  if (!factory) {
+    throw new Error('В payload отсутствует проверенный Go-движок фабрики');
+  }
+
   const required = [
     'server/help/help.json', 'server/help/help.en.json', 'server/help/site/index.html',
     'server/help/site/help.json', 'server/help/site/help.en.json',
     'VERSION', 'runtime/node/bin/node', 'runtime/node/bin/npm',
     'server/package.json', 'server/package-lock.json', 'server/payload.cjs',
     'server/worker-bootstrap.cjs', 'server/runtime/esmBridge.cjs',
-    'server/runtime/helpers/helpers.json', 'engine/bin/factory', 'engine/lib/core.sh',
+    'server/runtime/helpers/helpers.json', 'engine/bin/factory',
+    FACTORY_PROFILE_ABI, FACTORY_GO_DESCRIPTOR,
     'tools/skills/grigdesk-connect-project/SKILL.md',
     'schemas/analytics/lifecycle-event.schema.json',
     'schemas/analytics/provider-lineage.schema.json', 'schemas/analytics/usage-document.schema.json',
@@ -59,6 +72,11 @@ export async function auditPayload(root: string, options: PayloadAuditOptions): 
     forbiddenRoots: options.forbiddenRoots,
   });
 
+  if (files.some((file) => file.path.startsWith('engine/')
+    && file.path !== factory.path && file.path !== FACTORY_PROFILE_ABI)) {
+    throw new Error('Go payload содержит лишний файл в engine/');
+  }
+
   if (files.some((file) => file.path.startsWith('tools/') && !file.path.startsWith('tools/skills/'))) {
     throw new Error('Запрещён ресурс tools вне встроенных навыков payload');
   }
@@ -83,14 +101,34 @@ export async function buildPayload(input: {
   cacheDir: string;
   work: string;
   bootstrap: string;
+  factoryCandidate?: string;
 }) {
-  const resources = JSON.parse(await readFile(
+  if (!input.factoryCandidate) {
+    throw new Error('Поставка требует собранный Go-движок фабрики');
+  }
+
+  const resources: ResourceManifest = JSON.parse(await readFile(
     path.join(input.sourceRoot, 'server/build/binary-resources.json'), 'utf8',
   ));
+  const compatibility: CompatibilityManifest = JSON.parse(await readFile(
+    path.join(input.sourceRoot, 'server/build/compatibility.json'), 'utf8',
+  ));
+
   const { helpers, dependencies, helpPackages } = await prepareRelease({
     ...input,
     resources,
+    compatibility,
     install: prepareOfflineDependencies,
+  });
+
+  const [os, arch] = input.runtime.platform.split('-') as [string, string];
+
+  await stageFactoryCandidate({
+    root: input.directory,
+    binary: input.factoryCandidate,
+    profileAbi: path.join(input.sourceRoot, FACTORY_PROFILE_ABI),
+    os,
+    arch,
   });
 
   await bundlePayloadServer({
@@ -124,14 +162,11 @@ export async function buildPayload(input: {
     `${await readProductBuildVersion(input.sourceRoot)}\n`);
   await makeReadOnlyTree(input.directory);
 
-  const compatibility = JSON.parse(await readFile(
-    path.join(input.sourceRoot, 'server/build/compatibility.json'), 'utf8',
-  ));
   const files = await auditPayload(input.directory, {
     helperIds: helpers.helpers.map((helper) => helper.id),
     dependencies: Object.keys(dependencies.packages),
     native: dependencies.native,
-    wrappers: compatibility.wrappers.map((wrapper: { path: string }) => wrapper.path),
+    wrappers: compatibility.wrappers.map((wrapper) => wrapper.path),
     sourceRoot: input.sourceRoot,
     forbiddenRoots: [input.cacheDir, input.directory, input.work],
   });

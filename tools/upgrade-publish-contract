@@ -37,6 +37,6 @@ git -C "$ROOT" show "$TARGET_SHA:server/deepseek-runtime-contract.json" |
     }
   '
 git -C "$ROOT" merge --ff-only "$TARGET_SHA"
-bash "$ROOT/bin/grigdesk-ctl" deps
-bash "$ROOT/bin/grigdesk-ctl" build
+"$ROOT/bin/utilities/ctl" deps
+"$ROOT/bin/utilities/ctl" build
 echo 'Промежуточный релиз подготовлен. Перезапусти GrigDesk вручную, затем обновись штатной кнопкой.'

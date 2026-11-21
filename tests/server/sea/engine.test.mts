@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
-import { chmod, copyFile, mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { chmod, copyFile, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import path from 'node:path';
 import test from 'node:test';
@@ -9,10 +9,8 @@ import { writeCompatibility } from '../../../server/scripts/sea/compatibility.mt
 import { loadHelpers } from '../../../server/scripts/sea/helpers.mts';
 import { helperFixture, runFile, SOURCE_ROOT } from './helperFixture.mts';
 
-test('SEA-ENGINE-01: CLI, data-home и оба моста движка исполняются без server/src TS', async (t) => {
-  const fixture = await helperFixture(t, [
-    'grigdesk-cli', 'data-home-check', 'engine-runtime-usage', 'engine-codex-failure',
-  ]);
+test('SEA-ENGINE-01: CLI и data-home исполняются без server/src TS', async (t) => {
+  const fixture = await helperFixture(t, ['data-home-check']);
   const wrapperFile = path.join(SOURCE_ROOT, 'server/build/compatibility.json');
   const wrappers = JSON.parse(await readFile(wrapperFile, 'utf8'));
   const helpers = await loadHelpers(path.join(SOURCE_ROOT, 'server/build/helpers.json'), SOURCE_ROOT);
@@ -20,10 +18,11 @@ test('SEA-ENGINE-01: CLI, data-home и оба моста движка испол
   await writeCompatibility(fixture.root, wrappers, helpers);
   await mkdir(path.join(fixture.root, 'bin'), { recursive: true });
   await mkdir(path.join(fixture.root, 'deploy/lib'), { recursive: true });
-  await copyFile(path.join(SOURCE_ROOT, 'bin/grigdesk-ctl'), path.join(fixture.root, 'bin/grigdesk-ctl'));
+  await copyFile(path.join(process.env.GRIGDESK_SERVER_RELEASE_DIR!, 'bin/grigdesk-ctl'),
+    path.join(fixture.root, 'bin/grigdesk-ctl'));
   await copyFile(path.join(SOURCE_ROOT, 'deploy/lib/runtime-env.sh'),
     path.join(fixture.root, 'deploy/lib/runtime-env.sh'));
-  await writeFile(path.join(fixture.root, 'release.json'), JSON.stringify({ schema: 1 }));
+  await writeFile(path.join(fixture.root, 'release.json'), JSON.stringify({ schema: 1 }), { mode: 0o644 });
   // Здесь проверяются helper-ы частичного R; проверку настоящего ELF делает package-test.
   // Порт readiness явно моделирует успешную проверку полного комплекта.
   await writeFile(path.join(fixture.root, 'server/grigdesk-server'),
@@ -54,12 +53,12 @@ test('SEA-ENGINE-01: CLI, data-home и оба моста движка испол
     PATH: `${stubs}:/usr/bin:/bin`,
   };
   const launcher = path.join(fixture.root, 'bin/grigdesk-ctl');
-  const help = await runFile('/bin/bash', [launcher, '--help'], { cwd: '/', env });
-  const version = await runFile('/bin/bash', [launcher, '--version'], { cwd: '/', env });
-  const status = await runFile('/bin/bash', [launcher, 'server', 'status', '--json'], { cwd: '/', env });
+  const help = await runFile(launcher, ['--help'], { cwd: '/', env });
+  const version = await runFile(launcher, ['--version'], { cwd: '/', env });
+  const status = await runFile(launcher, ['server', 'status', '--json'], { cwd: '/', env });
 
   assert.match(help.stdout, /grigdesk-ctl/);
-  assert.equal(version.stdout, 'GrigDesk 1.2.3\n');
+  assert.match(version.stdout, /^grigdesk-ctl 1\.2\.3/);
   assert.equal(JSON.parse(status.stdout).server.state, 'ready');
 
   const checked = await runFile('/bin/bash', ['-c',
@@ -69,44 +68,6 @@ test('SEA-ENGINE-01: CLI, data-home и оба моста движка испол
   ], { cwd: '/', env });
 
   assert.equal(checked.stdout, env.GRIGDESK_PORT);
-
-  const runDirectory = path.join(fixture.temporary, 'run');
-
-  await mkdir(runDirectory);
-  await writeFile(path.join(runDirectory, 'meta.env'), 'SOURCE=runtime\n');
-  await writeFile(path.join(runDirectory, 'events.jsonl'), JSON.stringify({
-    type: 'turn.failed', error: { message: 'authentication required', code: '401' },
-  }) + '\n');
-
-  const failure = await runFile(fixture.node, [
-    path.join(fixture.root, 'engine/lib/codex-failure.mjs'), runDirectory, '1',
-  ], { cwd: '/', env });
-
-  assert.equal(failure.stdout, 'provider_unavailable\n');
-
-  const prepared = path.join(fixture.temporary, 'prepared.json');
-
-  await writeFile(prepared, JSON.stringify({
-    normalization: { provider: 'codex', normalizerDialect: 'codex-json' },
-  }));
-
-  const invalidated = await runFile(fixture.node, [
-    path.join(fixture.root, 'engine/lib/runtime-usage.mjs'), 'invalidate', prepared, 'fixtureConflict',
-  ], { cwd: '/', env });
-
-  assert.equal(JSON.parse(invalidated.stdout).normalization.completeness, 'conflict');
-  assert.deepEqual(JSON.parse(invalidated.stdout).normalization.diagnostics, ['fixtureConflict']);
-  await assert.rejects(runFile(fixture.node, [
-    path.join(fixture.root, 'engine/lib/runtime-usage.mjs'), 'unknown', 'a b', '',
-  ], { cwd: '/', env }), (error: Error & { code?: number; stderr?: string }) => {
-    assert.equal(error.code, 2);
-    assert.match(error.stderr ?? '', /FACTORY_ERROR=inputInvalid/);
-
-    return true;
-  });
-
-  await rename(fixture.node, `${fixture.node}.missing`);
-  await assert.rejects(runFile('/bin/bash', [launcher, '--help'], { env }), /нет вложенного Node/);
 });
 
 test('SEA-ENGINE-02: внешний публикатор профиля получает вложенный Node и прежние аргументы', async (t) => {

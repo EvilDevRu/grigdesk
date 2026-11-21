@@ -134,7 +134,10 @@ export function recipeDigest(recipe: ReleaseRecipe, runnerBytes: Buffer): string
 export async function recipeImplementationBytes(root: string, darwin = false): Promise<Buffer> {
   const files = ['tools/releasePipeline.mts', 'tools/releaseEnvironment.mts',
     'tools/ci/provision-ubuntu.sh', 'tools/ci/run-release-server-tests.sh',
-    'tools/ci/prepare-release-desktop.sh', 'cli/buildProcesses.ts'];
+    'tools/ci/prepare-release-desktop.sh', 'cli/buildProcesses.ts',
+    'go.mod', 'go.sum', 'tools/build-go-utilities.sh', 'tests/run-go-utilities.sh',
+    'tools/goReleaseUtility.mts',
+    'tools/installedBundle.mts', 'tools/verifyGoReleaseSize.mts', 'tools/verifyGoReleaseEvidence.mts'];
   const chunks: Buffer[] = [];
 
   if (darwin) {
@@ -144,7 +147,7 @@ export async function recipeImplementationBytes(root: string, darwin = false): P
       'tools/ci/runtime-pin-reporter.mjs', 'tools/ci/run-macos-runtime-pin-tests.mts',
       'tools/ci/Brewfile.macos', 'server/build/node-runtime-darwin-arm64.json',
       'tools/ci/stage-platform-candidate.mts', 'tools/ci/mac-candidate-bootstrap.mts',
-      'tools/installedBundle.mts', 'tools/buildDesktopRelease.mts', 'tools/verifyInstallation.mts');
+      'tools/buildDesktopRelease.mts', 'tools/verifyInstallation.mts');
   }
 
   for (const file of files) {

@@ -8,29 +8,70 @@ import { fileURLToPath } from 'node:url';
 
 import { bundlePayloadServer } from '../../server/scripts/sea/bundle.mts';
 import { copyResources } from '../../server/scripts/sea/resources.mts';
+import { stageFactoryCandidate } from '../../server/scripts/binary/factoryCandidate.mts';
+import { testFactoryBinary } from '../helpers/factoryBinary.mjs';
 import { factoryProfilesRoot, factoryRuntimePaths } from '../../server/src/lib/factoryRuntime.ts';
 
 const ROOT = fileURLToPath(new URL('../../', import.meta.url));
 const PROFILE = 'demo-profile';
 
-test('SB09: packaged default игнорирует прежний source engine override', () => {
-  const value = factoryRuntimePaths({
-    kind: 'packaged',
-    root: '/R',
-    env: {
-      GRIGDESK_FACTORY_BIN: '/old/source/engine/bin/factory',
-      FACTORY_HOME: '/old/source/engine',
-    },
+/**
+ * Пакет допускается только при совпадении проверенных байтов и ABI.
+ * Фикстура использует тот же staging, что штатный сборщик.
+ */
+async function stageEngine(root) {
+  return stageFactoryCandidate({
+    root,
+    binary: testFactoryBinary(),
+    profileAbi: path.join(ROOT, 'engine/lib/delivery_contract.py'),
+    os: process.platform,
+    arch: process.arch,
   });
+}
 
-  assert.equal(value.home, '/R/engine');
-  assert.equal(value.bin, '/R/engine/bin/factory');
-});
+test('SB09: packaged выбирает свой Go runtime и требует descriptor', async (t) => {
+  const root = await realpath(await mkdtemp(path.join(os.tmpdir(), 'server-go-factory-')));
 
-test('SB09: source прежний, bundled называет только имена старых overrides', () => {
-  const overrides = {
+  t.after(() => rm(root, { recursive: true, force: true }));
+
+  const env = {
     GRIGDESK_FACTORY_BIN: '/old/source/engine/bin/factory',
     FACTORY_HOME: '/old/source/engine',
+  };
+
+  assert.throws(() => factoryRuntimePaths({
+    kind: 'packaged',
+    root,
+    env,
+  }),
+    { code: 'factory_runtime_engine_invalid' });
+  await mkdir(path.join(root, 'server'));
+  await stageEngine(root);
+
+  const value = factoryRuntimePaths({
+    kind: 'packaged',
+    root,
+    env,
+  });
+
+  assert.deepEqual(value, {
+    mode: 'bundled',
+    home: path.join(root, 'engine'),
+    bin: path.join(root, 'engine/bin/factory'),
+    protocol: 'go-v1',
+    ignored: ['FACTORY_HOME', 'GRIGDESK_FACTORY_BIN'],
+  });
+  assert.deepEqual(factoryRuntimePaths({
+    kind: 'packaged',
+    root,
+    env: {},
+  }).ignored, []);
+});
+
+test('SB09: source использует bin/factory и явные пути Go runtime', () => {
+  const overrides = {
+    GRIGDESK_FACTORY_BIN: '/custom/factory',
+    FACTORY_HOME: '/custom/engine',
   };
 
   assert.deepEqual(factoryRuntimePaths({
@@ -39,8 +80,9 @@ test('SB09: source прежний, bundled называет только име�
     env: overrides,
   }), {
     mode: 'source',
-    home: '/old/source/engine',
-    bin: '/old/source/engine/bin/factory',
+    home: '/custom/engine',
+    bin: '/custom/factory',
+    protocol: 'go-v1',
     ignored: [],
   });
   assert.deepEqual(factoryRuntimePaths({
@@ -50,19 +92,10 @@ test('SB09: source прежний, bundled называет только име�
   }), {
     mode: 'source',
     home: '/checkout/engine',
-    bin: '/checkout/engine/bin/factory',
+    bin: '/checkout/bin/factory',
+    protocol: 'go-v1',
     ignored: [],
   });
-  assert.deepEqual(factoryRuntimePaths({
-    kind: 'packaged',
-    root: '/R',
-    env: overrides,
-  }).ignored, ['FACTORY_HOME', 'GRIGDESK_FACTORY_BIN']);
-  assert.deepEqual(factoryRuntimePaths({
-    kind: 'packaged',
-    root: '/R',
-    env: {},
-  }).ignored, []);
 });
 
 test('SB09: external только явным режимом с абсолютными путями, неизвестный режим отказ', () => {
@@ -77,6 +110,7 @@ test('SB09: external только явным режимом с абсолютн�
     mode: 'external',
     home: '/admin/engine',
     bin: '/admin/engine/bin/factory',
+    protocol: 'go-v1',
     ignored: [],
   });
   assert.equal(factoryRuntimePaths({
@@ -250,6 +284,7 @@ test('SB09: перенесённый R проходит настоящий facto
   const state = path.join(fixture.base, 'state');
 
   await copyResources(ROOT, root, manifest);
+  await stageEngine(root);
 
   const runtime = factoryRuntimePaths({
     kind: 'packaged',
@@ -261,15 +296,6 @@ test('SB09: перенесённый R проходит настоящий facto
   });
 
   assert.equal(runtime.bin, path.join(root, 'engine/bin/factory'));
-
-  for (const library of ['attempt-lifecycle-state.sh', 'provider-lineage-state.sh']) {
-    const schema = await engine('/bin/bash', ['-c',
-      'source "$FACTORY_HOME/lib/$1" && { _attempt_lifecycle_schema_path 2>/dev/null'
-        + ' || _provider_lineage_schema_path; }', 'schema', library], { FACTORY_HOME: runtime.home });
-
-    assert.equal(schema.code, 0, `${library}: ${schema.stderr}`);
-    assert.ok(schema.stdout.startsWith(path.join(root, 'schemas/analytics/')), schema.stdout);
-  }
 
   const profiles = factoryProfilesRoot({
     kind: 'packaged',
@@ -312,6 +338,8 @@ test('SB09: config payload выбирает движок R и физически
   await mkdir(path.dirname(binary), { recursive: true });
   await mkdir(home);
   await writeFile(binary, 'ELF');
+  await mkdir(path.join(root, 'server'), { recursive: true });
+  await stageEngine(root);
 
   const result = await bundlePayloadServer({
     sourceRoot: ROOT,

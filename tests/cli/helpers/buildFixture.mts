@@ -3,6 +3,7 @@ import { cp, mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import type { TestContext } from 'node:test';
 
+import { goCandidate } from '../../helpers/goCandidate.mts';
 import { fixture } from '../../server/helpers/ctlBuildFixture.js';
 import { repository, menuTitle, down } from './menuFixture.mts';
 import { startPty } from './pty.mts';
@@ -11,12 +12,18 @@ import { startPty } from './pty.mts';
  * Та же build-фикстура получает настоящий CLI вместо справочного стаба.
  * Все сборщики, установщики и системные команды остаются отдельными безопасными заглушками.
  */
-export async function terminalBuildFixture(t: TestContext) {
+export async function terminalBuildFixture(t: TestContext, useGo = process.env.GRIGDESK_CTL_TEST_GO === '1') {
   const box = await fixture(t, { binary: false });
 
   for (const name of ['cli', 'shared/i18n', 'shared/runtime', 'shared/desktop', 'shared/node',
     'server/src/lib/runtimePaths.ts', 'server/src/lib/runtimeBuildContext.ts', 'VERSION']) {
     await cp(path.join(repository, name), path.join(box.root, name), { recursive: true });
+  }
+
+  if (!useGo) {
+    for (const relative of ['tests/fixtures/legacy-ctl/cli', 'tests/fixtures/release-v2']) {
+      await cp(path.join(repository, relative), path.join(box.root, relative), { recursive: true });
+    }
   }
 
   const cgroup = path.join(box.env.HOME, 'cgroup');
@@ -86,7 +93,18 @@ export async function terminalBuildFixture(t: TestContext) {
     await writeFile(file, original.replace('process.exit(', insert + '\nprocess.exit('), { mode: 0o755 });
   }
 
-  return { ...box, env };
+  const executable = useGo ? goCandidate('grigdesk-ctl') : '/bin/bash';
+  const prefix = useGo ? [] : [path.join(box.root, 'bin/grigdesk-ctl')];
+
+  if (useGo) {
+    Object.assign(env, { GRIGDESK_CTL_CHECKOUT_ROOT: box.root });
+  }
+
+  return {
+    ...box,
+    env,
+    argv: (args: string[]) => [executable, ...prefix, ...args],
+  };
 }
 
 /**
@@ -96,7 +114,7 @@ export async function terminalBuildFixture(t: TestContext) {
 export function launchBuild(t: TestContext, box: Awaited<ReturnType<typeof terminalBuildFixture>>,
   target: string, menu = false, options: Partial<Parameters<typeof startPty>[1]> = {}) {
   return startPty(t, {
-    argv: ['/bin/bash', path.join(box.root, 'bin/grigdesk-ctl'), ...menu ? [] : ['build', target]],
+    argv: box.argv(menu ? [] : ['build', target]),
     env: box.env,
     ...options,
   });

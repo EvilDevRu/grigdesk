@@ -3,10 +3,7 @@ import { createHash } from 'node:crypto';
 import net from 'node:net';
 import test from 'node:test';
 
-import { readConfig } from '../../relay/src/config.ts';
-import { createRelayServer } from '../../relay/src/relayServer.ts';
-import { createIpLimiter } from '../../relay/src/limits.ts';
-import { connect, hello, makeCert, readLine, relayEnv, temporary } from './helpers.js';
+import { connect, hello, makeCert, readLine, relayFixture, temporary } from './helpers.js';
 
 /**
  * Запускает посредника на свободном loopback-порту с короткими таймаутами.
@@ -14,29 +11,13 @@ import { connect, hello, makeCert, readLine, relayEnv, temporary } from './helpe
  */
 async function fixture(t, overrides = {}) {
   const cert = await makeCert(await temporary(t), 'relay');
-  const config = readConfig(
-    relayEnv({
-      cert,
-      overrides,
-    }),
-  );
-  const logs = [];
-  const server = createRelayServer(
-    {
-      ...config,
-      port: 0,
-    },
-    { log: (event) => logs.push(event) },
-  );
-  const port = await server.listen('127.0.0.1');
-
-  t.after(() => server.close());
+  const server = await relayFixture(t, cert, overrides);
 
   return {
-    port,
+    port: server.port,
     cert,
-    logs,
     server,
+    logs: () => server.output.stdout,
   };
 }
 
@@ -178,7 +159,7 @@ test('RL-11/RL-23/RL-28: склейка двусторонних байтов, i
     },
   );
 
-  const log = JSON.stringify(logs);
+  const log = logs();
 
   assert.equal(
     ['brain-token', 'device-token', id, '127.0.0.1'].some((value) => log.includes(value)),
@@ -253,41 +234,6 @@ test('RL-12/RL-14/RL-15/RL-17: замена control, ожидания и ping', 
   device.destroy();
   extra.destroy();
   control.destroy();
-});
-
-test('RL-16/RL-19/RL-27: бан, освобождение слотов и ограниченная IP-таблица', () => {
-  let now = 0;
-  const limiter = createIpLimiter({
-    maxPerIp: 2,
-    banThreshold: 3,
-    banWindowMs: 100,
-    now: () => now,
-  });
-  const first = limiter.acquire('ip');
-  const second = limiter.acquire('ip');
-
-  assert.equal(limiter.acquire('ip'), null);
-  first.release();
-  first.release();
-  second.release();
-
-  for (let attempt = 0; attempt < 3; attempt += 1) {
-    limiter.failure('ip');
-  }
-
-  assert.equal(limiter.banned('ip'), true);
-  now = 101;
-  limiter.sweep();
-  assert.equal(limiter.banned('ip'), false);
-
-  for (let index = 0; index < 5000; index += 1) {
-    limiter.failure(`ip-${index}`);
-  }
-
-  assert.equal(limiter.size <= 4096, true);
-  now = 202;
-  limiter.sweep();
-  assert.equal(limiter.size, 0);
 });
 
 test('RL-08/RL-18/RL-27: TCP без TLS ограничен и освобождается по handshake timeout', async (t) => {

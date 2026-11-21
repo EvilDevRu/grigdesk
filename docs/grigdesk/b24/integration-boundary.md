@@ -3,8 +3,8 @@
 Доска и действия используют общий runtime реестра трекеров и
 нейтральный фасад `/api/tracker/*`; ссылка на внешнюю задачу принадлежит драйверу.
 Медиа использует локальный pipeline, вход в фабрику — `engine/bin/factory`.
-Команда `tracker` идёт по цепочке `tracker/src` → собранный `bin/tracker`
-→ локальный HTTP API GrigDesk (`/api/tracker/*` с CLI-токеном); без сборки `bin/grigdesk-ctl tracker`
+Команда `tracker` идёт по цепочке `utilities/tracker/internal` → собранный `bin/utilities/tracker`
+→ локальный HTTP API GrigDesk (`/api/tracker/*` с CLI-токеном); без сборки `bin/utilities/ctl tracker`
 исполняет тот же исходник. Прямого клиента портала, cookies и кредов у команды нет: сессией
 портала владеет сервер ([команда tracker](binary-cli.md)). Сессионный клиент, разбор HTML,
 загрузка файлов и показатели доработанного портала принадлежат отдельному пакету

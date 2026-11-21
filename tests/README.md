@@ -23,9 +23,9 @@ bash tests/run-all.sh
 Только движок:
 
 ```bash
+GOTOOLCHAIN=local GOWORK=off go -C utilities/factory test -count=1 -p=2 ./...
 bash tests/engine/run-offline.sh
-bash tests/engine/run-offline.sh debug-settings.sh
-TEST_REPEAT=50 bash tests/engine/run-offline.sh debug-settings-writer.sh
+bash tests/engine/run-offline.sh --one tests/engine/contract/factory-check-quick.sh
 ```
 
 Только документация:

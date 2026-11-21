@@ -186,12 +186,16 @@ notify() {
 # Терминала у ярлыка нет, поэтому отказ показывается уведомлением с причиной из stderr.
 open_grigdesk() {
   local problem
+  local executable="$GRIGDESK_DIR/bin/utilities/ctl"
 
   if [ -n "${GRIGDESK_NODE_DIR:-}" ] && [ -x "$GRIGDESK_NODE_DIR/node" ]; then
     export PATH="$GRIGDESK_NODE_DIR:$PATH"
   fi
 
-  if ! problem="$("$GRIGDESK_DIR/bin/grigdesk-ctl" open 2>&1 >/dev/null)"; then
+  if [[ -f "$GRIGDESK_DIR/release.json" ]]; then
+    executable="$GRIGDESK_DIR/bin/grigdesk-ctl"
+  fi
+  if ! problem="$("$executable" open 2>&1 >/dev/null)"; then
     notify "${problem:-GrigDesk не запустился.}"
     return 1
   fi

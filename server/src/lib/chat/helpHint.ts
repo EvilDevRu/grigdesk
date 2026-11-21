@@ -7,7 +7,7 @@ export function withHelpHint(message: string): string {
     + 'Для вопросов и действий в GrigDesk сначала используй grigdesk_help: index, search, read. '
     + 'Проверяй версию, дочитывай nextOffset и ссылайся на href статьи. '
     + 'Операции GrigDesk выполняй доступными штатными инструментами и CLI из справки; '
-    + 'для задач внешних трекеров используй tracker (в исходниках bin/grigdesk-ctl tracker). '
+    + 'для задач внешних трекеров используй tracker (в исходниках bin/utilities/ctl tracker). '
     + 'Если нужной команды нет, используй grigdesk_browser в пределах доступа; '
     + 'если доступа не хватает, сообщи об этом человеку. '
     + 'Не запускай Vite, сборку или второй GrigDesk '

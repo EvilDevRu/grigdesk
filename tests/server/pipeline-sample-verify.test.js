@@ -208,18 +208,4 @@ test('SAMPLE-VERIFY-05: command stdout passes engine parser and invalid diagnost
 
     assert.equal(unknown.status, 64);
 
-    for (const broken of ['{}', '{"schema":1', JSON.stringify({
-      schema: 1,
-      outcome: 'failed',
-      comment: 'Ошибка',
-      failureOwner: 'tests',
-      findings: [],
-    })]) {
-      const invalid = await put(f.root, 'invalid.json', broken);
-      const parsed = run('bash', ['-c',
-        'source "$FACTORY_HOME/lib/route-runtime.sh"; _route_v2_command_result "$1"',
-        'fixture', invalid], { env: f.env });
-
-      assert.notEqual(parsed.status, 0);
-    }
   });

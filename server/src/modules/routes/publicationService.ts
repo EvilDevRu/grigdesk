@@ -1,16 +1,15 @@
 import { execFile } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 
 import type { RouteDraft } from '../../../../shared/pipeline/routesEditorContracts.ts';
 
 import { RoutesEditorStoreError } from './draftStore.ts';
-import { RoutesEditorEngineError } from './editorEngine.ts';
+import { checkDraftEngine, editorRouteCommand, RoutesEditorEngineError } from './editorEngine.ts';
+import type { FactoryCommands } from '../../lib/factoryRuntime.ts';
 import { RoutesStore } from './store.ts';
 import { validateDraft } from './validation.ts';
 
 const runCli = promisify(execFile);
-const ROUTE_CLI = fileURLToPath(new URL('../../../../engine/bin/factory-route', import.meta.url));
 
 export interface PreparedDraftCatalog {
   catalogHash: string;
@@ -25,6 +24,7 @@ export interface PreparedDraftCatalog {
 export async function prepareDraftCatalog(
   store: RoutesStore,
   draft: RouteDraft,
+  runtime?: FactoryCommands,
 ): Promise<PreparedDraftCatalog> {
   const snapshot = structuredClone(draft);
   const report = validateDraft(snapshot);
@@ -33,6 +33,8 @@ export async function prepareDraftCatalog(
     throw new RoutesEditorStoreError('routes_validation_failed',
       'Черновик содержит ошибки маршрута', { issues: errors });
   }
+
+  await checkDraftEngine(snapshot, runtime);
 
   const routeHashes: Record<string, string> = {};
   for (const [routeId, bundle] of Object.entries(snapshot.routes).sort(([left], [right]) => (
@@ -54,11 +56,13 @@ export async function prepareDraftCatalog(
 
   // Читатель runtime перепроверяет именно возвращённый hash и его реальные байты.
   try {
-    await runCli(ROUTE_CLI, [
+    const helper = editorRouteCommand(runtime, [
       '--routes-dir', store.baseDir,
       '--profile', snapshot.profile,
       'catalog', '--catalog-hash', prepared.catalogHash,
-    ], { timeout: 10_000, maxBuffer: 16 * 1024 * 1024 });
+    ]);
+
+    await runCli(helper.command, helper.args, { timeout: 10_000, maxBuffer: 16 * 1024 * 1024 });
   } catch {
     throw new RoutesEditorEngineError('Движок не подтвердил подготовленный каталог');
   }

@@ -1,0 +1,416 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://grigdesk.local/schemas/analytics/provider-lineage.schema.json",
+  "title": "Долговечная цепочка возобновления провайдера Factory",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "protocolVersion",
+    "provider",
+    "threadId",
+    "scopeSha256",
+    "stateRevision",
+    "lineageGeneration",
+    "state",
+    "reservationId",
+    "predecessorRunId",
+    "predecessorUsageDocumentHash",
+    "predecessorCheckpointHash",
+    "predecessorRunnerUsageRecordedEventHash",
+    "predecessorScopeBoundEventHash",
+    "childRunId",
+    "runnerStartedEventHash",
+    "cancellationProof",
+    "blockProof",
+    "writerVersion"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "protocolVersion": { "const": 2 },
+    "provider": { "$ref": "#/$defs/provider" },
+    "threadId": { "$ref": "#/$defs/threadId" },
+    "scopeSha256": { "$ref": "#/$defs/sha256" },
+    "stateRevision": { "$ref": "#/$defs/positiveSafeInteger" },
+    "lineageGeneration": { "$ref": "#/$defs/safeInteger" },
+    "state": { "$ref": "#/$defs/state" },
+    "reservationId": { "$ref": "#/$defs/nullableReservationId" },
+    "predecessorRunId": { "$ref": "#/$defs/nullableRunId" },
+    "predecessorUsageDocumentHash": { "$ref": "#/$defs/nullableSha256" },
+    "predecessorCheckpointHash": { "$ref": "#/$defs/nullableSha256" },
+    "predecessorRunnerUsageRecordedEventHash": { "$ref": "#/$defs/nullableSha256" },
+    "predecessorScopeBoundEventHash": { "$ref": "#/$defs/nullableSha256" },
+    "childRunId": { "$ref": "#/$defs/nullableRunId" },
+    "runnerStartedEventHash": { "$ref": "#/$defs/nullableSha256" },
+    "cancellationProof": {
+      "oneOf": [
+        { "type": "null" },
+        { "$ref": "#/$defs/cancellationProof" }
+      ]
+    },
+    "blockProof": {
+      "oneOf": [
+        { "type": "null" },
+        { "$ref": "#/$defs/blockProof" }
+      ]
+    },
+    "writerVersion": { "const": "provider-lineage-state/1" }
+  },
+  "oneOf": [
+    {
+      "properties": {
+        "state": { "const": "advanced" },
+        "predecessorRunId": { "$ref": "#/$defs/runId" },
+        "predecessorUsageDocumentHash": { "$ref": "#/$defs/sha256" },
+        "predecessorCheckpointHash": { "$ref": "#/$defs/sha256" },
+        "predecessorRunnerUsageRecordedEventHash": { "$ref": "#/$defs/sha256" },
+        "predecessorScopeBoundEventHash": { "$ref": "#/$defs/sha256" },
+        "childRunId": { "$ref": "#/$defs/runId" },
+        "cancellationProof": { "type": "null" },
+        "blockProof": { "type": "null" }
+      },
+      "oneOf": [
+        {
+          "properties": {
+            "lineageGeneration": { "const": 0 },
+            "reservationId": { "type": "null" },
+            "runnerStartedEventHash": { "type": "null" }
+          }
+        },
+        {
+          "properties": {
+            "lineageGeneration": { "$ref": "#/$defs/positiveSafeInteger" },
+            "reservationId": { "$ref": "#/$defs/reservationId" },
+            "runnerStartedEventHash": { "$ref": "#/$defs/sha256" }
+          }
+        }
+      ]
+    },
+    {
+      "properties": {
+        "state": { "const": "reserved_before_start" },
+        "lineageGeneration": { "$ref": "#/$defs/positiveSafeInteger" },
+        "reservationId": { "$ref": "#/$defs/reservationId" },
+        "predecessorRunId": { "$ref": "#/$defs/runId" },
+        "predecessorUsageDocumentHash": { "$ref": "#/$defs/sha256" },
+        "predecessorCheckpointHash": { "$ref": "#/$defs/sha256" },
+        "predecessorRunnerUsageRecordedEventHash": { "$ref": "#/$defs/sha256" },
+        "predecessorScopeBoundEventHash": { "$ref": "#/$defs/sha256" },
+        "childRunId": { "$ref": "#/$defs/runId" },
+        "runnerStartedEventHash": { "type": "null" },
+        "cancellationProof": { "type": "null" },
+        "blockProof": { "type": "null" }
+      }
+    },
+    {
+      "properties": {
+        "state": { "const": "started" },
+        "lineageGeneration": { "$ref": "#/$defs/positiveSafeInteger" },
+        "reservationId": { "$ref": "#/$defs/reservationId" },
+        "predecessorRunId": { "$ref": "#/$defs/runId" },
+        "predecessorUsageDocumentHash": { "$ref": "#/$defs/sha256" },
+        "predecessorCheckpointHash": { "$ref": "#/$defs/sha256" },
+        "predecessorRunnerUsageRecordedEventHash": { "$ref": "#/$defs/sha256" },
+        "predecessorScopeBoundEventHash": { "$ref": "#/$defs/sha256" },
+        "childRunId": { "$ref": "#/$defs/runId" },
+        "runnerStartedEventHash": { "$ref": "#/$defs/sha256" },
+        "cancellationProof": { "type": "null" },
+        "blockProof": { "type": "null" }
+      }
+    },
+    {
+      "properties": {
+        "state": { "const": "cancelled_before_start" },
+        "lineageGeneration": { "$ref": "#/$defs/positiveSafeInteger" },
+        "reservationId": { "$ref": "#/$defs/reservationId" },
+        "predecessorRunId": { "$ref": "#/$defs/runId" },
+        "predecessorUsageDocumentHash": { "$ref": "#/$defs/sha256" },
+        "predecessorCheckpointHash": { "$ref": "#/$defs/sha256" },
+        "predecessorRunnerUsageRecordedEventHash": { "$ref": "#/$defs/sha256" },
+        "predecessorScopeBoundEventHash": { "$ref": "#/$defs/sha256" },
+        "childRunId": { "$ref": "#/$defs/runId" },
+        "runnerStartedEventHash": { "type": "null" },
+        "cancellationProof": { "$ref": "#/$defs/cancellationProof" },
+        "blockProof": { "type": "null" }
+      }
+    },
+    {
+      "properties": {
+        "state": { "const": "blocked_after_start" },
+        "lineageGeneration": { "$ref": "#/$defs/positiveSafeInteger" },
+        "reservationId": { "$ref": "#/$defs/reservationId" },
+        "predecessorRunId": { "$ref": "#/$defs/runId" },
+        "predecessorUsageDocumentHash": { "$ref": "#/$defs/sha256" },
+        "predecessorCheckpointHash": { "$ref": "#/$defs/sha256" },
+        "predecessorRunnerUsageRecordedEventHash": { "$ref": "#/$defs/sha256" },
+        "predecessorScopeBoundEventHash": { "$ref": "#/$defs/sha256" },
+        "childRunId": { "$ref": "#/$defs/runId" },
+        "runnerStartedEventHash": { "$ref": "#/$defs/sha256" },
+        "cancellationProof": { "type": "null" },
+        "blockProof": { "$ref": "#/$defs/blockProof" }
+      }
+    }
+  ],
+  "$defs": {
+    "safeInteger": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "positiveSafeInteger": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "nullableSha256": {
+      "oneOf": [
+        { "type": "null" },
+        { "$ref": "#/$defs/sha256" }
+      ]
+    },
+    "provider": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_-]{0,63}$"
+    },
+    "threadId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,255}$"
+    },
+    "runId": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+    },
+    "nullableRunId": {
+      "oneOf": [
+        { "type": "null" },
+        { "$ref": "#/$defs/runId" }
+      ]
+    },
+    "reservationId": {
+      "type": "string",
+      "pattern": "^lr_[a-f0-9]{32}$"
+    },
+    "nullableReservationId": {
+      "oneOf": [
+        { "type": "null" },
+        { "$ref": "#/$defs/reservationId" }
+      ]
+    },
+    "state": {
+      "enum": [
+        "reserved_before_start",
+        "started",
+        "advanced",
+        "cancelled_before_start",
+        "blocked_after_start"
+      ]
+    },
+    "cancellationProof": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "neverReleased",
+        "processSessionQuiesced",
+        "neverReleasedEvidenceHash",
+        "quiescenceEvidenceHash"
+      ],
+      "properties": {
+        "neverReleased": { "const": true },
+        "processSessionQuiesced": { "const": true },
+        "neverReleasedEvidenceHash": { "$ref": "#/$defs/sha256" },
+        "quiescenceEvidenceHash": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "blockProof": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["reasonCode", "evidenceHash"],
+      "properties": {
+        "reasonCode": {
+          "enum": [
+            "missing_complete_usage",
+            "checkpoint_ineligible",
+            "usage_document_conflict",
+            "runner_usage_lifecycle_gap",
+            "scope_conflict"
+          ]
+        },
+        "evidenceHash": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "initializeRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "protocolVersion",
+        "provider",
+        "threadId",
+        "lineageGeneration",
+        "runId",
+        "usageDocumentHash",
+        "checkpointHash",
+        "runnerUsageRecordedEventHash",
+        "runnerScopeBoundEventHash",
+        "usageCompleteness",
+        "resumeEligible"
+      ],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "protocolVersion": { "const": 2 },
+        "provider": { "$ref": "#/$defs/provider" },
+        "threadId": { "$ref": "#/$defs/threadId" },
+        "lineageGeneration": { "const": 0 },
+        "runId": { "$ref": "#/$defs/runId" },
+        "usageDocumentHash": { "$ref": "#/$defs/sha256" },
+        "checkpointHash": { "$ref": "#/$defs/sha256" },
+        "runnerUsageRecordedEventHash": { "$ref": "#/$defs/sha256" },
+        "runnerScopeBoundEventHash": { "$ref": "#/$defs/sha256" },
+        "usageCompleteness": { "const": "complete" },
+        "resumeEligible": { "const": true }
+      }
+    },
+    "reserveRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "protocolVersion",
+        "provider",
+        "threadId",
+        "expectedStateRevision",
+        "lineageGeneration",
+        "predecessorRunId",
+        "predecessorUsageDocumentHash",
+        "predecessorCheckpointHash",
+        "reservationId",
+        "childRunId"
+      ],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "protocolVersion": { "const": 2 },
+        "provider": { "$ref": "#/$defs/provider" },
+        "threadId": { "$ref": "#/$defs/threadId" },
+        "expectedStateRevision": { "$ref": "#/$defs/positiveSafeInteger" },
+        "lineageGeneration": { "$ref": "#/$defs/positiveSafeInteger" },
+        "predecessorRunId": { "$ref": "#/$defs/runId" },
+        "predecessorUsageDocumentHash": { "$ref": "#/$defs/sha256" },
+        "predecessorCheckpointHash": { "$ref": "#/$defs/sha256" },
+        "reservationId": { "$ref": "#/$defs/reservationId" },
+        "childRunId": { "$ref": "#/$defs/runId" }
+      }
+    },
+    "startedRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "protocolVersion",
+        "provider",
+        "threadId",
+        "expectedStateRevision",
+        "reservationId",
+        "childRunId",
+        "runnerStartedEventHash"
+      ],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "protocolVersion": { "const": 2 },
+        "provider": { "$ref": "#/$defs/provider" },
+        "threadId": { "$ref": "#/$defs/threadId" },
+        "expectedStateRevision": { "$ref": "#/$defs/positiveSafeInteger" },
+        "reservationId": { "$ref": "#/$defs/reservationId" },
+        "childRunId": { "$ref": "#/$defs/runId" },
+        "runnerStartedEventHash": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "advanceRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "protocolVersion",
+        "provider",
+        "threadId",
+        "expectedStateRevision",
+        "reservationId",
+        "childRunId",
+        "usageDocumentHash",
+        "checkpointHash",
+        "runnerUsageRecordedEventHash",
+        "runnerScopeBoundEventHash",
+        "usageCompleteness",
+        "resumeEligible"
+      ],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "protocolVersion": { "const": 2 },
+        "provider": { "$ref": "#/$defs/provider" },
+        "threadId": { "$ref": "#/$defs/threadId" },
+        "expectedStateRevision": { "$ref": "#/$defs/positiveSafeInteger" },
+        "reservationId": { "$ref": "#/$defs/reservationId" },
+        "childRunId": { "$ref": "#/$defs/runId" },
+        "usageDocumentHash": { "$ref": "#/$defs/sha256" },
+        "checkpointHash": { "$ref": "#/$defs/sha256" },
+        "runnerUsageRecordedEventHash": { "$ref": "#/$defs/sha256" },
+        "runnerScopeBoundEventHash": { "$ref": "#/$defs/sha256" },
+        "usageCompleteness": { "const": "complete" },
+        "resumeEligible": { "const": true }
+      }
+    },
+    "cancelRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "protocolVersion",
+        "provider",
+        "threadId",
+        "expectedStateRevision",
+        "reservationId",
+        "childRunId",
+        "cancellationProof"
+      ],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "protocolVersion": { "const": 2 },
+        "provider": { "$ref": "#/$defs/provider" },
+        "threadId": { "$ref": "#/$defs/threadId" },
+        "expectedStateRevision": { "$ref": "#/$defs/positiveSafeInteger" },
+        "reservationId": { "$ref": "#/$defs/reservationId" },
+        "childRunId": { "$ref": "#/$defs/runId" },
+        "cancellationProof": { "$ref": "#/$defs/cancellationProof" }
+      }
+    },
+    "blockRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "protocolVersion",
+        "provider",
+        "threadId",
+        "expectedStateRevision",
+        "reservationId",
+        "childRunId",
+        "blockProof"
+      ],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "protocolVersion": { "const": 2 },
+        "provider": { "$ref": "#/$defs/provider" },
+        "threadId": { "$ref": "#/$defs/threadId" },
+        "expectedStateRevision": { "$ref": "#/$defs/positiveSafeInteger" },
+        "reservationId": { "$ref": "#/$defs/reservationId" },
+        "childRunId": { "$ref": "#/$defs/runId" },
+        "blockProof": { "$ref": "#/$defs/blockProof" }
+      }
+    }
+  }
+}

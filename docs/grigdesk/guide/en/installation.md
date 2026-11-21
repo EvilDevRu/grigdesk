@@ -1,5 +1,11 @@
 # Installing the application
 
+A v3 package downloads `control.tar.gz` alongside the selected components.
+It contains the `grigdesk-ctl` command. Close the registered installation’s
+window and server before its first switch to Go. Use `--migrate-to-go` for
+separate terminal confirmation. For automation, use
+`--yes --migrate-to-go --expected-current-sha <sha256>` for the existing `current.json`.
+
 Download a small terminal script from the website. It obtains its helper and only the selected
 components of a ready-made release. Internet access is required; system Node/npm and source code are not.
 This installation method applies to the Linux releases on the website.
@@ -93,7 +99,7 @@ On Apple Silicon, **Build → All** and `grigdesk-ctl build all` run
 `dist build --channel dev`. This requires macOS 15 or later, the Xcode tools,
 native Node, and the Homebrew formulas in `tools/ci/Brewfile.macos`.
 The build checks its environment. On a new machine or after a setup error, you can run
-`bin/grigdesk-ctl dist doctor` from the repository root and review `ok` and `checks`
+`bin/utilities/ctl dist doctor` from the repository root and review `ok` and `checks`
 in the JSON report. After verification, use the run UUID
 with `dist install --local-run <UUID>` and specify the installation mode and paths.
 Official candidates have their own signing key.

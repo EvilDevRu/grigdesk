@@ -14,7 +14,6 @@ test('GigaCode временно отсутствует в карточках, м
 test('исходники GigaCode сохранены вне автоматических загрузчиков чата и Factory', async () => {
   for (const relative of [
     'server/src/lib/executors/gigacode.ts',
-    'engine/lib/runners/gigacode.sh',
     'server/scripts/gigacodeRunner.mts',
   ]) {
     const source = new URL(`../../${relative}`, import.meta.url);

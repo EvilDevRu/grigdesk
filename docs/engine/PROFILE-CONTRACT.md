@@ -21,6 +21,11 @@ profiles/<name>/
 содержимое при этом не поставляется. Движок и тесты репозитория не должны зависеть
 от наличия профилей с конкретными именами.
 
+Go-кандидат проверяет тот же `profile.sh`, `graph.json` и `runners.env`.
+`dashboard.env` обслуживает привычный резервный просмотрщик старых поставок.
+В пробном Go-комплекте просмотр графа и журнала идёт через GrigDesk.
+Импорт `delivery_contract` использует точный файл `$FACTORY_HOME/lib/delivery_contract.py`.
+
 ## Runner policy
 
 `profiles/<name>/runners.env` — единственный project source для выбора ИИ и моделей. Без валидного
@@ -39,27 +44,22 @@ PROJECT_RUNNER_FAILOVER=codex
 Настраивать нужно через CLI, чтобы сохранить revision/CAS:
 
 ```bash
-engine/bin/factory profile <name> runner show
-engine/bin/factory profile <name> runner set claude --failover codex
-engine/bin/factory profile <name> runner set REVIEW codex --failover claude
-engine/bin/factory profile <name> model set DEFAULT claude \
+bin/factory profile <name> runner show
+bin/factory profile <name> runner set claude --failover codex
+bin/factory profile <name> runner set REVIEW codex --failover claude
+bin/factory profile <name> model set DEFAULT claude \
   family=opus version=latest effort=max
-engine/bin/factory profile <name> model set DEFAULT codex \
+bin/factory profile <name> model set DEFAULT codex \
   family=sol version=latest effort=xhigh
 ```
 
-Primary/failover принадлежат проекту. Task override не меняет профиль:
-
-```bash
-engine/bin/factory <TASK> runner set codex --failover claude
-engine/bin/factory <TASK> runner set REVIEW claude --failover codex
-engine/bin/factory <TASK> runner clear REVIEW
-```
+Primary и failover по умолчанию задаёт проект. Настройки отдельного этапа
+оператор меняет в карточке попытки.
 
 Task-level override можно закрепить уже на старте прогона:
 
 ```bash
-engine/bin/factory <TASK> start --profile <name> --route <route> --ticket-json <abs> \
+bin/factory <TASK> start --profile <name> --route <route> --ticket-json <abs> \
   --runner-primary codex
 ```
 
@@ -68,8 +68,8 @@ Id валидируется по установленным адаптерам (
 выбранного id (task override целиком замещает пару primary/failover, профильный failover сам
 не подмешивается). Флаг допустим только при `start`; override хранится в реестре задачи и
 переживает resume. В GrigDesk тот же override выставляет селект исполнителя в форме запуска,
-а stage override — модалка узла (`POST /api/tasks/:id/runner/override` → `runner set/clear
-<STAGE>`; работающий этап — только `runner switch`).
+а выбор этапа — модалка узла. Сервер передаёт exact identity в
+`factory TASK runner settings apply` с режимом `next` или `restart`.
 
 Routing precedence:
 
@@ -99,7 +99,7 @@ provider-neutral, а смена модели или effort не требует �
 После изменения runner/model policy нужен metadata-only preflight:
 
 ```bash
-RUN_HOST_PREFLIGHT=1 engine/bin/factory-check <name> --host-preflight
+RUN_HOST_PREFLIGHT=1 bin/factory profile-check <name> --host-preflight
 ```
 
 Он не отправляет prompt. Пока coverage отсутствует, просрочено или несовместимо, запуск
@@ -149,7 +149,7 @@ URL с одним хостом вида `http://<host>:<port>` без пути. 
 | `profile_timeout_class <CLASS>` | переопределить секунды класса времени из бандла маршрута |
 | `profile_stage_agent_allow <RUN_KEY>` | добавить узкому route-узлу project command |
 | `profile_route_node_evidence_check ...` | trusted-проверка evidence exact run и снимок его артефактов |
-| `profile_stage_result_check <TASK> <RUN_KEY>` | путь исполняемой предпроверки сдачи, которую `stage-result.sh` зовёт до записи `done/skipped` |
+| `profile_stage_result_check <TASK> <RUN_KEY>` | путь исполняемой предпроверки сдачи, которую `factory stage-result` вызывает до записи `done/skipped` |
 | `profile_route_volatile_paths <TASK>` | runtime-пути проверочного инструментария, которые сторож `state-only` терпит |
 | `profile_agent_control_start <TASK> <RUN_KEY>` / `profile_agent_control_stop <TASK> <RUN_KEY> <RC>` | Linux. Краткоживущий канал управления для точного этапа |
 | `profile_agent_control_darwin_v1 <TASK> <RUN_KEY>` | macOS. Объявляет команды брокера и парного закрытия |
@@ -186,13 +186,12 @@ URL с одним хостом вида `http://<host>:<port>` без пути. 
 Движок сам разрешает только scoped status API:
 
 ```text
-engine/lib/stage-result.sh
-engine/lib/stage-progress.sh
+"$FACTORY_STATUS_BIN" stage-result
+"$FACTORY_STATUS_BIN" stage-progress
 ```
 
-Общий `pipeline-set.sh` агенту не выдаётся. Это ограниченный writer неслужебных полей
-вторичной проекции; topology, lifecycle, provenance и route statuses принадлежат только
-host/control writer и run-scoped capability API.
+Topology, lifecycle, provenance и состояния узлов принадлежат движку и
+обновляются с точной identity запуска.
 Для Codex дополнительные каталоги переводятся в `--add-dir`; sandbox остаётся
 `workspace-write`.
 
@@ -205,6 +204,10 @@ path/owner/mode/non-symlink, отклоняет пересечение с люб
 `flock` работают через read-only bind, поэтому network proxy, localhost/TCP и AF_UNIX для
 host-channel не нужны. Сам broker остаётся host-процессом с закрытым whitelist; каталог не
 может выдавать агенту произвольный lifecycle API.
+
+Go-движок на Linux вызывает обе функции в одной профильной оболочке. Канал живёт
+на протяжении одного визита узла, включая повторы. При подтверждённом Stop хук
+закрытия получает `130`. Ошибка закрытия прерывает продвижение графа.
 
 Claude route runner доступен для любой native CLI, которая отвечает разборчивым номером
 версии: изоляцию держат флаги запуска, а соблюдение контракта живым бинарём проверяет
@@ -219,7 +222,10 @@ MCP не расширяют route policy; credential store при этом не 
 Файл требует native Bash sandbox `enabled=true`, `failIfUnavailable=true`, запрещает
 unsandboxed escape hatch и не содержит `excludedCommands`. `CONTROL_DIR` закрыт одновременно
 через `sandbox.filesystem.denyRead/denyWrite` и deny правил инструментов
-`Read/Edit/Write/NotebookEdit`. Другая версия CLI считается unavailable до повторного аудита.
+`Read/Edit/Write/NotebookEdit`. Go создаёт этот файл на один запуск и объединяет базовые
+правила с `PROFILE_AGENT_ALLOW`, `PROFILE_AGENT_DENY` и `profile_stage_agent_allow`.
+Результат Claude поступает через приватную очередь точной эпохи. Она работает
+и в shell, который CLI запускает без наследования дескриптора статуса.
 
 Разрешение сверяется по префиксу строки, поэтому на проверочных этапах движок запрещает
 запускатели чужих команд (`timeout`, `env`, `xargs`, `nohup`, `setsid`, `stdbuf`, `nice`,
@@ -266,14 +272,9 @@ profile_route_volatile_paths TASK
 
 ## Временная инструментация
 
-Для `trace → verify` используется host-controlled API
-`engine/lib/instrumentation-transaction.sh`:
-
-```text
-instrumentation_tx_begin TASK TXID SCOPE_FILE FACTORY-TRACE:tTASK GIT_ROOT...
-instrumentation_tx_checkpoint TASK TXID
-instrumentation_tx_cleanup TASK TXID
-```
+Движок Go открывает, проверяет и восстанавливает транзакцию инструментации
+по закреплённому scope. Этими операциями владеет журнал в
+`utilities/factory/internal/state/instrumentation.go`.
 
 Способ получения scope задаёт опубликованная topology, а не имя маршрута. Транзакционный
 узел `instrument` означает `explicit`: вызывающий обязан передать точные repo-relative пути
@@ -343,7 +344,7 @@ cp -a "$REPO/vendor" "$WORKTREE/vendor"     # не cp -al
 
 > `PROFILE_VOLATILE_PATHS` отменён. Если переменная осталась в профиле — она мёртвая,
 > движок её не читает. Почему список исключений оказался тупиком, расписано над
-> `_instrumentation_tx_snapshot` в `engine/lib/instrumentation-transaction.sh`.
+> снимок транзакции в `utilities/factory/internal/state/instrumentation.go`.
 
 ### `PROFILE_SERVICE_HOST` — под каким именем открывать стенд
 
@@ -364,7 +365,7 @@ production-сборкой, получил 401 и ушёл на отсутств�
 витков браузер перестал отвечать, а узел `browser` исчерпал лимит без единого сценария.
 
 Значение — голое имя хоста или адрес: без схемы, порта и слэшей (их добавляет движок).
-Форму проверяет `factory-check`, чтобы ошибка не всплыла на живом прогоне.
+Форму проверяет `factory profile-check`, чтобы ошибка не всплыла на живом прогоне.
 
 ## Route protocol: capability и workspace
 
@@ -424,7 +425,7 @@ health стенда, lease и проверка неизменяемых pin ос
 Поля закрыты: `schema` равна 1, дополнительные поля, shell, аргументы команд и секреты
 запрещены. Для command доступны только `state-only` и `workspace-write`; сам hook
 `profile_route_command` по-прежнему проверяет ID по собственному allowlist. Файл можно
-опустить: встроенные секции `factory-context` и agent-маршруты остаются доступны, но
+опустить: встроенные секции `factory context` и agent-маршруты остаются доступны, но
 command без декларации не проходит editor-проверку. Неизвестная секция контекста также
 блокирует editor-публикацию. Декларация подтверждает контракт профиля, а не успешность
 реального вызова команды; её соответствие hook проверяет тест профиля.
@@ -503,7 +504,7 @@ fail-closed (код 78). Singleton `source-branch` в манифесте поп�
 своя ветка каждого доступна агенту как `workspace.<repo>.branch`, а целевые ветки
 доставки задаются отдельно через `profile_delivery_targets`.
 
-`bin/factory-check --quick` сверяет фактический HEAD каждого shared checkout с его пином и
+`bin/factory profile-check --quick` сверяет фактический HEAD каждого shared checkout с его пином и
 проверяет, что isolated-профиль закрепил одну ветку на все репозитории. Без этой сверки
 расхождение всплывало только отказом движка на первом же действии по задаче — включая
 приёмку уже сделанной работы.
@@ -569,9 +570,9 @@ Repo/project/mode/branch/stand/ports/resources закрепляются immutabl
 попытки. `resume` останавливается при любом дрейфе. Для маршрута с `ship` каждый
 delivery target задаётся как `имя-repo=ветка` для имени из `profile_repositories`;
 маршрут без `ship` не получает delivery actions. Typed context принимает список через
-`factory-context --repo имя:workspace:source:branch` и публикует его под именами профиля.
+`factory context --repo имя:workspace:source:branch` и публикует его под именами профиля.
 Трёхпольная форма без `branch` остаётся rolling-upgrade совместимостью для launcher-процесса,
-который уже работал в момент замены отдельного `factory-context`; тогда берётся общий
+который уже работал в момент замены отдельного `factory context`; тогда берётся общий
 закреплённый `--source-branch`. Новые запуски всегда передают четырёхпольную форму.
 
 Транзакционная instrumentation в isolated по-прежнему требует linked worktree. Primary
@@ -579,6 +580,10 @@ checkout разрешён только в explicit shared mode после про
 Cleanup использует прежний CAS и восстанавливает исходно dirty baseline побайтово; затем
 обязателен `profile_instrumentation_restored`. Любая параллельная неизвестная правка или
 ошибка sync останавливает попытку и ничего не перезаписывает молча.
+
+В Go-кандидате Linux использует тот же хук `profile_instrumentation_restored TASK SCOPE_FILE`
+для shared-стенда. Движок вызывает его после восстановления файлов и индекса и очищает
+указатель на транзакцию после подтверждения хука и повторной проверки workspace.
 
 Файловая политика узла дополнена явным разрешением браузера:
 `policy.browser: forbid|allow` (умолчание `forbid`). Разрешение независимо от
@@ -613,7 +618,7 @@ GrigDesk называла её, а не отсылала к победному �
 
 Той же проверке место и ДО сдачи: `profile_stage_result_check TASK RUN_KEY` печатает путь
 исполняемого файла профиля (или ничего), движок отдаёт его агенту переменной
-`FACTORY_STAGE_RESULT_CHECK`, а `stage-result.sh` зовёт файл с аргументами `TASK RUN_KEY RESULT`
+`FACTORY_STAGE_RESULT_CHECK`, а `factory stage-result` вызывает файл с аргументами `TASK RUN_KEY RESULT`
 перед записью `done/skipped` (`failed` не проверяется). Ненулевой код — сдача отклонена: причина
 из вывода файла показывается агенту, результат не записывается, агент правит и сдаёт снова в
 том же заходе. Это не сторож, а его ранняя копия в руках агента: файл исполняется в оболочке
@@ -700,7 +705,7 @@ host-команды и не превращаются в продуктовый �
 ничего: он и так лежал в репозитории до задачи.
 
 Тот же порядок обязателен и для проверяющих `executor=agent`: он записан в общем блоке
-промпта этапа (`_stage_scope_block` в `engine/lib/core.sh`), чтобы правило было одно на оба
+промпта этапа, чтобы правило было одно на оба
 сорта узлов.
 
 Поэтому диагностику (кто из провайдеров выпал, что пропущено) command-узел кладёт в `comment`
@@ -708,11 +713,8 @@ host-команды и не превращаются в продуктовый �
 причину: список «по одному finding на каждый выпавший элемент» ломается сам собой, как только
 элементов становится двое — одинаковые `id` движок отвергает.
 
-Тест профиля обязан прогонять stdout hook-а через настоящий парсер движка:
-
-```bash
-source engine/lib/route-runtime.sh; _route_v2_command_result RESULT_JSON
-```
+Контракт stdout проверяйте через выполнение командного узла на изолированном профиле.
+Парсер вердиктов находится в `utilities/factory/internal/hooks/command.go`.
 
 Схема profile-скрипта всегда шире контракта движка, и проверки одного лишь JSON на выходе
 скрипта рассинхрон не ловят. На этом уже вставал боевой маршрут с кворумом нескольких мнений:
@@ -938,8 +940,8 @@ GrigDesk (`PROFILE_CTX`, `PROFILE_TRIAGE_*`, пути репозиториев) 
 Debug не является profile hook:
 
 ```bash
-engine/bin/factory profile <name> debug set verbose --for 2h
-engine/bin/factory profile <name> debug clear
+bin/factory profile <name> debug set verbose --for 2h
+bin/factory profile <name> debug clear
 ```
 
 Настройка хранится отдельно от runner config, не меняет routing revision и не выдаёт агенту
@@ -952,14 +954,19 @@ engine/bin/factory profile <name> debug clear
 Без GrigDesk и model call:
 
 ```bash
-engine/bin/factory-check <name> --quick
+bin/factory profile-check <name> --quick
 ```
 
 На рабочем хосте перед первым запуском задачи:
 
 ```bash
-RUN_HOST_PREFLIGHT=1 engine/bin/factory-check <name> --host-preflight
+RUN_HOST_PREFLIGHT=1 bin/factory profile-check <name> --host-preflight
 ```
+
+Исходная сборка Go принимает `bin/factory profile-check <name> --quick` и
+`RUN_HOST_PREFLIGHT=1 bin/factory profile-check <name> --host-preflight`. При опущенном имени
+проверяются профили из выбранного `FACTORY_PROFILES_DIR`. `--quick` создаёт временные
+state, config и XDG-каталоги на время проверки.
 
 Проверки должны подтвердить:
 

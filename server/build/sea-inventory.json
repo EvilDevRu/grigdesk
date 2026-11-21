@@ -2,22 +2,49 @@
   "schema": 1,
   "points": [
     {
-      "file": "cli/buildProgress.ts",
+      "file": "server/scripts/factoryRuntimePin.mts",
       "construct": "exec-path",
       "target": "",
-      "count": 2,
-      "owner": "task-19",
-      "fate": "development-only",
-      "detail": "Source build под sourceInstallation запускает ctlBuild и admissionPreflight обычным Node; готовая поставка не допускает эту ветку."
+      "count": 1,
+      "owner": "task-17",
+      "fate": "helper",
+      "detail": "Запуск проверенного helper-а закреплённым Node выбранного пакета."
     },
     {
-      "file": "cli/commands.ts",
+      "file": "server/src/binary/serverEntry.ts",
       "construct": "dynamic-import",
-      "target": "./updates.ts",
+      "target": "../lib/arbiterConversationService.ts",
       "count": 1,
       "owner": "task-19",
-      "fate": "helper",
-      "detail": "Литеральный ленивый импорт installed update команд входит в helper grigdesk-cli из каталога helpers."
+      "fate": "server-bundle",
+      "detail": "Инициализация серверных служб из CJS payload."
+    },
+    {
+      "file": "server/src/binary/serverEntry.ts",
+      "construct": "dynamic-import",
+      "target": "../lib/arbiterConversationStore.ts",
+      "count": 1,
+      "owner": "task-19",
+      "fate": "server-bundle",
+      "detail": "Инициализация серверных служб из CJS payload."
+    },
+    {
+      "file": "server/src/binary/serverEntry.ts",
+      "construct": "dynamic-import",
+      "target": "../lib/factoryDarwinLaunch.ts",
+      "count": 1,
+      "owner": "task-19",
+      "fate": "server-bundle",
+      "detail": "Инициализация серверных служб из CJS payload."
+    },
+    {
+      "file": "server/src/binary/serverEntry.ts",
+      "construct": "dynamic-import",
+      "target": "../lib/factoryLaunchAdmission.ts",
+      "count": 1,
+      "owner": "task-19",
+      "fate": "server-bundle",
+      "detail": "Инициализация серверных служб из CJS payload."
     },
     {
       "file": "deploy/desktop.sh",
@@ -128,96 +155,6 @@
       "detail": "Только source-ветка запускает TS entry ротации журнала; release-ветка выбирает helper комплекта."
     },
     {
-      "file": "engine/lib/codex-failure.mjs",
-      "construct": "shell-ref",
-      "target": "server/src/lib/runnerFailure.ts",
-      "count": 1,
-      "owner": "task-12",
-      "fate": "compat-wrapper",
-      "detail": "JS движка в staging получает обёртку на модуль сервера."
-    },
-    {
-      "file": "engine/lib/runners/deepseek.sh",
-      "construct": "shell-ref",
-      "target": "server/scripts/deepseekRunner.mts",
-      "count": 1,
-      "owner": "deepseek-plan",
-      "fate": "compat-wrapper",
-      "detail": "Прежний Bash путь вызывает собранный helper через тонкий script import в staging."
-    },
-    {
-      "file": "engine/lib/runners/deepseek.sh",
-      "construct": "shell-ref",
-      "target": "server/scripts/deepseekRuntimeInfo.mts",
-      "count": 1,
-      "owner": "deepseek-plan",
-      "fate": "compat-wrapper",
-      "detail": "Прежний Bash путь вызывает собранный helper через тонкий script import в staging."
-    },
-    {
-      "file": "engine/lib/runners/glm.sh",
-      "construct": "shell-ref",
-      "target": "server/scripts/glmRunner.mts",
-      "count": 1,
-      "owner": "deepseek-plan",
-      "fate": "compat-wrapper",
-      "detail": "Раннер GLM этапа вызывает собранный helper через тонкий script import в staging."
-    },
-    {
-      "file": "engine/lib/runners/glm.sh",
-      "construct": "shell-ref",
-      "target": "server/scripts/glmRuntimeInfo.mts",
-      "count": 1,
-      "owner": "deepseek-plan",
-      "fate": "compat-wrapper",
-      "detail": "Раннер GLM этапа вызывает собранный helper через тонкий script import в staging."
-    },
-    {
-      "file": "engine/lib/runtime-usage.mjs",
-      "construct": "shell-ref",
-      "target": "server/src/lib/analytics/canonical.ts",
-      "count": 1,
-      "owner": "task-12",
-      "fate": "compat-wrapper",
-      "detail": "JS движка в staging получает обёртки на аналитические модули сервера."
-    },
-    {
-      "file": "engine/lib/runtime-usage.mjs",
-      "construct": "shell-ref",
-      "target": "server/src/lib/analytics/durableFs.ts",
-      "count": 1,
-      "owner": "task-12",
-      "fate": "compat-wrapper",
-      "detail": "JS движка в staging получает обёртки на аналитические модули сервера."
-    },
-    {
-      "file": "engine/lib/runtime-usage.mjs",
-      "construct": "shell-ref",
-      "target": "server/src/lib/analytics/normalizers.ts",
-      "count": 1,
-      "owner": "task-12",
-      "fate": "compat-wrapper",
-      "detail": "JS движка в staging получает обёртки на аналитические модули сервера."
-    },
-    {
-      "file": "engine/lib/runtime-usage.mjs",
-      "construct": "shell-ref",
-      "target": "server/src/lib/analytics/usageDocument.ts",
-      "count": 1,
-      "owner": "task-12",
-      "fate": "compat-wrapper",
-      "detail": "JS движка в staging получает обёртки на аналитические модули сервера."
-    },
-    {
-      "file": "engine/lib/runtime-usage.mjs",
-      "construct": "shell-ref",
-      "target": "server/src/lib/runnerFailure.ts",
-      "count": 1,
-      "owner": "task-12",
-      "fate": "compat-wrapper",
-      "detail": "JS движка в staging получает обёртки на аналитические модули сервера."
-    },
-    {
       "file": "server/scripts/buildBinary.mts",
       "construct": "exec-path",
       "target": "",
@@ -252,15 +189,6 @@
       "owner": "task-19",
       "fate": "development-only",
       "detail": "Один ELF: явные стадии сборки, launcher и ordinary Node payload."
-    },
-    {
-      "file": "server/scripts/buildSea.mts",
-      "construct": "exec-path",
-      "target": "",
-      "count": 1,
-      "owner": "task-14",
-      "fate": "development-only",
-      "detail": "Сборка и локальная проверка релиза, не входит в runtime."
     },
     {
       "file": "server/scripts/buildSea.mts",
@@ -299,15 +227,6 @@
       "detail": "Source-команда build готовит закреплённый Node и читает descriptor окна; в payload не входит."
     },
     {
-      "file": "server/scripts/ctlBuild.mts",
-      "construct": "resource-ref",
-      "target": "server/build/node-runtime.json",
-      "count": 1,
-      "owner": "task-19",
-      "fate": "development-only",
-      "detail": "Версия и SHA архива читаются только перед сборкой из исходников."
-    },
-    {
       "file": "server/scripts/deepSeekCandidateGate.ts",
       "construct": "exec-path",
       "target": "",
@@ -333,33 +252,6 @@
       "owner": "deepseek-plan",
       "fate": "helper",
       "detail": "Явный main helper сохраняет runDeepSeekFactory и выбирает вложенный status через каталог R."
-    },
-    {
-      "file": "server/scripts/deepseekStatusMcp.mts",
-      "construct": "import-meta",
-      "target": "url",
-      "count": 2,
-      "owner": "deepseek-plan",
-      "fate": "helper",
-      "detail": "Factory metadata/status входят в исполняемый helper; engine assets разрешаются внутри R."
-    },
-    {
-      "file": "server/scripts/deepseekStatusMcp.mts",
-      "construct": "resource-ref",
-      "target": "engine/lib/stage-progress.sh",
-      "count": 1,
-      "owner": "deepseek-plan",
-      "fate": "helper",
-      "detail": "Factory metadata/status входят в исполняемый helper; engine assets разрешаются внутри R."
-    },
-    {
-      "file": "server/scripts/deepseekStatusMcp.mts",
-      "construct": "resource-ref",
-      "target": "engine/lib/stage-result.sh",
-      "count": 1,
-      "owner": "deepseek-plan",
-      "fate": "helper",
-      "detail": "Factory metadata/status входят в исполняемый helper; engine assets разрешаются внутри R."
     },
     {
       "file": "server/scripts/externalCliLease.mts",
@@ -1271,60 +1163,6 @@
       "detail": "Ленивый литеральный import включается esbuild в CJS-бандл."
     },
     {
-      "file": "server/src/modules/routes/editorCapabilities.ts",
-      "construct": "import-meta",
-      "target": "url",
-      "count": 1,
-      "owner": "task-4",
-      "fate": "server-bundle",
-      "detail": "URL engine CLI переписывается плагином задачи 4."
-    },
-    {
-      "file": "server/src/modules/routes/editorCapabilities.ts",
-      "construct": "resource-ref",
-      "target": "engine/bin/factory-route",
-      "count": 1,
-      "owner": "task-12",
-      "fate": "asset",
-      "detail": "engine/bin/factory-route поставляется вместе с движком."
-    },
-    {
-      "file": "server/src/modules/routes/editorEngine.ts",
-      "construct": "import-meta",
-      "target": "url",
-      "count": 1,
-      "owner": "task-4",
-      "fate": "server-bundle",
-      "detail": "URL engine CLI переписывается плагином задачи 4."
-    },
-    {
-      "file": "server/src/modules/routes/editorEngine.ts",
-      "construct": "resource-ref",
-      "target": "engine/bin/factory-route",
-      "count": 1,
-      "owner": "task-12",
-      "fate": "asset",
-      "detail": "engine/bin/factory-route поставляется вместе с движком."
-    },
-    {
-      "file": "server/src/modules/routes/publicationService.ts",
-      "construct": "import-meta",
-      "target": "url",
-      "count": 1,
-      "owner": "task-4",
-      "fate": "server-bundle",
-      "detail": "URL engine CLI переписывается плагином задачи 4."
-    },
-    {
-      "file": "server/src/modules/routes/publicationService.ts",
-      "construct": "resource-ref",
-      "target": "engine/bin/factory-route",
-      "count": 1,
-      "owner": "task-12",
-      "fate": "asset",
-      "detail": "engine/bin/factory-route поставляется вместе с движком."
-    },
-    {
       "file": "server/src/modules/routes/store.ts",
       "construct": "dynamic-import",
       "target": "./publicationJournal.ts",
@@ -1388,24 +1226,6 @@
       "detail": "Сборочная подготовка существующего Markdown renderer своим Node; не исполняется из payload."
     },
     {
-      "file": "engine/lib/runner-model-options.sh",
-      "construct": "shell-ref",
-      "target": "server/scripts/factoryRunnerModels.mts",
-      "count": 1,
-      "owner": "deepseek-plan",
-      "fate": "compat-wrapper",
-      "detail": "Metadata раннеров через собранный helper закреплённой поставки."
-    },
-    {
-      "file": "engine/lib/runners/qwen.sh",
-      "construct": "shell-ref",
-      "target": "server/scripts/qwenRunner.mts",
-      "count": 2,
-      "owner": "task-1",
-      "fate": "compat-wrapper",
-      "detail": "Qwen host-wrapper: исходный и упакованный helper используют один runtime и ACP launcher."
-    },
-    {
       "file": "server/scripts/qwenRunner.mts",
       "construct": "import-meta",
       "target": "url",
@@ -1449,15 +1269,6 @@
       "owner": "task-1",
       "fate": "asset",
       "detail": "Управляемый CLI-вход использует Python PTY, уже включённый в оба manifest ресурсов."
-    },
-    {
-      "file": "shared/node/cliSeaBuild.ts",
-      "construct": "exec-path",
-      "target": "",
-      "count": 1,
-      "owner": "task-1",
-      "fate": "development-only",
-      "detail": "Сборщик CLI запускает postject обычным Node; в runtime CLI этот путь не исполняется."
     }
   ],
   "resources": [
@@ -1632,10 +1443,10 @@
     {
       "path": "bin/grigdesk-ctl",
       "kind": "file",
-      "expect": "source",
+      "expect": "generated",
       "owner": "task-17",
-      "fate": "compat-wrapper",
-      "detail": "Единая команда выбирает бинарник комплекта или исходный сервер."
+      "fate": "asset",
+      "detail": "Нативная команда Go, собранная в staging."
     },
     {
       "path": "server/scripts/dataHomeCheck.mts",
@@ -1886,12 +1697,36 @@
       "detail": "Манифест состава, версий и хешей комплекта."
     },
     {
-      "path": "bin/b24",
+      "path": "bin/tracker",
       "kind": "file",
       "expect": "generated",
       "owner": "task-14",
       "fate": "asset",
-      "detail": "Готовая команда b24 из своего выпуска."
+      "detail": "Нативная команда Go, собранная в staging."
+    },
+    {
+      "path": "bin/pipeline",
+      "kind": "file",
+      "expect": "generated",
+      "owner": "task-14",
+      "fate": "asset",
+      "detail": "Нативная команда Go, собранная в staging."
+    },
+    {
+      "path": "bin/routes",
+      "kind": "file",
+      "expect": "generated",
+      "owner": "task-14",
+      "fate": "asset",
+      "detail": "Нативная команда Go, собранная в staging."
+    },
+    {
+      "path": "bin/voice",
+      "kind": "file",
+      "expect": "generated",
+      "owner": "task-14",
+      "fate": "asset",
+      "detail": "Нативная команда Go, собранная в staging."
     },
     {
       "path": "bin/grigdesk-relay",

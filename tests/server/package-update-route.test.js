@@ -202,7 +202,7 @@ test('LIVE-PROOF: авторизованный runtime identity не подме�
 });
 
 const { installedFixture, pinnedKeyHook } = await import('../helpers/installedUpdateFixture.mjs');
-const { confirmInstalledUpdate } = await import('../../shared/node/installedUpdateApply.ts');
+const { confirmInstalledUpdate } = await import('../../tests/fixtures/release-v2/installedUpdateApply.ts');
 const { saveInstalledUpdate } = await import('../../shared/node/installedUpdateState.ts');
 const { execFile } = await import('node:child_process');
 const { promisify } = await import('node:util');

@@ -3,14 +3,15 @@ import { spawnSync } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 
 import { RoutesStore } from '../../server/src/modules/routes/store.ts';
 import { prepareDraftCatalog } from '../../server/src/modules/routes/publicationService.ts';
 import { makeCatalogInput, makeDraft } from '../fixtures/routes-editor.mjs';
 
-const ROUTE_TOOL = fileURLToPath(new URL('../../engine/bin/factory-route', import.meta.url));
+import { testFactoryBinary } from '../helpers/factoryBinary.mjs';
+
+const ROUTE_TOOL = testFactoryBinary();
 
 async function fixture(t) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-editor-prepare-'));
@@ -51,7 +52,7 @@ test('RE-D1-01: prepare создаёт читаемый bundle без перек
 test('RE-D1-02: engine проверяет returned hash и подмену prompt до CAS', async (t) => {
   const { root, store } = await fixture(t);
   const prepared = await store.prepareCatalog('sample', await prepareInput(store));
-  const check = () => spawnSync(ROUTE_TOOL, [
+  const check = () => spawnSync(ROUTE_TOOL, ['route',
     '--routes-dir', root, '--profile', 'sample',
     'catalog', '--catalog-hash', prepared.catalogHash,
   ], { encoding: 'utf8' });

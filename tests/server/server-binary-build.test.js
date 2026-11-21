@@ -66,6 +66,11 @@ async function fixture(t, failure) {
 
       return { stdout: '', stderr: '' };
     },
+    factory: async (work) => {
+      step('factory');
+
+      return path.join(work, 'factory-bin/factory');
+    },
     prepare: async () => step('prepare'),
     bundle: async (work) => {
       step('bundle');
@@ -106,8 +111,39 @@ test('SB22: build argv закрыт, out/cache обязательны и не в
   });
 });
 
+test('SB22: argv принимает явный путь заранее собранного Go ELF', () => {
+  const roots = ['--out-dir', 'out', '--cache-dir', 'cache'];
+  const candidate = ['--factory-candidate', 'artifacts/factory'];
+
+  assert.deepEqual(parseBuildArgs([...roots, ...candidate], '/fixture'), {
+    outDir: '/fixture/out',
+    cacheDir: '/fixture/cache',
+    factoryCandidate: '/fixture/artifacts/factory',
+  });
+  assert.ok('error' in parseBuildArgs([...roots, ...candidate, ...candidate], '/fixture'));
+  assert.ok('error' in parseBuildArgs([...roots, '--factory-candidate'], '/fixture'));
+});
+
+test('SB22: обычная сборка Linux передаёт свежий Go ELF в payload', async (t) => {
+  const input = await fixture(t);
+  let received = '';
+
+  input.steps.prepare = async (work, options) => {
+    received = options.factoryCandidate;
+
+    assert.equal(received, path.join(work, 'factory-bin/factory'));
+  };
+
+  await executeBinaryBuild(input.options, input.steps);
+
+  assert.deepEqual(input.events.slice(0, 2), ['extract', 'factory']);
+  assert.ok(received);
+});
+
 test('SB22: injected отказы всех стадий сохраняют предыдущие ELF/result', async (t) => {
-  for (const failure of ['extract', 'prepare', 'bundle', 'package', 'blob', 'copy', 'postject', 'smoke']) {
+  const stages = ['extract', 'factory', 'prepare', 'bundle', 'package', 'blob', 'copy', 'postject', 'smoke'];
+
+  for (const failure of stages) {
     const input = await fixture(t, failure);
 
     await assert.rejects(executeBinaryBuild(input.options, input.steps), /fixture.*failed/, failure);
@@ -136,7 +172,7 @@ test('SB22: публикация после smoke выдаёт SHA/size/packageI
   assert.equal(result.sha256, sha256('new-ELF'));
   assert.equal(result.size, Buffer.byteLength('new-ELF'));
   assert.deepEqual(input.events,
-    ['extract', 'prepare', 'bundle', 'package', 'blob', 'copy', 'postject', 'smoke']);
+    ['extract', 'factory', 'prepare', 'bundle', 'package', 'blob', 'copy', 'postject', 'smoke']);
   assert.deepEqual(JSON.parse(await readFile(path.join(input.options.outDir, 'build-result.json'), 'utf8')),
     result);
 });
@@ -177,6 +213,7 @@ test('MAC-BUILD-TARGET: Darwin archive и manifest относятся к одн�
   assert.deepEqual(manifest.runtime, runtime);
   assert.deepEqual(JSON.parse(await readFile(previousResult, 'utf8')).runtime, runtime);
   assert.equal(result.packageId, manifest.packageId);
+  assert.ok(input.events.includes('factory'), 'Apple Silicon собирает Go-фабрику по умолчанию');
 });
 
 /**

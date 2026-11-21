@@ -1,11 +1,16 @@
 # Сборка и установка из исходников
 
 В папке исходников `grigdesk-ctl build` собирает и ставит сервер, веб, окно, задачи Б24
-(`bin/tracker`, `bin/pipeline`, `bin/routes`) и озвучку (`bin/voice`). Команда использует Node разработчика из PATH, в том числе когда рядом уже
+(`tracker`, `pipeline`, `routes`) и озвучку (`voice`) в `bin/utilities/`. Команда использует Node разработчика из PATH, в том числе когда рядом уже
 установлен `bin/grigdesk-server`. Исходники распознаются по одновременному наличию
 `server/src/app.ts`, `web/package.json` и `desktop/package.json`. Готовая поставка
 с `release.json` сохраняет приоритет; в ней и в установке ELF без исходников команды
 разработки дают прежний отказ.
+
+У Go-кандидата на Linux `all` включает одну цепочку утилит через
+`tools/build-go-utilities.sh` параллельно серверу и окну. Сценарий PTY и отдельный fd 3
+проверяются в `tests/cli/checkout-go.test.mts`. Текущий launcher сохраняет прежний
+рецепт до переключения точки входа.
 
 Для полного дистрибутива используется отдельная source-only группа `grigdesk-ctl dist`:
 `build` фиксирует снимок исходников и проходит общий с Actions релизный рецепт;
@@ -24,16 +29,23 @@ grigdesk-ctl build all
 grigdesk-ctl build server
 grigdesk-ctl build web
 grigdesk-ctl build window
+grigdesk-ctl build factory
 grigdesk-ctl build deepseek
 grigdesk-ctl build apk
 ```
 
+`grigdesk-ctl build factory` отдельно собирает локальный движок из `utilities/factory/`
+в `bin/factory` через Go 1.27.4. Цель использует временный файл рядом с выходом и после проверки
+capabilities заменяет путь атомарно. В Go CLI это стадия `factory.build`: при
+`build all` она предшествует упаковке сервера. На Linux x64 сборщик включает
+этот ELF в серверный комплект. При прямом запуске серверного сборщика
+фабрика собирается во временном каталоге той же сборки.
+
 На Linux без цели выбирается `all` — «Всё». Сначала общей фазой готовятся
 зависимости (`ensure_deps`: сверка серверных пакетов через `npm install`, веб при отсутствии
 `node_modules`, проба DeepSeek),
-затем четыре цепочки собираются **параллельно**: сервер (`prepare-runtime`, `build:binary`,
-`install:binary`), окно (`npm run build` в web и `npm --prefix desktop run dist`) и задачи
-Б24 и конвейера (`npm --prefix tracker run build`, затем `build:pipeline`; routes — `npm --prefix routes run build`) и voice (`npm --prefix voice run build`). Установка окна идёт строго после всех цепочек:
+затем собираются сервер, окно и семь Go-утилит. Установка окна ждёт
+завершения этих стадий:
 `deploy/desktop.sh install` проверяет метаданные и совместимость `bin/grigdesk-server`
 ([декодер runtime-env](runtime-env-version-sync.md)), поэтому не может конкурировать
 с `install:binary`. Отдельные цели остаются последовательными: `server` вызывает
@@ -50,26 +62,9 @@ grigdesk-ctl build apk
 releases папки данных и `--glm-mode` фактического режима потребителя, затем чистка.
 Кэш и кандидат — `${XDG_CACHE_HOME:-$HOME/.cache}/grigdesk/deepseek-binary/{cache,out}`.
 
-Задачи Б24 собираются внутри `all` своим сборщиком tracker: зависимости ставятся только при
-отсутствии `tracker/node_modules`, затем `npm --prefix tracker run build` публикует ELF
-атомарной заменой прямо в `bin/tracker` (тот же закреплённый Node, что и у релизного
-комплекта). Кэш — `${XDG_CACHE_HOME:-$HOME/.cache}/grigdesk/tracker-binary/cache`.
-В той же tasks-цепочке после tracker последовательно собирается pipeline через
-`npm --prefix tracker run build:pipeline`, с общими зависимостями и кэшем.
-Затем `npm --prefix routes run build` публикует отдельный `bin/routes` из пакета routes/.
-`routes.deps` устанавливает его зависимости только при отсутствии routes/node_modules;
-кэш — `${XDG_CACHE_HOME:-$HOME/.cache}/grigdesk/routes-binary/cache`.
-Стадии `pipeline.build`, `routes.deps` и `routes.build` имеют отдельные веса и подписи RU/EN.
-Сводная строка перед списком стадий совмещает процент и оценку времени, сохраняя их
-видимыми при высоте терминала 24 строки.
-Отдельной цели `tasks` нет: свежий ELF для команды `grigdesk-ctl tracker` даёт `all`.
-
-Четвёртый трек собирает [ядро озвучки voice](../media/voice-core.md): `voice.deps`
-ставит зависимости только при отсутствии `voice/node_modules`, `voice.build` публикует
-ELF 0755 прямо в `bin/voice`. Кэш — `${XDG_CACHE_HOME:-$HOME/.cache}/grigdesk/voice-binary/cache`.
-Названия стадий, описание «Всё» и итог сборки переведены в RU/EN CLI-каталогах.
-Отдельной цели `build voice` нет; для неё используйте `npm --prefix voice run build`.
-Сборка не скачивает речевые модели, не устанавливает локальные движки и не вызывает синтез.
+Для отдельной сборки нативных команд используйте
+`bash tools/build-go-utilities.sh "$PWD/bin/utilities"` с Go 1.27.4.
+Сборка voice оставляет установку речевых моделей отдельной командой.
 
 Перед запуском в терминале preflight считает identity входов дерева без сборки и
 проверяет допуск режима потребителя. Если он покрыт, сборка идёт без вопроса. Если

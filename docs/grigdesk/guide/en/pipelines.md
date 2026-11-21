@@ -12,6 +12,9 @@ an empty new run does not replace an existing attempt.
 
 ## What to do
 
+If a stopped attempt is pinned to a retired factory, choose Rebind runtime and then Resume.
+The Go factory uses the same attempt, route and accepted results.
+
 1. Open the launch form and check project, route, triage, working copies and proposed settings.
 2. Confirm and open Pipelines. Choose the attempt card.
 3. Follow the current stage: blue runs, green passed, yellow awaits a human, red failed.
@@ -26,12 +29,15 @@ an empty new run does not replace an existing attempt.
 6. Pause or stop with normal controls. A deliberate stop is not a failure and does not show a red interrupted-pipeline
    error. After fixing a problem, Resume the same attempt while observing its stated limits.
 
+A short route can reach a gate or show its result immediately. The card opens
+the recorded state of the same attempt.
+
 If Git access stops publication, check whether the agent requested the executor's supported permission
 and the response. A first filesystem refusal alone does not prove publication impossible.
 Supported modes request access for the exact action; an actual refusal remains in the report.
 For an older route that immediately hands work to a human, use Go here on publication alone with new instructions.
 Accepted stages need not rerun; catalog updates do not rewrite the attempt's pinned instructions.
-If SHIP failed because `b24` is absent, use `tracker` or `grigdesk-ctl tracker` with the task's explicit source board.
+In SHIP, use `tracker` or `grigdesk-ctl tracker` with the task's explicit source board.
 Verify and reuse existing commits and PRs rather than recreating them.
 
 After migration, open the original card, verify documents and cursor and Resume it.
@@ -55,11 +61,25 @@ pipeline" button then creates the pipeline without running any node, including s
 4. Press "▶ start run" on the card and confirm. The pipeline runs scouting and
    follows the route with the assigned parameters.
 
+If scouting pauses with a question, open the SCOUT node, save your answer, and select Resume.
+Once scouting succeeds, Resume uses the saved result.
+
+When an executor supply incompatibility is confirmed, Resume rebinds once to the
+current GrigDesk runtime and preserves the attempt's progress. Ordinary executor
+unavailability keeps the existing runtime pin.
+
 The toggle affects only the manual launch from the task card: Telegram rule
 auto-launches and bulk start work as before. The enabled toggle (default) keeps the
 ordinary immediate launch.
 
 ## Stage executor, model and effort
+
+The editor is available when the runtime pinned to the attempt supports stage settings.
+When a stopped attempt is rebound to Go, resuming uses the previously saved
+settings for that stage.
+
+On Linux, the node stops advancing if its stand control channel fails to close.
+The launch log shows the profile hook error.
 
 Open a node's Executors tab. Select an executor, available model and compatible effort.
 Choices save immediately without Apply. From profile, separately for model and effort, restores current project
@@ -81,7 +101,10 @@ Use Retry save after a write failure. If restart was accepted but process startu
 saved settings from startup failure. While the selected executor catalog is unavailable, fields and application
 are blocked; the saved local model/effort remain visible without another executor's models being substituted.
 An unavailable project default does not block opening a confirmed override using another executor.
-Older engines may lack the editor; history stays readable and new engines apply to new runs without silently replacing old ones.
+The editor opens when the pinned engine supports saving settings and restarting from the card.
+The Go factory in the Linux x64 package supports both actions. Settings saved
+during a launch take effect the next time that stage runs.
+History remains available when the editor is unavailable.
 
 ## Result
 
@@ -105,6 +128,11 @@ On macOS, a profile with a control channel must declare a compatible interface.
 A shared environment also declares its recovery mode. The error identifies the
 missing interface or mode. If stop cleanup is still pending, resolve the reported
 issue and use Stop again on the same attempt.
+
+In a Linux Go test installation, Resume can finish restoring temporary files after an
+interruption. After a confirmed Stop and cleanup, Resume starts at INSTRUMENT. If the task
+reports a conflict, review the changes in the checkout. If an abrupt interruption leaves
+the stage outcome unconfirmed, use Go here on the INSTRUMENT stage.
 
 After a write failure, Resume can restore a verified result without rerunning the agent.
 If it requires a human decision, open the indicated node: its question/comment remain and Resume does not answer for you.
@@ -147,6 +175,17 @@ retry only resume. Check state before repeating an operation after a connection 
 
 A Qwen stop includes the failure reported by its wrapper. Check that reason before retrying
 the stage; a successful later run clears the previous error.
+
+## Check a run after switching installations
+
+Check the project profile in a separate installation. Open an existing task at its
+approval gate, close the task panel, and reopen it. Check the stage and journal, record
+the decision, and continue. The journal should show one result for the completed check.
+Once the route finishes, its card shows that it is done.
+
+To check DeepSeek on a Linux build with the Go engine, choose a stage that allows
+browser access. After you continue, the runner can use the GrigDesk browser tool
+while that stage is active.
 
 ## Related articles
 

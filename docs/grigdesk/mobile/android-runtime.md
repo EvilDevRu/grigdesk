@@ -11,7 +11,7 @@ GrigDesk и его исполнителей на физическом Android в
 для его запуска: [контракт сервера](../server/host-native-runtime.md).
 
 В [server/package.json](../../../server/package.json) сервер запускается через Node.js,
-а [bin/grigdesk-ctl](../../../bin/grigdesk-ctl) поддерживает запуск без systemd. Наличие Node.js
+а [grigdesk-ctl](../server/grigdesk-cli.md) поддерживает запуск без systemd. Наличие Node.js
 на другой платформе само по себе не подтверждает переносимость исполнителей,
 их песочниц, инструментов проектов и интеграций с хостом.
 

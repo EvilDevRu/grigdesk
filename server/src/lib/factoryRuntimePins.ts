@@ -3,6 +3,9 @@ import { constants } from 'node:fs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
+import { FACTORY_GO_BINARY, readFactoryGoDescriptor } from './factoryGoDescriptor.ts';
+import type { FactoryEngineProtocol } from './factoryRuntime.ts';
+
 import { canonicalJson } from '../../../shared/lib/canonicalJson.ts';
 import type { DirectoryLockOptions } from '../../../shared/node/directoryLock.ts';
 import {
@@ -38,6 +41,7 @@ export interface FactoryRuntimeRoots {
 }
 
 export interface FactoryRuntimeSelection {
+  engineProtocol?: FactoryEngineProtocol;
   packageId: string | null;
   runtimeRoot: string;
   engineHome: string;
@@ -265,6 +269,11 @@ export async function validateFactoryRuntime(
   await assertPhysicalRuntimePath(input.engineHome);
   await assertPhysicalRuntimePath(input.engineBin, false);
   await assertPhysicalRuntimePath(input.node, false);
+
+  if (input.packageId && readFactoryGoDescriptor(input.runtimeRoot)
+    && input.engineBin !== path.join(input.runtimeRoot, FACTORY_GO_BINARY)) {
+    throw runtimeError('factory_runtime_engine_invalid');
+  }
 }
 
 /**

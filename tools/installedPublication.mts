@@ -5,7 +5,8 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { randomUUID } from 'node:crypto';
 
-import { decodeReleaseChannelIndex, type ReleaseEnvelope }
+import { verifyGoReleaseEvidence } from './verifyGoReleaseEvidence.mts';
+import { parseReleaseChannelIndex, type ReleaseEnvelope }
   from '../shared/runtime/installedUpdateContracts.ts';
 import { RELEASE_SIGNING_PUBLIC_KEY } from '../shared/runtime/releaseChannelContracts.ts';
 import { verifyReleaseEnvelope } from '../shared/node/releaseTrust.ts';
@@ -99,11 +100,24 @@ export function installedPublicationCommand(input: {
   version: string;
   channel: string;
   deb?: string;
+  expectedSHA?: Readonly<Record<string, string>>;
 }): string {
-  const releaseFiles = ['desktop.tar.gz', 'server.tar.gz', 'grigdesk-install',
-    'grigdesk-install.sha256', 'grigdesk-install.sig', 'grigdesk-maintenance.gz']
-    .map(shellQuote).join(' ');
+  const releaseNames = ['desktop.tar.gz', 'server.tar.gz', 'control.tar.gz', 'grigdesk-install',
+    'grigdesk-install.sha256', 'grigdesk-install.sig', 'grigdesk-maintenance.gz'];
+  const releaseFiles = releaseNames.map(shellQuote).join(' ');
   const helpFiles = HELP_LOCALES.map(helpResourceFile).map(shellQuote).join(' ');
+  const expected = Object.entries(input.expectedSHA ?? {});
+  const integrity = expected.map(([name, digest]) => {
+    if (!/^[a-z0-9._-]+$/u.test(name) || !/^[a-f0-9]{64}$/u.test(digest)) {
+      throw new Error('release_upload_inventory_invalid');
+    }
+
+    return `${digest}  ${name}`;
+  }).join('\n');
+  const immutable = new Set([...releaseNames, input.channel + '.json', input.deb]);
+  const readBack = expected.filter(([name]) => immutable.has(name))
+    .map(([name, digest]) => `${digest}  ${name}`).join('\n');
+
   const deb = input.deb ? `
 if test -e "$stage/${input.deb}"; then
   if test -e "$root/releases/$version/${input.deb}"; then
@@ -126,6 +140,11 @@ trap 'rmdir "$lock"' EXIT
 trap 'exit 129' HUP
 trap 'exit 130' INT
 trap 'exit 143' TERM
+for file in ${releaseFiles} "$channel.json"; do
+  test -f "$stage/$file"
+  test ! -L "$stage/$file"
+done
+${integrity ? `(cd "$stage" && printf '%s\\n' ${shellQuote(integrity)} | sha256sum -c -)` : ''}
 mkdir -p "$root/releases" "$root/help" "$root/api/releases/v1" "$stage/help"
 tar -xzf "$stage/help-site.tar.gz" -C "$stage/help"
 test -f "$stage/help/index.html"
@@ -144,6 +163,11 @@ else
   cp "$stage/$channel.json" "$stage/release/$channel.json"
   mv "$stage/release" "$root/releases/$version"
 fi${deb}
+for file in ${releaseFiles} "$channel.json"; do
+  test -f "$root/releases/$version/$file"
+  test ! -L "$root/releases/$version/$file"
+done
+${readBack ? `(cd "$root/releases/$version" && printf '%s\\n' ${shellQuote(readBack)} | sha256sum -c -)` : ''}
 if test -e "$root/help/$version"; then
   for file in ${helpFiles}; do
     cmp "$stage/help/$file" "$root/help/$version/$file"
@@ -236,7 +260,7 @@ export async function publishInstalledRelease(
   }
 
   const indexBytes = await fs.readFile(path.join(directory, names[0]!), 'utf8');
-  const index = decodeReleaseChannelIndex(JSON.parse(indexBytes));
+  const index = parseReleaseChannelIndex(indexBytes);
 
   if (!index.latest) {
     throw new Error('release_publication_empty');
@@ -279,12 +303,18 @@ export async function publishInstalledRelease(
     return;
   }
 
+  await verifyGoReleaseEvidence(directory);
+
   const work = await fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-publish-'));
 
   try {
-    for (const component of ['desktop', 'server'] as const) {
+    if (index.format !== 3 || !index.latest.payload.artifacts.control) {
+      throw new Error('release_go_target_required');
+    }
+
+    for (const component of ['desktop', 'server', 'control'] as const) {
       await extractReleaseArtifact(path.join(directory, `${component}.tar.gz`),
-        path.join(work, component), index.latest.payload.artifacts[component]);
+        path.join(work, component), index.latest.payload.artifacts[component]!);
     }
 
     const help = await prepareInstalledHelp(work, index.latest);
@@ -297,7 +327,8 @@ export async function publishInstalledRelease(
 
         return false;
       });
-    const upload = ['desktop.tar.gz', 'server.tar.gz', 'grigdesk-maintenance.gz', 'grigdesk-install',
+    const upload = ['desktop.tar.gz', 'server.tar.gz', 'control.tar.gz',
+      'grigdesk-maintenance.gz', 'grigdesk-install',
       'grigdesk-install.sha256',
       'grigdesk-install.sig', names[0]!].map((name) => path.join(directory, name));
 
@@ -306,6 +337,9 @@ export async function publishInstalledRelease(
     if (debPresent) {
       upload.push(path.join(directory, debName));
     }
+
+    const expectedSHA = Object.fromEntries(await Promise.all(upload.map(async (file) =>
+      [path.basename(file), await sha256File(file)] as const)));
 
     for (const [number, target] of targets.entries()) {
       const staging = `${target.dir}/.grigdesk-publish-${randomUUID()}`;
@@ -328,6 +362,7 @@ export async function publishInstalledRelease(
           staging,
           version: index.latest.payload.version,
           channel: index.channel,
+          expectedSHA,
           ...(debPresent ? { deb: debName } : {}),
         }));
 

@@ -2,8 +2,7 @@ import assert from 'node:assert/strict';
 import net from 'node:net';
 
 import { createMobileSeed } from '../../helpers/mobileSeed.mjs';
-import { createRelayServer } from '../../../relay/src/relayServer.ts';
-import { readConfig } from '../../../relay/src/config.ts';
+import { relayFromEnv } from '../../relay/helpers.js';
 
 /**
  * Порт выделяется в loopback до выдачи административного QR, реальное состояние не читается.
@@ -46,15 +45,7 @@ export async function localStack(t) {
         return [line.slice(0, position), line.slice(position + 1)];
       }),
   );
-  const config = {
-    ...readConfig(values),
-    port,
-  };
-  const relay = createRelayServer(config, { log: () => {} });
-
-  await relay.listen('127.0.0.1');
-  t.after(() => relay.close());
-
+  const relay = await relayFromEnv(t, { ...values, RELAY_PORT: String(port) });
   const deadline = Date.now() + 5000;
 
   while ((await seed.service.status()).relays[0].link.state !== 'online') {
@@ -70,7 +61,6 @@ export async function localStack(t) {
     ...seed,
     relay,
     relayInfo,
-    relayConfig: config,
     qr: qr.json().text,
     admin,
   };

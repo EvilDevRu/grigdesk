@@ -6,6 +6,7 @@
   "rootPrompt": "Program folder",
   "dataPrompt": "Data folder",
   "downloadBytes": "Download size",
+  "migrateConfirm": "Confirm the one-way switch of this installation to Go? [y/N]",
   "confirm": "Continue? [y/N]",
   "cancelled": "Installation cancelled.",
   "missingTools": "Missing required command",

@@ -1,0 +1,25 @@
+Использование:
+  routes --help | --version | --license
+  routes list <профиль>
+  routes show <профиль> --draft <id>
+  routes editor <профиль>
+  routes source <профиль> --mode <editor|profile-script> --yes
+    --expected-source-revision <N> --expected-catalog-hash <hash|none>
+  routes new <профиль> [--from <empty|catalog>] [--title <текст>]
+  routes apply <профиль> --draft <id> --file <JSON> --expected-revision <N>
+  routes validate <профиль> --draft <id> --expected-revision <N>
+  routes publish <профиль> --draft <id> --expected-revision <N> --yes
+    --expected-source-revision <N> --expected-catalog-hash <hash|none>
+  routes rollback <профиль> --hash <hash> --yes
+    --expected-source-revision <N> --expected-catalog-hash <hash|none>
+  routes publications <профиль> <operationId>
+  routes export <профиль> --draft <id>
+  routes import <профиль> --file <JSON> [--title <текст>]
+  routes profile-config get <профиль>
+  routes profile-config set <профиль> [--file profile.sh|dashboard.env] --set NAME=VALUE…
+Флаги: --token, --token-file, --base <url>, --timeout <мс>.
+GRIGDESK_CLI_TOKEN, GRIGDESK_CLI_TOKEN_PATH, GRIGDESK_BASE_URL, GRIGDESK_PORT.
+none означает отсутствие current. validate exit 0 — отчёт получен; проверяйте issues/severity.
+После конфликта сопоставьте снимки, не подставляйте свежую ревизию автоматически.
+После обрыва publish/rollback выполните publications из hint с прежними --base/токеном.
+Если потерян ответ создания rollback-копии, проверьте list, не повторяйте создание.

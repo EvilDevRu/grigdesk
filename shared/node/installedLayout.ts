@@ -4,7 +4,7 @@ import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 
 import { canonicalJson } from '../lib/canonicalJson.ts';
-import { parseProductVersion } from '../runtime/productReleaseVersion.ts';
+import { compareProductVersions, parseProductVersion } from '../runtime/productReleaseVersion.ts';
 import { syncDirectory } from './files.ts';
 import { decodeInstallationReceipt } from './bundleLayout.ts';
 import { acquireInstallLock } from './binaryInstall.ts';
@@ -15,10 +15,12 @@ export { readInstallationSync } from './bundleLayout.ts';
 export type { InstallationReceipt } from './bundleLayout.ts';
 
 export interface InstalledPointer {
-  format: 1;
+  format: 1 | 2;
   installationId: string;
   desktop: string | null;
   server: string | null;
+  control?: string;
+  floor?: string;
 }
 
 export interface InstallationFileProof {
@@ -306,11 +308,38 @@ export async function readInstallation(root: string): Promise<InstallationReceip
  * Каждый компонент указывает только на разрешённый каталог поколений этой установки.
  */
 export async function readInstalledPointer(receipt: InstallationReceipt): Promise<InstalledPointer> {
-  const value = await readInstallationJson(receipt.root, 'current.json') as InstalledPointer;
+  const value = decodeInstalledPointer(receipt, await readInstallationJson(receipt.root, 'current.json'));
 
-  if (!value || value.format !== 1 || value.installationId !== receipt.installationId
-    || Object.keys(value).sort().join(',') !== 'desktop,format,installationId,server') {
+  for (const relative of [value.desktop, value.server, value.control]) {
+    if (relative != null) {
+      await assertInstallationPath(receipt.root, relative);
+    }
+  }
+
+  return value;
+}
+
+/**
+ * Читает форму указателя без файловых эффектов. Наличие каталога проверяется для current.
+ * Канонический путь поколения подтверждается отдельно для каждой роли.
+ */
+export function decodeInstalledPointer(receipt: InstallationReceipt, input: unknown): InstalledPointer {
+  const value = input as InstalledPointer;
+  const keys = value?.format === 2 ? 'control,desktop,floor,format,installationId,server'
+    : 'desktop,format,installationId,server';
+
+  if (!value || ![1, 2].includes(value.format) || value.installationId !== receipt.installationId
+    || Object.keys(value).sort().join(',') !== keys) {
     throw new Error('installation_pointer_invalid');
+  }
+
+  if (value.format === 2) {
+    const [directory, version, extra] = typeof value.control === 'string' ? value.control.split('/') : [];
+
+    if (directory !== 'generations' || !parseProductVersion(version) || extra !== undefined
+      || !parseProductVersion(value.floor) || compareProductVersions(version!, value.floor!) < 0) {
+      throw new Error('installation_pointer_invalid');
+    }
   }
 
   for (const component of ['desktop', 'server'] as const) {
@@ -324,16 +353,17 @@ export async function readInstalledPointer(receipt: InstallationReceipt): Promis
       continue;
     }
 
-    const parts = relative.split('/');
+    const parts = typeof relative === 'string' ? relative.split('/') : [];
 
-    if (parts.length !== 3 || parts[0] !== 'generations' || !parseProductVersion(parts[1])
-      || parts[2] !== component) {
+    const version = parts[1];
+
+    if (parts.length !== 3 || parts[0] !== 'generations' || !version || !parseProductVersion(version)
+      || parts[2] !== component || value.format === 2 && (compareProductVersions(version, value.floor!) < 0
+        || component === 'desktop' && receipt.mode === 'server'
+        || component === 'server' && receipt.mode === 'remote')) {
       throw new Error('installation_pointer_invalid');
     }
-
-    await assertInstallationPath(receipt.root, relative);
   }
-
 
   return value;
 }

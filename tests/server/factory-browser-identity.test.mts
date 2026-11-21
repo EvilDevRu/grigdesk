@@ -190,6 +190,27 @@ test('BR17-A: binding связывает secret/run/current visit и не сод
   assert.deepEqual(await factoryBrowserOwner(f.port, f.proof), owner);
 });
 
+test('BR17-GO: native запись браузерного запуска связывает точную попытку', async (t) => {
+  const f = await fixture(t);
+  const legacy = await readFile(f.active, 'utf8');
+  const scope = `ATTEMPT_ID=${ATTEMPT}\nLOOP_ROLE=lead\n`;
+  const node = f.proof.stage.toLowerCase();
+
+  await removeBrowserBinding(f.root, f.proof);
+  await writeFile(f.active, legacy + scope + `NODE=${node}\nPROFILE=fixture\n`);
+  await publishFactoryBrowserBinding(f.port, f.proof);
+  assert.equal((await factoryBrowserOwner(f.port, f.proof)).attemptId, ATTEMPT);
+
+  for (const stale of ['NODE=foreign\nPROFILE=fixture\n', `NODE=${node}\nPROFILE=foreign\n`]) {
+    await removeBrowserBinding(f.root, f.proof);
+    await writeFile(f.active, legacy + scope + stale);
+    await assert.rejects(() => publishFactoryBrowserBinding(f.port, f.proof), /browser_run_stale/u);
+  }
+
+  await writeFile(f.active, legacy + `ATTEMPT_ID=${NEXT_ATTEMPT}\n`);
+  await assert.rejects(() => factoryBrowserOwner(f.port, f.proof), /browser_run_stale/u);
+});
+
 test('BR17-PARENTS: небезопасные родители дают stale до чтения trusted cursor', async (t) => {
   const f = await fixture(t, 'BROWSER');
   const trusted = f.port.trusted;

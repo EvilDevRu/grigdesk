@@ -2,7 +2,7 @@
 //
 // Источник истины не дублируется: профиль читается из того же
 // profiles/<profile>/runners.env, а task override и фактический результат —
-// из t<task>.pipeline. Порядок приоритетов повторяет engine/lib/routing.sh.
+// из t<task>.pipeline. Порядок приоритетов повторяет цепочку Go-движка.
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';

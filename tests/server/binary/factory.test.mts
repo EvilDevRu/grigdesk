@@ -17,7 +17,6 @@ import {
   spawnRouteEngine,
 } from '../../../server/src/lib/factoryRouteCli.ts';
 import { prepareFactoryRouteLaunch } from '../../../server/src/lib/factoryLaunch.ts';
-import { packagedLaunchEnvironment } from '../../../server/src/lib/seaLaunch.ts';
 import { pruneServerCache, recordServerRuntimeUsage } from '../../../server/src/binary/prune.ts';
 import {
   prepareServerBinary,
@@ -29,7 +28,6 @@ import { initializeDeepSeekAcp } from '../../../server/src/lib/deepseek/nativeSe
 import { makeCatalogInput } from '../../fixtures/routes-editor.mjs';
 import { isolatedBinary } from './isolation.mts';
 import {
-  codexDispatcherProbe,
   executeFactoryTurn,
   gateResumeProbe,
   loadFactoryVerification,
@@ -201,18 +199,6 @@ test('SB26-unit-env: systemd-run исполняет команду и получ
   assert.equal(report.secretInArgv, false);
   assert.deepEqual(report.secretNames, ['DEEPSEEK_API_KEY', 'ZAI_API_KEY']);
   assert.equal(report.codingPlanInherited, false);
-});
-
-test('SB26-codex-path: GUI PATH находит nvm-only codex через catalog и dispatcher', async (t) => {
-  const root = await fixture(t);
-  const report = await codexDispatcherProbe(root, path.join(SOURCE, 'engine'), packagedLaunchEnvironment);
-
-  assert.equal(report.dispatched, true, 'dispatcher обязан исполнить CLI, а не только probe');
-  assert.equal(report.model, 'gpt-6.1-sol');
-  assert.equal(report.nodeMarker, 'nvm-node');
-  assert.equal(report.cliMarker, 's26-codex-executed');
-  assert.equal(report.localAlias, false);
-  assert.equal(report.override, false);
 });
 
 /**

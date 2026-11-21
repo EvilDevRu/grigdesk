@@ -57,6 +57,8 @@ fi
 source_dir=
 yes=0
 launch=0
+migrate=0
+expected_current_sha=
 
 if [ "${1:-}" = install ]; then
   [ "$#" -gt 1 ] || die invalid
@@ -70,13 +72,14 @@ while [ "$#" -gt 0 ]; do
 
   case "$option" in
     --yes) yes=1 ;;
+    --migrate-to-go) [ "$migrate" = 0 ] || die invalid; migrate=1 ;;
     --launch) launch=1 ;;
     --help|-h)
       message help
       printf '\n'
       exit 0
       ;;
-    --mode|--root|--data-home|--user-data|--bin-dir|--applications-dir|--unit-dir|--source-dir|--lang)
+    --mode|--root|--data-home|--user-data|--bin-dir|--applications-dir|--unit-dir|--source-dir|--expected-current-sha|--lang)
       [ "$#" -gt 0 ] && [ -n "$1" ] || die invalid
       value=$1
       shift
@@ -92,6 +95,7 @@ while [ "$#" -gt 0 ]; do
         --applications-dir) applications_dir=$value ;;
         --unit-dir) unit_dir=$value ;;
         --source-dir) source_dir=$value ;;
+        --expected-current-sha) [ -z "$expected_current_sha" ] || die invalid; expected_current_sha=$value ;;
         --lang)
           case "$value" in ru|en) language=$value ;; *) die invalid ;; esac
           ;;
@@ -100,6 +104,12 @@ while [ "$#" -gt 0 ]; do
     *) die invalid ;;
   esac
 done
+
+case "$expected_current_sha" in
+  '') [ "$yes" = 0 ] || [ "$migrate" = 0 ] || die invalid ;;
+  *[!a-f0-9]*) die invalid ;;
+  *) [ "$migrate" = 1 ] && [ "${#expected_current_sha}" = 64 ] || die invalid ;;
+esac
 
 case "${mode:-}" in
   local|remote) ;;
@@ -338,8 +348,31 @@ hash_file() {
   fi
 }
 
-# Получение никогда не интерпретирует URL как shell. Редиректы не разрешаются;
-# повтор касается только приватного временного файла этого запуска.
+# Отдельное согласие закрепляет байты текущего указателя перед загрузкой.
+if [ "$migrate" = 1 ] && [ "$yes" = 0 ]; then
+  [ -f "$root/current.json" ] && [ ! -L "$root/current.json" ] || die invalid
+  actual_current=$(hash_file "$root/current.json")
+  actual_current=${actual_current%% *}
+  [ -z "$expected_current_sha" ] || [ "$expected_current_sha" = "$actual_current" ] || die integrity
+  expected_current_sha=$actual_current
+  if [ ! -f "$root/update/go-cutover.json" ]; then
+    printf 'GrigDesk → %s · %s · %s\n' "$release_version" "$mode" "$root" >&3
+    sed -n 's/.*"desktop"[[:space:]]*:[[:space:]]*"generations\/\([0-9.dev-]*\)\/desktop".*/desktop \1/p;
+      s/.*"server"[[:space:]]*:[[:space:]]*"generations\/\([0-9.dev-]*\)\/server".*/server \1/p' \
+      "$root/current.json" >&3
+    message migrateConfirm >&3
+    printf ' ' >&3
+    IFS= read -r answer <&3 || die invalid
+    case "$answer" in
+      y|Y|yes|д|Д|да) ;;
+      *) message cancelled; printf '\n'; exit 0 ;;
+    esac
+  else
+    migrate=0
+  fi
+fi
+
+# URL передаётся curl как один аргумент, а повтор пишет только во временный файл.
 obtain() {
   obtain_file=$1
   obtain_hash=$2
@@ -381,6 +414,7 @@ set -- install-online --release "$work/release.json" --mode "$mode" --root "$roo
   --data-home "$data_home" --user-data "$user_data" --bin-dir "$bin_dir" \
   --applications-dir "$applications_dir" --unit-dir "$unit_dir"
 [ -z "$source_dir" ] || set -- "$@" --source-dir "$source_dir"
+[ "$migrate" = 0 ] || set -- "$@" --migrate-to-go --expected-current-sha "$expected_current_sha"
 result=0
 env -u NODE_OPTIONS -u NODE_PATH -u APPIMAGE -u APPDIR -u ELECTRON_RUN_AS_NODE \
   "$work/helper" "$@" || result=$?

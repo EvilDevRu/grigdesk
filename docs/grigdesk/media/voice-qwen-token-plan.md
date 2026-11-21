@@ -2,7 +2,7 @@
 
 ## Подключение в штатной команде
 
-Профиль подключён в `voice/src/engines/qwenToken.ts` через явный выбор:
+Профиль подключён в `utilities/voice/internal/engine/qwen.go` через явный выбор:
 
 ```sh
 voice generate --service qwencloud-token --engine qwen \

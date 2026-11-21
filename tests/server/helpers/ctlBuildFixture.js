@@ -82,8 +82,12 @@ export async function fixture(t, { source = true, binary = true, release = false
   await fs.mkdir(stubs);
   await fs.writeFile(callsFile, '');
   await fs.writeFile(failure, '{}');
-  await fs.cp(path.join(repository, 'bin/grigdesk-ctl'), path.join(root, 'bin/grigdesk-ctl'));
-  await fs.writeFile(path.join(root, 'cli/main.ts'), 'console.log("СПРАВКА");\n');
+
+  const cliFixture = 'tests/fixtures/legacy-ctl';
+
+  await fs.cp(path.join(repository, cliFixture, 'grigdesk-ctl'), path.join(root, 'bin/grigdesk-ctl'));
+  await fs.mkdir(path.join(root, cliFixture, 'cli'), { recursive: true });
+  await fs.writeFile(path.join(root, cliFixture, 'cli/main.ts'), 'console.log("СПРАВКА");\n');
 
   await fs.cp(path.join(repository, 'shared'), path.join(root, 'shared'), { recursive: true });
 

@@ -15,6 +15,7 @@ import {
   type CandidatePlan, type CandidatePlatform, type CandidateVerification,
 } from '../../tools/platformCandidate.mts';
 import { renderBootstrap } from '../../tools/installBootstrap.mts';
+import { archiveBytes } from '../helpers/installedUpdateFixture.mjs';
 import { signedIndex, signedMacIndex } from '../helpers/releaseV2Fixture.mjs';
 
 const checkout = path.resolve(import.meta.dirname, '../..');
@@ -41,12 +42,45 @@ async function signedCandidate(directory: string, platform: CandidatePlatform, t
     version: identity.version,
     origin: candidateOrigin,
   });
-  const { manifestDigest, publicKeyPem } = release;
-  const index = Buffer.from(canonicalJson(release.index) + '\n');
+  const { publicKeyPem, envelope } = release;
+  const entry = 'bin/grigdesk-ctl';
+  const tool = Buffer.from('fixture control');
+  const control = archiveBytes(entry, tool, '0', 0o555);
+  const controlFiles = [{
+    path: entry,
+    size: tool.length,
+    mode: 0o555,
+    sha256: sha256(tool),
+  }];
+
+  const releasePath = darwin ? 'releases/darwin-arm64' : 'releases';
+
+  envelope.payload.artifacts.control = {
+    url: `${candidateOrigin}/${releasePath}/${identity.version}/control.tar.gz`,
+    size: control.length,
+    sha256: sha256(control),
+    unpackedSize: tool.length,
+    files: controlFiles,
+    filesDigest: sha256(canonicalJson(controlFiles)),
+    buildIdentity: identity,
+  };
+
+  const signedBytes = Buffer.from(`GrigDesk release v3\n${canonicalJson(envelope.payload)}\n`);
+  const manifestDigest = sha256(signedBytes);
+  const latest = {
+    format: 3,
+    payload: envelope.payload,
+    signature: sign(null, signedBytes, keys.privateKey).toString('base64'),
+  };
+  const index = Buffer.from(canonicalJson({
+    ...release.index,
+    format: 3,
+    latest,
+  }) + '\n');
   const helper = Buffer.from('fixture helper');
   const compressed = gzipSync(helper);
   const archives = release.envelope.payload.artifacts;
-  const overhead = index.length + compressed.length;
+  const overhead = index.length + compressed.length + control.length;
   const template = await fs.readFile(path.join(checkout, 'tools/installBootstrap.sh'), 'utf8');
   const messages = Object.fromEntries(await Promise.all(['ru', 'en'].map(async (locale) => [
     locale, JSON.parse(await fs.readFile(path.join(checkout, 'shared/i18n/assets/locales',
@@ -88,6 +122,7 @@ async function signedCandidate(directory: string, platform: CandidatePlatform, t
     'grigdesk-install.sig': sign(null, Buffer.from(proof), keys.privateKey).toString('base64'),
     'grigdesk-maintenance.gz': compressed,
     'dev.json': index,
+    'control.tar.gz': control,
     'server.tar.gz': 'server:' + identity.releaseId + '\n',
     'desktop.tar.gz': 'desktop:' + identity.releaseId + '\n',
   };

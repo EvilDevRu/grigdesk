@@ -133,13 +133,11 @@ export async function installedBuild(t, channel, options = {}) {
 
   const { executeInstalledBundle } = await loadInstalledModule(t, 'tools/installedBundle.mts',
     signer.publicKeyPem, {
-      'tools/build-maintenance.mts': [
+      'tools/goReleaseUtility.mts': [
         "import fs from 'node:fs/promises';",
-        "import path from 'node:path';",
-        'export async function buildMaintenance(input) {',
-        "  if (input.assets) throw new Error('fixture_official_helper_embedded_assets');",
-        "  await fs.writeFile(path.join(input.outDir, 'grigdesk-install'),",
-        `    ${JSON.stringify(helperSource)}, { mode: 0o555 });`,
+        'export async function buildReleaseUtility(name, input) {',
+        "  await fs.writeFile(input.output, name === 'grigdesk-maintenance'",
+        `    ? ${JSON.stringify(helperSource)} : 'контрольный файл', { mode: 0o555 });`,
         '}',
       ].join('\n'),
     });

@@ -151,7 +151,8 @@ test('MW-01…MW-05: посредники, QR, отзыв с подтвержд�
     host: '192.168.1.20',
     port: 443,
   });
-  assert.match(wrapper.text(), /docker compose/);
+  assert.equal(wrapper.find('.mobile-install pre').text(), 'set -a\n. ./relay.env\nset +a\n./grigdesk-relay');
+  assert.doesNotMatch(wrapper.text(), /docker compose/u);
   assert.equal(body.find('[role="dialog"]').exists(), false);
   await wrapper.find('[data-testid="mobile-phone-qr"]').trigger('click');
   await flushPromises();

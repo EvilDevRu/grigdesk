@@ -36,7 +36,7 @@ await writeFile('/D/probe.sh', [
   'printf "%s\\n" "${PYTHONDONTWRITEBYTECODE:-}" > /D/terminal.python',
   'npm -v > /D/npm-version',
   'npm prefix -g > /D/npm-prefix',
-  `'${root}/engine/bin/factory-route' --help > /D/factory-help`,
+  `'${root}/engine/bin/factory' capabilities --format json > /D/factory-capabilities`,
   'printf "__SEA_WRITABLE_%s__\\n" OK',
 ].join('\n'));
 
@@ -89,7 +89,10 @@ try {
   assert.equal((await readFile('/D/terminal.python', 'utf8')).trim(), '1');
   assert.equal((await readFile('/D/npm-prefix', 'utf8')).trim(), '/D/state/npm-global');
   assert.match(await readFile('/D/npm-version', 'utf8'), /^\d+\.\d+\.\d+/);
-  assert.match(await readFile('/D/factory-help', 'utf8'), /usage:/);
+
+  const capabilities = JSON.parse(await readFile('/D/factory-capabilities', 'utf8'));
+
+  assert.ok(capabilities.features.includes('native-subcommands'));
   assert.ok((await readFile('/D/user-node-calls', 'utf8')).includes('user-node'));
   assert.equal(existsSync(path.join(root, 'engine/lib/__pycache__')), false);
 } finally {

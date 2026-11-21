@@ -3,12 +3,9 @@ import { once } from 'node:events';
 import https from 'node:https';
 import net from 'node:net';
 import test from 'node:test';
-import { readConfig } from '../../relay/src/config.ts';
-import { parseHello } from '../../relay/src/protocol.ts';
-import { createRelayServer } from '../../relay/src/relayServer.ts';
 import { MobileService } from '../../server/src/lib/mobile/service.ts';
 import { clientFailureText, connectionDetailText } from '../../shared/client/clientShell.ts';
-import { connect, hello, makeCert, relayEnv, temporary } from '../relay/helpers.js';
+import { connect, hello, makeCert, relayFixture, temporary } from '../relay/helpers.js';
 import { clientRequest } from './helpers/clientAccess.js';
 import { issuePhone, phoneAdmin, phoneFixture } from './helpers/phoneAccess.js';
 import { configuredRelay, relayRequest } from './helpers/phoneRelay.js';
@@ -104,10 +101,7 @@ test('PHONE-R1: pair закрывает bootstrap-соединение, hello п
 
 test('PHONE-R2: relay до возвращения control отвечает временным brain_offline', async (t) => {
   const cert = await makeCert(await temporary(t), 'relay');
-  const relay = createRelayServer({ ...readConfig(relayEnv({ cert })), port: 0 }, { log: () => {} });
-  const port = await relay.listen('127.0.0.1');
-
-  t.after(() => relay.close());
+  const { port } = await relayFixture(t, cert);
 
   const device = await connect(port, cert.fp);
 
@@ -131,13 +125,18 @@ test('PHONE-R2: relay до возвращения control отвечает вр�
 });
 
 for (const capabilities of [{ includes: 'client-v2' }, [1], null]) {
-  test(`PHONE-R2: capabilities ${JSON.stringify(capabilities)} отклонены до смены control`, () => {
-    assert.throws(() => parseHello(JSON.stringify({
+  test(`PHONE-R2: capabilities ${JSON.stringify(capabilities)} отклонены до смены control`, async (t) => {
+    const cert = await makeCert(await temporary(t), 'relay');
+    const { port } = await relayFixture(t, cert);
+    const peer = await connect(port, cert.fp);
+
+    t.after(() => peer.destroy());
+    assert.deepEqual(await hello(peer, {
       v: 1,
       role: 'brain-control',
       token: 'brain-token',
       capabilities,
-    })), /bad_hello/);
+    }), { ok: false, error: 'bad_hello' });
   });
 }
 

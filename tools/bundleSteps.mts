@@ -252,7 +252,7 @@ export async function executeBundle(options: BundleOptions): Promise<void> {
       await options.verifyDeepSeekCompatibility(deepseek, env);
     });
     await step('bundle.pack', async () => {
-      await files.copyFile(path.join(root, 'bin/grigdesk-ctl'), path.join(stage, 'bin/grigdesk-ctl'));
+      await files.copyFile(path.join(root, 'bin/utilities/ctl'), path.join(stage, 'bin/grigdesk-ctl'));
       await files.copyFile(path.join(root, 'deploy/lib/runtime-env.sh'),
         path.join(stage, 'bin/lib/runtime-env.sh'));
       await files.writeFile(path.join(stage, 'README.md'), readme);

@@ -1,7 +1,9 @@
+import { once } from 'node:events';
 import assert from 'node:assert/strict';
 import { spawn, execFile } from 'node:child_process';
 import { createInterface } from 'node:readline';
-import { promisify } from 'node:util';
+import { parseEnv, promisify } from 'node:util';
+import { fileURLToPath } from 'node:url';
 import { mkdir, mkdtemp, readFile, writeFile, rm, copyFile } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import net from 'node:net';
@@ -13,7 +15,6 @@ import type { Chat, QuestionWaiting, Waiting } from '../../mobile/src/api/contra
 import { parseQr } from '../../mobile/src/link/qr.ts';
 import { artifactsPath } from '../../shared/runtime/dataHome.ts';
 import { browserFlow } from './browserFlow.mts';
-import { dockerCheck } from './dockerCheck.mts';
 
 const execute = promisify(execFile);
 const output = path.join(artifactsPath({ env: process.env, home: homedir() }), 'mobile-remote/e2e');
@@ -181,16 +182,20 @@ async function online() {
 
 /**
  * Supervisor читает только скачанный временный relay.env; parent следит за своими PID.
- * Заморозка child проверяет настоящий watchdog, вне Docker повторный запуск делает этот скрипт.
+ * Заморозка child проверяет watchdog, повторный запуск делает этот скрипт.
  */
 async function startRelay() {
-  relay = spawn(process.execPath, ['--env-file=' + relayFile, 'relay/src/supervisor.ts'], {
+  const executable = fileURLToPath(new URL('../../bin/utilities/relay', import.meta.url));
+  const env = parseEnv(await readFile(relayFile, 'utf8'));
+
+  relay = spawn(executable, [], {
     env: {
-      ...process.env,
+      ...env,
       RELAY_PORT: String(relayPort),
     },
     stdio: ['ignore', 'ignore', 'ignore'],
   });
+  await once(relay, 'spawn');
   await until(online);
 }
 
@@ -507,29 +512,6 @@ async function main() {
     id: 'MV-10',
     state: 'PASS',
     detail: 'SIGKILL GrigDesk, тот же fingerprint/outbox и durable result; эффект не повторяется',
-  });
-
-  const docker = process.argv.includes('--without-docker')
-    ? {
-        state: 'NOT RUN',
-        detail: 'Контейнер пропущен в отладочном прогоне --without-docker',
-      }
-    : await dockerCheck({
-        directory: temporary,
-        relayFile,
-        relayPort,
-        stopRelay: () => stop(relay),
-        startRelay,
-        check: async () => {
-          await until(online);
-          assert.equal((await json(phone, '/hello', 'hello')).status, 200);
-          assert.equal((await json(phone, '/chats', 'chats')).status, 200);
-        },
-      });
-
-  checks.push({
-    id: 'MV-11',
-    ...docker,
   });
 
   if (process.argv.includes('--browser')) {

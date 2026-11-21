@@ -1,8 +1,23 @@
 # Устройство Factory Engine
 
-Документ для изменений в `engine/`. Контракт проекта описан в
+Документ для изменений в `utilities/factory/` и `engine/`. Контракт проекта описан в
 [PROFILE-CONTRACT.md](PROFILE-CONTRACT.md), создание нового профиля — в
 [NEW-PROJECT.md](NEW-PROJECT.md), multi-AI cutover — в [MULTI-AI.md](MULTI-AI.md).
+
+## Движок на Go
+
+Исходники и offline-тесты находятся в `utilities/factory/`
+в общем Go-модуле `grigdesk.local/tools`.
+`grigdesk-ctl build factory` выпускает `bin/factory` для текущей среды.
+Запуск из исходников использует `bin/factory`. Штатный серверный сборщик
+для Linux x64 и Apple Silicon упаковывает Go-фабрику.
+Профильный ABI `engine/lib/delivery_contract.py` входит отдельным ресурсом.
+Сервер выбирает команды и helpers по закреплённому поколению. Контракт manifest и результаты нативных проб — в разделе о
+[движке поставки](../grigdesk/server/server-binary-factory.md).
+
+Из корня исходников выполняются `go test -count=1 -p=2 ./utilities/factory/...` и
+`go test -race -count=1 ./utilities/factory/internal/state ./utilities/factory/internal/engine`.
+Разработка использует проверенный Go 1.27.4 с `GOTOOLCHAIN=local` и `GOWORK=off`.
 
 ## Инварианты
 
@@ -29,43 +44,17 @@
 
 | Путь | Ответственность |
 |---|---|
-| `bin/factory` | CLI, start/resume, обязательные config/protocol gates |
-| `bin/factory-check` | profile contract и metadata-only host preflight |
-| `bin/factory-route` | offline integrity check, typed prompt render и transition lookup |
-| `bin/factory-context` | сборка typed JSON-контекста узла (провайдер-нейтральная) |
-| `lib/core.sh` | stage loop, gates, retries, readonly guard |
-| `lib/route-runtime.sh` | доверенный диспетчер agent/command v2: pin, рендер, fanout policy, evidence, ретраи и переходы |
-| `lib/attempt-stage-state.sh` | курсор, append-only hash-chain, findings projection и no-progress guard |
-| `lib/attempt-lifecycle-state.{sh,py}` | host-owned segmented lifecycle ledger, manifest generations и recovery хвоста |
-| `lib/runtime-analytics.{sh,py}` | typed lifecycle spans/reasons, stable identity и writable reconciliation |
-| `lib/bootstrap-sandbox.sh` | ранняя передача готовых рабочих деревьев разведке и барьер готовности стенда |
-| `lib/workspace-guard.sh` | точный snapshot source roots без автоматического отката |
-| `lib/instrumentation-transaction.sh` | scoped временные правки и CAS cleanup |
-| `lib/attempt-state.sh` | изолированные pin/CAS/terminal-файлы попытки route protocol v2 |
-| `lib/routing.sh` | precedence task-stage → task → profile-stage → profile-project |
-| `lib/multi-runner.sh` | model policy, dispatcher, telemetry |
-| `lib/dispatcher.sh` | классификация попыток/failover/breaker |
-| `lib/executor.sh`, `lib/runner-launcher.sh` | запуск adapter-а и run capability |
-| `lib/provider-lineage-state.{sh,py}` | durable CAS authority native provider resume по exact provider scope |
-| `lib/runtime-usage.mjs` | retained-FD sealing, immutable usage publish и diagnostic `meta.env` mirror |
-| `lib/runners/*.sh` | provider adapters/catalog/probe (реестр грузит только `*.sh`, вспомогательные файлы рядом безопасны) |
-| `lib/runners/gigacode.sh.disabled` | [Временно отключённый GigaCode](GIGACODE.md); исходники сохранены, в реестре его нет |
-| `lib/runners/kimi-wire.py` | мост телеметрии kimi: субагентов нет в stream-json CLI ([KIMI.md](KIMI.md)) |
-| `lib/runners/qwen.sh` | внешний npm CLI, живой каталог и host-wrapper ([qwen.md](qwen.md)) |
-| `lib/profile-config.sh` | schema, validation, revision CAS, atomic writer |
-| `lib/coverage.sh`, `lib/profile-preflight.sh` | readiness/capability artifacts |
-| `lib/pipeline-store.sh` | locked/atomic pipeline storage |
-| `lib/run-state.sh` | active run identity и result/progress CAS |
-| `lib/stage-result.sh` | agent terminal API |
-| `lib/stage-progress.sh` | allowlisted nonterminal API |
-| `lib/pipeline-control.sh` | privileged control update |
-| `lib/pipeline-set.sh` | ограниченный writer неслужебных полей вторичной проекции |
-| `lib/debug-settings.sh`, `lib/debug-log.sh` | scoped debug config и redacted trace |
-| `profiles/<name>/profile.sh` | project-specific hooks/prompts |
-| `profiles/<name>/runners.env` | canonical runner/model policy |
-| `profiles/<name>/graph.json` | UI graph |
-| `schemas/analytics/*.schema.json` | общий closed contract lifecycle, provider lineage и usage document |
-| `tests/engine/` | unit/contract/integration/profile checks |
+| `utilities/factory/cmd/factory` и `internal/cli` | CLI и публичные подкоманды |
+| `utilities/factory/internal/engine` | Запуск и продолжение, ворота, транзакции, восстановление |
+| `utilities/factory/internal/route` | Чтение и проверка route-v2, рендер, редактор и контекст |
+| `utilities/factory/internal/state` | Пины, курсор, lifecycle, CAS статусов и прочие доверенные записи |
+| `utilities/factory/internal/runner` | Адаптеры исполнителей, metadata, failover, браузер и статусный IPC |
+| `utilities/factory/internal/host` | Владелец процесса, границы запуска и остановка |
+| `utilities/factory/internal/hooks` | Метаданные, Bash ABI и профильный канал управления |
+| `engine/lib/delivery_contract.py` | Файл публичного профильного ABI |
+| `profiles/<name>/` | Проектные хуки, конфигурация исполнителей и граф |
+| `schemas/analytics/` | Форматы журналов и аналитики |
+| `tests/engine/` | Публичные CLI-контракты и офлайн-фикстуры |
 
 ## Запуск этапа
 
@@ -84,7 +73,7 @@ factory
       task/policy/unknown-side-effect failure → stop
 ```
 
-`core.sh` provider-agnostic: в нём нет прямого запуска provider CLI и нет выбора модели.
+Пакет `internal/engine` запускает исполнителей через адаптеры `internal/runner`.
 Write roots и state transport принадлежат adapter-ам. Codex получает разрешённые roots через
 повторяемый `--add-dir`. DeepSeek V1 получает одну writable root — cwd; дополнительные
 каталоги остаются только prompt-контекстом, а status проходит отдельным host MCP.
@@ -788,7 +777,7 @@ Unicode-суррогаты отвергаются поиском регуляр�
 и `.code` публичных проверок, успешные значения и canonical bytes. Текст первой ошибки
 некорректного входа может отличаться. Произвольные повреждённые schema и мутации уже
 закэшированных узлов не входят в эту гарантию. Регрессия —
-[`attempt-lifecycle-validator.sh`](../../tests/engine/unit/attempt-lifecycle-validator.sh);
+[тесты чтения lifecycle](../../utilities/factory/internal/state/lifecycle_test.go);
 порядок подъёма и замер `read` — [подтверждение resume](../grigdesk/pipeline/resume-lifecycle-read-cost.md).
 
 Initial publication и rotation соблюдают полный durability barrier:
@@ -1001,6 +990,10 @@ resume. На macOS открытый канал профиля блокирует
 до завершения «Стоп», в том числе у попытки без транзакции инструментации.
 Старые checkpoint schema 1 и stage events не переписываются. Контракты source,
 экспорта, questions и rollout — [результаты bootstrap](../grigdesk/pipeline/bootstrap-results.md).
+В Go-фабрике отдельный SCOUT проходит через `utilities/factory/internal/engine/bootstrap.go`
+после проверки workspace, с ранним либо итоговым descriptor. Основной маршрут ждёт health
+и окончательного подтверждения среды. Guard сравнивает checkout для каждого запуска
+провайдера, в том числе перед повтором после отсутствующего результата.
 
 Catalog содержит точные route hashes и bootstrap Scout. Рендерер принимает только JSON
 context, проверяет обязательные корневые секции, отклоняет secret-shaped поля и добавляет
@@ -1120,7 +1113,7 @@ run-state как `failed`: exact run id/epoch сохраняются для fenc
 тем же событием, что и возврат кнопкой. Остановки `rewind-limit`/`no-progress` и исход
 `failed` так не обнуляются — они по-прежнему ждут явного `goto` с новой гипотезой.
 Для `stop=human` с исходом `failed`, а также `rewind-limit` и `no-progress`, ранняя
-read-only проверка [`route_v2_failed_stop_held`](../../engine/lib/route-runtime.sh)
+read-only проверка [защита продолжения](../../utilities/factory/internal/engine/start.go)
 удерживает `resume` до открытия lifecycle-сессии,
 закрытия вмешательства человека, снятия `STALLED_HUMAN` и подготовки стенда. Код проверки
 11 превращается в штатный выход CLI с кодом 0: `RESULT`, курсор и оба журнала попытки
@@ -1567,10 +1560,19 @@ engine-owned deny остаётся самостоятельной политик
 
 В `isolated` инструментационная транзакция требует отдельный linked worktree,
 эксклюзивно арендованный trusted host-ом. В `shared` primary checkout допустим только при
-точно проверенном durable lease всех workspace/stand ресурсов. Lease остаётся занят до
-полного cleanup; после восстановления scope профиль обязан синхронизировать существующий
+точно проверенном durable lease всех workspace/stand ресурсов. Аренда сохраняется после
+cleanup и снимается при завершении попытки или успешном abandon. После восстановления scope
+профиль обязан синхронизировать существующий
 stand и подтвердить health. Ошибка cleanup или post-restore оставляет попытку и lease в
 human stall — автоматического освобождения поверх изменённого checkout нет.
+
+Go-фабрика на Linux открывает прежний журнал `transactions/t<TASK>`. Перед этапом он
+сверяет checkpoint, а после этапа проверяет изменения вне scope. Перед первой записью
+восстановления он сохраняет состояние `cleaning`. Продолжение принимает только смесь
+исходных и подтверждённых объектов. Исходный Git index восстанавливается побайтово,
+а Git-проверки Go выполняются без обновления служебных полей индекса. Неизвестная правка
+останавливает восстановление. Границы этого переноса описаны в
+[документе о повторе транзакционного этапа](../grigdesk/pipeline/instrumentation-retry.md).
 
 **Что попадает в снимок.** Чувствительный список транзакции — это `scope.list`, и только он:
 записи по нему нужны cleanup-у, чтобы доказать побайтовое восстановление инструментации.
@@ -1745,7 +1747,7 @@ Exact id допустим, если он подтверждён каталого
 повтор admission: именной выбор человека обходит сохранённый breaker только для основного.
 При null восстанавливается источник унаследованной цепочки; резерв сохраняет свой допуск.
 
-`factory TASK runner settings show|options|apply --profile PROFILE --attempt ATTEMPT
+`factory TASK runner settings show|options|apply --profile <PROFILE> --attempt <ATTEMPT>
 --node NODE --stage STAGE` проверяет immutable pin, точный agent-node/runKey и CAS.
 Options принимает provider, apply — целый JSON payload. Callback `model_options` подтверждает
 per-model efforts; неподтверждённая пара не заменяется молча. Capability редактора —
@@ -2025,6 +2027,11 @@ Task-level debug ограничивается TTL. Typed events пишут routi
 Debug setting хранится отдельно от runner config, поэтому его включение не инвалидирует
 policy revision/coverage.
 
+Go-фабрика читает и меняет прежние настройки `factory settings debug`,
+`factory profile <PROFILE> debug` и `factory TASK debug` с общей шкалой и TTL.
+На границах запуска и завершения адаптера он сверяет эффективный уровень.
+Host trace сохраняет смену уровня и код выхода процесса.
+
 Глобальный уровень также служит источником для диагностического logger-а GrigDesk
 и журнала браузерного окна. Профильный и задачный override на них не распространяется
 и не может включить trace фабрики поверх глобального `off`.
@@ -2045,7 +2052,7 @@ root; одного старого `RUN_PROTOCOL=2` недостаточно (leg
 ```bash
 rg -l -0 '^#!/usr/bin/env bash' engine/bin engine/lib profiles | xargs -0 bash -n
 python3 -m py_compile engine/lib/dashboard.py
-engine/bin/factory-check --quick
+bin/factory profile-check --quick
 tests/run-all.sh
 ```
 
@@ -2064,7 +2071,7 @@ Offline-набор движка идёт параллельно: `tests/engine/r
 Host preflight запускается отдельно и явно:
 
 ```bash
-RUN_HOST_PREFLIGHT=1 engine/bin/factory-check --host-preflight
+RUN_HOST_PREFLIGHT=1 bin/factory profile-check --host-preflight
 ```
 
 Он допускается после offline suite, но до GrigDesk/рабочего запуска. Реальный model call не является

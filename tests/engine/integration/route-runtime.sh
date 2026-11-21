@@ -2,7 +2,8 @@
 set -uo pipefail
 source "$FACTORY_TESTS_HOME/lib/testlib.sh"
 
-route_tool="$FACTORY_HOME/bin/factory-route"
+route_tool=fixture_route
+route_program="${FACTORY_TEST_CANDIDATE:?}"
 publisher="$FACTORY_TESTS_HOME/fixtures/routes-publish.mjs"
 routes_dir="$TEST_ROOT/routes"
 
@@ -17,8 +18,8 @@ if [[ -z "${NODE_BIN:-}" || ! -x "$NODE_BIN" ]]; then
   finish_tests
   exit $?
 fi
-if [[ ! -x "$route_tool" ]]; then
-  test_fail "route v2 runtime reader is executable" "$route_tool"
+if [[ ! -x "$route_program" ]]; then
+  test_fail "route v2 runtime reader is executable" "$route_program"
   finish_tests
   exit $?
 fi

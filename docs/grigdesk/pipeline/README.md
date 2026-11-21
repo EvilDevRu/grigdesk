@@ -4,9 +4,9 @@
 
 Читай при изменении запуска, маршрутов, графа, остановок, триажа и арбитра.
 
-Фабрика и движок маршрутов, граф попытки, ворота, арбитр и триаж.
+Фабрика на Go, граф попытки, ворота, арбитр и триаж.
 
-Читай перед правкой: `engine`, `server/src/modules/factory`, `server/src/modules/routes`, `web/src/views/pipeline`, `web/src/views/routes`.
+Код движка находится в `utilities/factory`, контракт профилей в `engine`.
 
 ## Контракты продукта
 
@@ -19,17 +19,18 @@
 
 ## Устройство
 
-- [pipeline: полный CLI, exact DTO и исходы](agent-cli.md)
+- [pipeline: полный CLI, exact DTO, исходы и проверки автономной Go-сборки](agent-cli.md)
 
 - [Доставка объявленных ключей участников маршрута и выбора сервиса Qwen](legacy-credential-delivery.md)
 
-- [Закрепление доступа цепочек исполнителей, identity попытки, паузы и рестарт](access-profile-pins.md)
+- [Закрепление доступа, подтверждение быстрого запуска Go, паузы и рестарт](access-profile-pins.md)
 
 - [Достоверность приёмки: поздние блокеры, обязательные доказательства и автоматические цепочки](acceptance-evidence.md)
 - [Адресный preflight и триаж, подтверждённый источник и ограничение одного номера](task-source-index.md)
 - [Codex: отсутствие terminal status, noResult, stage-result и пояснение skipped](codex-no-result-contract.md)
+- [Codex: права общего стенда, Linux-песочница Go и допуск к сдаче](codex-delivery-permissions.md)
 - [Offline-граница DeepSeek: metadata как provider, код 126 и denylist](deepseek-offline-guard.md)
-- [Браузер этапа: pinned authority, CLI/MCP, lifecycle и поставка](browser-transport.md)
+- [Браузер этапа: pinned authority, CLI/MCP, Linux-приёмка и legacy mode](browser-transport.md)
 - [Как усиливать узлы конвейера](node-hardening.md) — входы и результаты, PLAN/SKEPTIC,
   доказательства проверок, повторы, границы GLM и безопасная публикация.
 
@@ -53,12 +54,12 @@
   отказ PR в shared, состав приёмки за 15 минут и допустимые исправления ревью.
 - [Внешний источник оценки и конвейера, исторический индекс](grigdesk-task-source.md)
 - [Сводка конвейера: названия сохранённых тикетов](task-title-snapshot.md)
-- [Профили конвейера: устройство и параметры](project-profiles.md) — файлы, переменные, — literal metadata API, batch CAS и точная пара исполнителей.
-  хуки, исполнители и модели, маршруты, значения по умолчанию и применение изменений.
+- [Профили конвейера: устройство и параметры](project-profiles.md) — файлы, переменные, literal metadata API, batch CAS и локальная проверка профиля.
+  хуки, исполнители, маршруты, закрытие профильного канала на Linux и диагностика профиля.
 - [Покрытие исполнителей по цепочкам узлов](runner-chain-coverage.md) — схема 2,
   область start/resume, объявленный failover и строгая публикация каталога.
 - [Несовместимость поставки раннера](runner-supply-incompatibility.md) — строгий маркер,
-  покрытие всех недоступных кандидатов и одна перепривязка рантайма на resume.
+  покрытие всех недоступных кандидатов и Linux-проверка одной перепривязки на двух Go-поколениях.
 - [Ручная перепривязка рантайма](runtime-rebind.md) — кнопка в диалоге этапа снимает
   закрепление остановленной попытки: следующий запуск берёт текущую поставку сервера.
 - [Отказ среды не повторяется](environment-failure-stop.md) — failed/environment
@@ -71,7 +72,7 @@
 - [Авто-шип фабрики](automatic-shipping.md) — порядок задаёт профиль; адресный tracker,
   штатное разрешение Git и переиспользование опубликованных результатов при повторе.
 - [Маршруты (modules/routes)](route-management.md)
-- [CLI авторинга маршрутов](routes-cli.md) — пакет routes/, отдельный ELF routes, CAS apply, source и receipts.
+- [CLI авторинга маршрутов](routes-cli.md) — CAS apply, source, квитанции и политика перенаправлений нативной команды Go.
 - [Палитра](graph-palette.md)
 - [Сервер (server/src/lib/factoryGraph.ts)](graph-server.md)
 - [Стадии — глобальный enum (server/src/lib/stages.ts)](stage-catalog.md)
@@ -83,8 +84,9 @@
 ### Данные фабрики
 
 - [Диалог разбора остановки: история, явный выбор, CAS и восстановление](arbiter-stop-dialog.md)
-- [Результат отдельной разведки: checkpoint, deferred, вопрос и exact ответ](bootstrap-results.md) — допуск после «Стоп» на macOS.
-- [Данные фабрики](factory-data.md)
+- [Результат отдельной разведки: checkpoint, deferred, вопрос и точный ответ](bootstrap-results.md).
+- [Данные фабрики: завершение маршрута, совместимая витрина, время и экспорт находок](factory-data.md)
+- [Выбор движка закреплённой попытки и проверка комплекта](../server/server-binary-factory.md)
 - [разбор СОХРАНЯЕТСЯ и виден в карточке остановки](persistent-stall-analysis.md)
 
 ### Клиент графа
@@ -117,7 +119,7 @@
 - [Импорт общего API из вложенных компонентов конвейера](client-api-imports.md)
 - [Модель и effort в модалке узла](node-model-and-effort.md) — сохранение по клику без «Применить»,
   проекция настройки в граф, exact API, scoped storage, отказ каталога и receipt перезапуска.
-- [Область настройки этапа](stage-runner-settings-scope.md) — локальный выбор и оба режима живого этапа.
+- [Область настройки этапа](stage-runner-settings-scope.md) — сохранение выбора и перезапуск этапа в закреплённой попытке.
 - [Предыдущая раскладка и причины разделения содержимого и решения](stage-dialog-layout.md)
 - [Текст человека в модалке: у ворот и у возврата он разный](gate-and-rewind-comments.md)
 - [Токены попытки: meta.env — зеркало, а не источник правды](attempt-token-accounting.md)
@@ -125,11 +127,11 @@
 ## Грабли
 
 - [Тестовый стенд: посев, точные write roots проверяющего и освобождение shared-аренды](stand-empty-editor-acceptance.md)
-- [Browser run stale до первого запроса: umask, права control и стартовый барьер](browser-launch-permissions.md)
+- [Browser run stale: права control, стартовый барьер и ACP в Go-движке Linux](browser-launch-permissions.md)
 - [Арбитр: текст разбора сохранён, но ошибка формата итога убрала варианты решения](arbiter-result-format-failure.md)
 - [Арбитр требует отсутствующий plan: запуск использует режим «Авто»](arbiter-auto-mode.md)
 - [Составной modelRef GLM требует представления маршрут/модель в lifecycle](lifecycle-model-id.md)
-- [Повтор INSTRUMENT после временного отказа упирался в завершённую транзакцию](instrumentation-retry.md)
+- [Повтор INSTRUMENT и восстановление журнала транзакций на Linux](instrumentation-retry.md)
 - [Codex на SHIP: защищённый Git, штатный запрос Auto-review и резервная доставка](codex-delivery-permissions.md) —
   файловый отказ до запроса reviewer, подтверждённая PR-публикация и возврат закреплённой попытки.
 - [«Продолжить» после failed: остановка ждёт goto без побочных эффектов](failed-resume.md)
@@ -139,7 +141,7 @@
 - [«Блокирующее замечание» проверяющего узла бывает просто отказом прав](reviewer-permission-denials.md)
 - [«Завис — агент молчит», «узел вернул решение человеку» и «исчерпан бюджет повторов» в одной модалке = три захода убиты по лимиту, а туннель терял половину рукопожатий](retry-timeouts-and-tunnel-failures.md)
 - [Ошибки всех исполнителей: причина, события Qwen, запасной stderr и отсутствие диагностики](runner-failure-diagnostics.md)
-- [Имя CLI в команде раннера подставляет helper, а не args: сдвоенное имя = отказ до модели](runner-external-cli-launch.md)
+- [Выбор внешнего CLI: дескриптор, identity и lease](runner-external-cli-launch.md)
 - [«Конвейер оборвался» сразу после «Принять» = окно передачи хода](gate-handoff-window.md)
 - [«Конвейер встал» при живом этапе: правило линейности гасило сам фронт](active-stage-linearity.md)
 - [«Маршрут требует файл инструментации» = форма открылась на чужом профиле](launch-profile-consistency.md)

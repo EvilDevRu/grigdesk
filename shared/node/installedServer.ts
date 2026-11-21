@@ -15,7 +15,7 @@ import type { InstalledUpdateJob } from './installedUpdateState.ts';
 import { readUpdateProcess } from './updateProcessOwner.ts';
 import { launchInstalledProcess } from './installedProcess.ts';
 import { acquireInstallLock } from './binaryInstall.ts';
-import { verifyInstalledGeneration } from './installedUpdateApply.ts';
+import { verifyInstalledGeneration } from './installedGeneration.ts';
 import { darwinProcessOwnerState, readDarwinProcessIdentity } from './processIdentity.ts';
 import {
   darwinServerPaths, identifyDarwinServerOwner, liveDarwinServerLease, registerDarwinServerLaunch,

@@ -4,7 +4,7 @@ import os from 'node:os';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 
-import { decodeReleaseChannelIndex } from '../shared/runtime/installedUpdateContracts.ts';
+import { parseReleaseChannelIndex } from '../shared/runtime/installedUpdateContracts.ts';
 
 const execute = promisify(execFile);
 
@@ -54,9 +54,9 @@ export async function buildDeb(input: { root: string; artifacts: string }): Prom
     throw new Error('deb_release_index_missing');
   }
 
-  const index = decodeReleaseChannelIndex(JSON.parse(
+  const index = parseReleaseChannelIndex(
     await fs.readFile(path.join(input.artifacts, names[0]!), 'utf8'),
-  ));
+  );
 
   if (!index.latest) {
     throw new Error('deb_release_index_empty');

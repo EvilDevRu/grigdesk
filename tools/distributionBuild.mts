@@ -14,8 +14,9 @@ import { createRunRecord, completeRunRecord } from './distributionRuns.mts';
 import {
   runStages, decodeRecipe, recipeDigest, recipeImplementationBytes, requireBuildOutcomes,
 } from './releasePipeline.mts';
-import { prepareReleaseToolchain, requireDarwinBuildHost, selectDistributionTarget }
-  from './releaseEnvironment.mts';
+import {
+  prepareReleaseToolchain, requireDarwinBuildHost, resolveReleaseGoDirectory, selectDistributionTarget,
+} from './releaseEnvironment.mts';
 import { apiContractFingerprint } from './api-version.mjs';
 import { prepareDarwinBuildTools } from './darwinBuildTools.mts';
 import { configureDarwinBuildProcessHelper } from '../shared/node/processIdentity.ts';
@@ -198,6 +199,8 @@ async function buildDistribution(root: string, channel: string, runsDir: string,
       signal,
     }) : null;
 
+    const buildPath = darwin ? toolchain.bin : [toolchain.bin, await resolveReleaseGoDirectory()].join(':');
+
     for (const name of darwin ? ['build', 'verify'] : ['server', 'web', 'build', 'verify']) {
       signal.throwIfAborted();
 
@@ -240,7 +243,7 @@ async function buildDistribution(root: string, channel: string, runsDir: string,
 
       temporaryDirectories.set(temporary, true);
 
-      const env = await stageEnvironment(scope, toolchain.bin, version, channel, snapshot.commit, temporary);
+      const env = await stageEnvironment(scope, buildPath, version, channel, snapshot.commit, temporary);
 
       if (darwinTools) {
         const { prepareDarwinFactoryEnvironment } = await import('../server/src/lib/factoryDarwinRuntime.ts');

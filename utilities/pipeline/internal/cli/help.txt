@@ -1,0 +1,31 @@
+pipeline — управление конвейерами GrigDesk.
+  pipeline list 
+  pipeline status <task>
+  pipeline state <task>
+  pipeline graph <task>
+  pipeline doc <task> <doc>
+  pipeline profiles 
+  pipeline runners 
+  pipeline slots <profile>
+  pipeline source <board>
+  pipeline launch-options <task> <profile> <source>
+  pipeline launch <task>
+  pipeline stop <task>
+  pipeline resume <task>
+  pipeline goto <task> <key>
+  pipeline gate <task> <key> <decision>
+  pipeline prelude-state <task>
+  pipeline runner-options <task> <profile> <attempt> <node> <stage> <provider>
+  pipeline runner-set <task>
+  pipeline bootstrap-answer <task>
+  pipeline runtime-rebind <task>
+  pipeline arbiter-current <task>
+  pipeline arbiter-show <task> <conversation> <afterSequence> <knownRevision>
+  pipeline arbiter-journal <task> <conversation>
+  pipeline arbiter-start <task>
+  pipeline arbiter-message <task> <conversation>
+  pipeline arbiter-diagnose <task> <conversation>
+  pipeline arbiter-apply <task> <conversation>
+  pipeline arbiter-resume <task> <conversation>
+  pipeline arbiter-stop <task>
+  pipeline wait <task> <attempt> <timeoutMs> <intervalMs>

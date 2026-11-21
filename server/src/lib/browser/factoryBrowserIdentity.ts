@@ -27,6 +27,7 @@ function matches(binding: BrowserRunBinding, run: BrowserRun, trusted: TrustedBr
     && binding.profile === trusted.profile && binding.catalogHash === trusted.catalogHash
     && binding.route === trusted.route && binding.routeHash === trusted.routeHash
     && binding.node === trusted.node && binding.sequence === trusted.sequence
+    && (run.node === undefined || (run.node === trusted.node && run.profile === trusted.profile))
     && binding.headEventHash === trusted.headEventHash
     && binding.runId === run.runId && binding.epoch === run.epoch
     && binding.tokenHash === run.tokenHash && binding.runner === run.runner
@@ -76,7 +77,8 @@ export async function publishFactoryBrowserBinding(port: FactoryBrowserAuthority
 
   if (first.identity !== second.identity || trusted.identity !== again.identity
     || trusted.attempt !== proof.attemptId || again.attempt !== proof.attemptId
-    || trusted.runKey !== proof.stage || again.runKey !== proof.stage) {
+    || trusted.runKey !== proof.stage || again.runKey !== proof.stage
+    || (first.node !== undefined && (first.node !== trusted.node || first.profile !== trusted.profile))) {
     return browserAuthorityError();
   }
 

@@ -306,6 +306,35 @@
   },
   "artifactsCleanup": "Уборка артефактов",
   "artifactsCleanupDescription": "просмотр и явное удаление старых артефактов",
+  "inventory": {
+    "scanning": "Измеряю занятое место в папке артефактов…",
+    "total": "Занято в просмотренных записях: {size}",
+    "groupHeading": "По категориям",
+    "entryHeading": "Крупнейшие записи",
+    "partial": "(частично прочитано)",
+    "more": "Остальных записей: {count}. Полный список доступен с --json.",
+    "errors": "Ошибок чтения: {count}. Размеры могут быть занижены.",
+    "interrupted": "Просмотр прерван. Показаны уже измеренные данные.",
+    "invalidTopic": "Для --topic укажите имя одной папки верхнего уровня и флаг --inventory.",
+    "invalidFilters": "--inventory считает занятое место. Уберите --older-than и --keep-generations.",
+    "openError": "Не удалось открыть папку для просмотра: {error}",
+    "kinds": {
+      "chat-runs": "Ходы чатов",
+      "factory-checks": "Проверки фабрики",
+      "installer-checks": "Проверки установки",
+      "runtime-checks": "Проверки исполнителя",
+      "builds": "Сборки",
+      "release": "Материалы выпусков",
+      "other": "Другие артефакты"
+    },
+    "units": {
+      "bytes": "байт",
+      "kib": "КиБ",
+      "mib": "МиБ",
+      "gib": "ГиБ",
+      "tib": "ТиБ"
+    }
+  },
   "cleanup": {
     "root": "Папка: {path}",
     "policy": "Порог: {days} сут.; хранить поколений: {keep}",

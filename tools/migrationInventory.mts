@@ -283,11 +283,7 @@ const GENERAL_PROJECTS: readonly { config: string; compiler: string }[] = [
     // проверять покрытие интерфейса им значило бы «не вижу, значит нет».
     { config: 'web/tsconfig.json', compiler: 'web/node_modules/.bin/vue-tsc' },
     { config: 'web/tsconfig.scripts.json', compiler: 'web/node_modules/.bin/tsc' },
-    { config: 'relay/tsconfig.json', compiler: 'server/node_modules/.bin/tsc' },
     { config: 'desktop/tsconfig.json', compiler: 'server/node_modules/.bin/tsc' },
-    // Собственный пакет tracker покрывает и свои тесты tests/tracker. Для --showConfig хватает tsc
-    // сервера, как у relay и desktop: свежий клон без tracker/node_modules не краснеет.
-    { config: 'tracker/tsconfig.json', compiler: 'server/node_modules/.bin/tsc' },
     { config: 'mobile/tsconfig.json', compiler: 'mobile/node_modules/.bin/vue-tsc' },
     // Тесты проверяются той же базой, что и проверяемый ими код: до этих проектов
     // перенесённый на TypeScript тест компилятор не открывал вовсе.

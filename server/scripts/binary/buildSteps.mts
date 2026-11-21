@@ -14,6 +14,7 @@ import { decodeServerManifest, serverManifestBytes,
 export interface BinaryBuildOptions {
   outDir: string;
   cacheDir: string;
+  factoryCandidate?: string;
 }
 
 export interface BinarySmokeMetrics {
@@ -33,7 +34,8 @@ export async function readBuildInputs(
   const files = ['VERSION', 'server/package.json', 'server/package-lock.json',
     serverNodeRuntimeManifest(target), 'server/build/helpers.json', 'server/build/compatibility.json',
     'shared/node/helpSources.ts', 'web/package-lock.json',
-    'server/build/binary-resources.json', 'server/build/esmBridge.cjs', 'server/scripts/buildBinary.mts'];
+    'server/build/binary-resources.json', 'server/build/esmBridge.cjs', 'server/scripts/buildBinary.mts',
+    'go.mod', 'tools/build-factory.sh'];
 
   if (target === 'darwin-arm64') {
     files.push('cli/darwinBuildProcesses.ts', 'shared/node/processIdentity.ts',
@@ -83,6 +85,7 @@ export interface BinaryBuildSteps {
     cwd: string;
     env?: NodeJS.ProcessEnv;
   }): Promise<{ stdout: string; stderr: string }>;
+  factory(work: string): Promise<string>;
   prepare(work: string, options: BinaryBuildOptions): Promise<void>;
   bundle(work: string): Promise<void>;
   package(work: string, options: BinaryBuildOptions): Promise<ServerPackageManifest>;
@@ -99,14 +102,15 @@ export interface BinaryBuildSteps {
  */
 export function parseBuildArgs(args: readonly string[], cwd: string): BinaryBuildOptions | { error: string } {
   const values = new Map<string, string>();
+  const known = ['--out-dir', '--cache-dir', '--factory-candidate'];
 
   for (let index = 0; index < args.length; index += 2) {
     const key = args[index]!;
     const value = args[index + 1];
 
-    if (!['--out-dir', '--cache-dir'].includes(key) || values.has(key)
+    if (!known.includes(key) || values.has(key)
       || !value || value.startsWith('--') || value.includes('\0')) {
-      return { error: 'Ожидаются неповторные --out-dir и --cache-dir со значениями' };
+      return { error: 'Допустимы --out-dir, --cache-dir и --factory-candidate со значениями, без повторов' };
     }
 
     values.set(key, path.resolve(cwd, value));
@@ -119,7 +123,13 @@ export function parseBuildArgs(args: readonly string[], cwd: string): BinaryBuil
     return { error: 'Нужны отдельные явные --out-dir и --cache-dir' };
   }
 
-  return { outDir, cacheDir };
+  const factoryCandidate = values.get('--factory-candidate');
+
+  return {
+    outDir,
+    cacheDir,
+    ...(factoryCandidate ? { factoryCandidate } : {}),
+  };
 }
 
 /**
@@ -167,10 +177,13 @@ export async function executeBinaryBuild(options: BinaryBuildOptions, steps: Bin
       throw new Error('Нет лицензии закреплённого Node');
     }
 
-    await steps.prepare(work, options);
+    const factoryCandidate = options.factoryCandidate ?? await steps.factory(work);
+    const payloadOptions = { ...options, factoryCandidate };
+
+    await steps.prepare(work, payloadOptions);
     await steps.bundle(work);
 
-    const manifest = await steps.package(work, options);
+    const manifest = await steps.package(work, payloadOptions);
     const bytes = serverManifestBytes(manifest);
 
     const { runtime: runtimeInfo } = decodeServerManifest(bytes, manifest.packageId);

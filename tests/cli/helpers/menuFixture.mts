@@ -41,7 +41,7 @@ export async function sourceMenu(t: TestContext) {
  */
 export function launchMenu(t: TestContext, box: Sandbox, overrides: NodeJS.ProcessEnv = {}) {
   return startPty(t, {
-    argv: ['/bin/bash', path.join(box.root, 'bin/grigdesk-ctl')],
+    argv: box.argv(),
     env: {
       ...box.environment,
       LC_ALL: '',

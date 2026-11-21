@@ -1,7 +1,9 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import os from 'node:os';
+import { extractReleaseArtifact } from '../shared/node/releaseArchive.ts';
 
-import { decodeReleaseChannelIndex, type ReleaseEnvelope }
+import { parseReleaseChannelIndex, type ReleaseEnvelope }
   from '../shared/runtime/installedUpdateContracts.ts';
 import { verifyReleaseEnvelope } from '../shared/node/releaseTrust.ts';
 import { assertReleasePlatform } from '../shared/node/releaseChannel.ts';
@@ -42,9 +44,9 @@ export async function verifyDistributionArtifacts(directory: string,
     throw new Error('release_distribution_ambiguous');
   }
 
-  const index = decodeReleaseChannelIndex(JSON.parse(
+  const index = parseReleaseChannelIndex(
     await fs.readFile(path.join(directory, names[0]!), 'utf8'),
-  ));
+  );
 
   if (!index.latest) {
     throw new Error('release_distribution_empty');
@@ -96,6 +98,20 @@ export async function verifyDistributionArtifacts(directory: string,
     if (await sha256File(file, signal) !== artifact.sha256
       || (await fs.stat(file)).size !== artifact.size) {
       throw new Error('release_archive_integrity_invalid');
+    }
+  }
+
+  const control = index.latest.payload.artifacts.control;
+
+  if (control) {
+    const stage = await fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-control-'));
+
+    try {
+      await extractReleaseArtifact(
+        path.join(directory, 'control.tar.gz'), path.join(stage, 'control'), control,
+      );
+    } finally {
+      await fs.rm(stage, { recursive: true, force: true });
     }
   }
 

@@ -6,14 +6,15 @@ import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 
 import { readFactoryAttemptLedger } from '../../../server/src/lib/factoryAttemptLedger.ts';
-import { canonicalJson } from '../../../shared/lib/canonicalJson.ts';
+import { testFactoryBinary } from '../../helpers/factoryBinary.mjs';
+import { writeFactoryLedger } from '../../helpers/factoryLedgerFixture.mjs';
 
 const execute = promisify(execFile);
 const repository = path.resolve(fileURLToPath(new URL('../../../', import.meta.url)));
 const engineHome = path.join(repository, 'engine');
 
 /**
- * Настоящий stage-state helper создаёт content-addressed события и runtime projection.
+ * Go store создаёт content-addressed события и runtime projection.
  * Все roots принадлежат тесту, команды профиля и живые модели не запускаются.
  */
 export async function arbiterDecisionFixture(t) {
@@ -36,27 +37,23 @@ export async function arbiterDecisionFixture(t) {
       retro: 'Подведение итогов',
     }),
   ])).stdout);
-  const env = {
-    ...process.env,
-    FACTORY_HOME: engineHome,
-    FACTORY_CONTROL_ROOT: controlDir,
-    FACTORY_PROFILES_DIR: profilesDir,
-    FACTORY_STATE: stateDir,
-    STATE_DIR: stateDir,
-    NODE_BIN: process.execPath,
-    FACTORY_FORBID_LIVE: '1',
-    PYTHONDONTWRITEBYTECODE: '1'
-  };
-  const call = async (operation, ...args) => execute('bash', ['-c',
-    'set -uo pipefail\nsource "$FACTORY_HOME/lib/attempt-stage-state.sh"\n"$@"',
-    'arbiter-fixture', operation, ...args.map(String)], { env, maxBuffer: 2 * 1024 * 1024 });
-  const attempt = (await call('attempt_state_begin_v2', '7', 'demo-profile', routesDir)).stdout.trim();
+  const task = '7';
+  const attempt = writeFactoryLedger(root, 'begin', {
+    task,
+    profile: 'demo-profile',
+    route: 'debug',
+  });
+  const commit = (node, outcome, verdict) => writeFactoryLedger(root, 'commit', {
+    task,
+    attempt,
+    node,
+    outcome,
+    failureOwner: verdict?.owner,
+    verdict,
+  });
 
-  await call('attempt_state_select_route_v2', '7', attempt, 'debug');
-  await call('attempt_stage_state_init_v2', '7', attempt, 'debug');
-  await call('attempt_stage_state_commit_v2', '7', attempt, 'instrument', 'done');
-
-  const verdict = Buffer.from(canonicalJson({
+  commit('instrument', 'done');
+  commit('check', 'failed', {
     owner: 'tests', findings: [
       {
         id: 'timeout',
@@ -64,9 +61,7 @@ export async function arbiterDecisionFixture(t) {
         summary: 'Проверка не завершилась за отведённое время.'
       },
     ]
-  })).toString('base64');
-
-  await call('attempt_stage_state_commit_v2', '7', attempt, 'check', 'failed', '0', verdict);
+  });
 
   const attemptDir = path.join(controlDir, 'protocol-v2/tasks/t7/attempts', attempt);
 
@@ -90,9 +85,15 @@ export async function arbiterDecisionFixture(t) {
     task: '7',
     registry
   });
-  const rewind = (node, reason, expected, actor = 'human') => call('attempt_stage_state_human_rewind_v2',
-    '7', attempt, node, node === 'instrument' ? 'instrument,check,gate_plan,retro' : 'check,gate_plan,retro',
-    reason, actor, expected?.sequence ?? '', expected?.headEventHash ?? '');
+  const rewind = (node, reason, expected, actor = 'human') => writeFactoryLedger(root, 'rewind', {
+    task,
+    attempt,
+    node,
+    reason,
+    actor,
+    sequence: expected?.sequence,
+    head: expected?.headEventHash,
+  });
 
   return {
     root,
@@ -104,12 +105,12 @@ export async function arbiterDecisionFixture(t) {
     attemptDir,
     registry,
     trusted,
-    call,
+    commit,
     rewind,
     config: {
       rootDir: repository,
       factoryHome: engineHome,
-      factoryBin: path.join(engineHome, 'bin/factory'),
+      factoryBin: testFactoryBinary(),
       factoryControlDir: controlDir,
       factoryConfigRoot: path.join(root, 'config'),
       routesDir,

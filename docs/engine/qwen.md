@@ -1,16 +1,15 @@
 # Qwen Code в конвейере
 
-Раннер `engine/lib/runners/qwen.sh` использует внешний npm-пакет
-`@qwen-code/qwen-code`. Собственный бинарник Qwen не собирается. Выбор CLI идёт через
-`factory_external_bin`; host-wrapper `qwenRunner.mts` поставляется helper-ом `qwen-runner`.
+Go-адаптер в `utilities/factory/internal/runner/qwen.go` использует внешний
+npm-пакет `@qwen-code/qwen-code`. Движок передаёт точный путь выбранного CLI
+хосту `qwenRunner.mts`, который входит в комплект как helper `qwen-runner`.
 
 ## Каталог и запуск
 
 Metadata-only режим wrapper-а получает тот же снимок `modelProviders`, что и чат, и
-подтверждает полные native ids через ACP без prompt. `models.tsv` имеет 11 полей,
-семейство `default`; default-политика — `default/latest/auto`. Неизвестные усилия не
-выдумываются: model options содержит единственное пустое значение. Встроенный `high`
-движка не передаётся CLI; native reasoning сохраняется из настроек модели.
+подтверждает полные native ids через ACP без prompt. Модель и тип авторизации
+составляют один ID. Для effort options возвращается пустое значение, чтобы CLI
+использовал собственную настройку reasoning.
 Доступная модель, выбранная через `model.name` и `security.auth.selectedType` CLI,
 получает первое предпочтение; одинаковые bare ids разных типов не подменяют её маршрут.
 
@@ -55,10 +54,10 @@ exact identity; текст ответа модели не завершает э�
 шаги, отмена, resume в новом процессе, разрешённый MCP, запрет прямого SSH и выхода
 за рабочую папку. Отказ API сохраняет причину без полного ключа.
 
-Настоящий launcher с тестовым CLI проходит `state-only` и `workspace-write`, отказ
-вопроса, stale/current status MCP, файловые эффекты, timeout и частичный отказ без
-повтора. Доставка двух динамических ключей проверена в systemd/detached, с access
-service и без него. Source и собранный helper возвращают структурный `wrapper_error`
+Go-запуск на Linux прошёл предпроверку, ворота и продолжение с синтетическим
+ACP. Статус чужого запуска отклонён, текущий результат принят один раз.
+Доставка двух объявленных ключей проверена в systemd и detached, с access service
+и без него. Source и собранный helper возвращают структурный `wrapper_error`
 при некорректных аргументах.
 
 Платный smoke, установка через карточку и браузерная приёмка требуют отдельного

@@ -3,9 +3,7 @@ import { readFile } from 'node:fs/promises';
 import https from 'node:https';
 import path from 'node:path';
 import tls from 'node:tls';
-import { readConfig } from '../../../relay/src/config.ts';
-import { createRelayServer } from '../../../relay/src/relayServer.ts';
-import { connect, hello } from '../../relay/helpers.js';
+import { connect, hello, relayEnv, relayFromEnv } from '../../relay/helpers.js';
 import { freePort } from './pluginBootFixture.js';
 import { legacyRelay } from './legacyRelay.js';
 /**
@@ -22,25 +20,25 @@ export async function configuredRelay(t, fixture, options = {}) {
   const directory = path.join(fixture.directory, 'relays', record.id);
   const key = await readFile(path.join(directory, 'relay-key.pem'), 'utf8');
   const cert = await readFile(path.join(directory, 'relay-cert.pem'), 'utf8');
-  const { createHash } = await import('node:crypto');
-  const digest = (value) => createHash('sha256').update(value).digest('hex');
-  const relay = options.legacy ? legacyRelay({
-    key,
-    cert,
-    brainToken: record.brainToken,
-    deviceToken: record.deviceToken,
-  }) : createRelayServer({
-    ...readConfig({
-      RELAY_TLS_KEY_B64: Buffer.from(key).toString('base64'),
-      RELAY_TLS_CERT_B64: Buffer.from(cert).toString('base64'),
-      RELAY_BRAIN_TOKEN_SHA256: digest(record.brainToken),
-      RELAY_DEVICE_TOKEN_SHA256: digest(record.deviceToken),
-    }),
-    port,
-  }, { log: () => { } });
+  const optionsWithTokens = { brainToken: record.brainToken, deviceToken: record.deviceToken };
+  let relay;
 
-  await relay.listen('0.0.0.0', port);
-  t.after(() => relay.close());
+  if (options.legacy) {
+    relay = legacyRelay({
+      key,
+      cert,
+      ...optionsWithTokens,
+    });
+    await relay.listen('0.0.0.0', port);
+    t.after(() => relay.close());
+  } else {
+    relay = await relayFromEnv(t, relayEnv({
+      cert: { keyPem: key, certPem: cert },
+      ...optionsWithTokens,
+      overrides: { RELAY_PORT: String(port) },
+    }));
+  }
+
   await fixture.mobile.start();
 
   const deadline = Date.now() + 5000;

@@ -7,7 +7,7 @@
       "argv": [
         "bash",
         "-c",
-        "npm --prefix server ci && npm --prefix web ci && npm --prefix mobile ci && npm --prefix tracker ci && npm --prefix routes ci --include=dev && npm --prefix voice ci --include=dev && npm --prefix relay ci && npm --prefix deepseek ci && npm --prefix desktop ci --ignore-scripts && node desktop/node_modules/esbuild/install.js"
+        "npm --prefix server ci && npm --prefix web ci && npm --prefix mobile ci && npm --prefix deepseek ci && npm --prefix desktop ci --ignore-scripts && node desktop/node_modules/esbuild/install.js"
       ],
       "timeoutMs": 1800000
     },
@@ -209,6 +209,30 @@
       }
     },
     {
+      "id": "factory-go-tests",
+      "group": "server",
+      "needs": [
+        "prepare-build",
+        "server-environment"
+      ],
+      "argv": [
+        "env",
+        "GOTOOLCHAIN=local",
+        "GOWORK=off",
+        "go",
+        "test",
+        "-count=1",
+        "-p=2",
+        "./utilities/factory/..."
+      ],
+      "timeoutMs": 1800000,
+      "memory": {
+        "rssMb": 4096,
+        "heapMb": 1024,
+        "concurrency": 2
+      }
+    },
+    {
       "id": "voice-tests",
       "group": "server",
       "needs": [
@@ -216,10 +240,31 @@
         "server-environment"
       ],
       "argv": [
-        "npm",
-        "--prefix",
-        "voice",
-        "test"
+        "go",
+        "test",
+        "-count=1",
+        "-p=2",
+        "./utilities/voice/...",
+        "./utilities/tracker/...",
+        "./utilities/pipeline/..."
+      ],
+      "timeoutMs": 1800000,
+      "memory": {
+        "rssMb": 4096,
+        "heapMb": 1024,
+        "concurrency": 2
+      }
+    },
+    {
+      "id": "go-utilities-behavior",
+      "group": "server",
+      "needs": [
+        "prepare-build",
+        "server-environment"
+      ],
+      "argv": [
+        "bash",
+        "tests/run-go-utilities.sh"
       ],
       "timeoutMs": 1800000,
       "memory": {
@@ -236,10 +281,15 @@
         "server-environment"
       ],
       "argv": [
-        "npm",
-        "--prefix",
-        "routes",
-        "test"
+        "go",
+        "test",
+        "-count=1",
+        "-p=2",
+        "./utilities/routes/...",
+        "./utilities/relay/...",
+        "./utilities/ctl/...",
+        "./utilities/maintenance/...",
+        "./utilities/internal/..."
       ],
       "timeoutMs": 1800000,
       "memory": {
@@ -351,7 +401,7 @@
       "argv": [
         "bash",
         "-c",
-        "npm --prefix server ci && npm --prefix web ci && npm --prefix mobile ci && npm --prefix tracker ci && npm --prefix routes ci --include=dev && npm --prefix voice ci --include=dev && npm --prefix relay ci && npm --prefix deepseek ci && npm --prefix desktop ci --ignore-scripts && node desktop/node_modules/esbuild/install.js"
+        "npm --prefix server ci && npm --prefix web ci && npm --prefix mobile ci && npm --prefix deepseek ci && npm --prefix desktop ci --ignore-scripts && node desktop/node_modules/esbuild/install.js"
       ],
       "timeoutMs": 1800000
     },

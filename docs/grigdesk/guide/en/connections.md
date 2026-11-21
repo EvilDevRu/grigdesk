@@ -23,6 +23,10 @@ Verify the home machine: console and window share its job list, including first 
 Enter a name, SSH address, username and password/key file.
 Verify the SSH fingerprint against a trusted source, review Ubuntu/Debian x64 with systemd checks and confirm changes.
 The VPS needs neither Docker nor Node.
+
+`grigdesk-ctl relay status` reports connection states for configured relays.
+For manual installation, download `relay.env` and follow the relay card instructions
+to run the `grigdesk-relay` executable on the relay host.
 After channel verification, obtain QR and wait separately for the phone to connect.
 You may close and later reopen the same job; do not delete configuration for a temporary connection failure.
 Select a particular job to continue, or 0 in the console for a new VPS.
@@ -36,9 +40,10 @@ With the same DNS/port, point DNS to the new VPS and recheck without new pairing
 For a changed address, use Connection parameters → Change address → Update route by QR or string on the phone
 and confirm the selected machine's QR. Keys and trust remain.
 If unavailable, update the app in place without deleting data.
-When changing a running service on the same VPS, the wizard backs it up before channel checks and restores it on failure.
-If SSH is lost and rollback unconfirmed, inspect the VPS and retry restoration with SSH access;
-home identity and phone keys remain. DNS waiting continues until DNS points to the new VPS.
+If installation stops after replacing the executable on a VPS, reopen the job with Continue setup and choose
+Resume installation over SSH. Verify the existing VPS host key and confirm the selected release.
+If the job is waiting for DNS or VPN, fix the connection and choose Check.
+Home identity and phone keys are preserved.
 
 ## Result
 

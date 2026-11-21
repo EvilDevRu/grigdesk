@@ -4,6 +4,8 @@ import path from 'node:path';
 import { dataPath } from '../../../shared/runtime/dataHome.ts';
 import { PACKAGE_ID, runtimeError } from '../binary/leases.ts';
 import { prepareDarwinFactoryEnvironment } from './factoryDarwinRuntime.ts';
+import { FACTORY_GO_BINARY, readFactoryGoDescriptor } from './factoryGoDescriptor.ts';
+import type { FactoryEngineProtocol } from './factoryRuntime.ts';
 import { legacyRuntimeContext } from './factoryLegacyRuntimeContext.ts';
 import {
   readFactoryDecisionRuntime,
@@ -66,6 +68,7 @@ export function factoryLaunchEnv(
 export interface FactoryRouteLaunchPaths extends FactoryLaunchPaths {
   rootDir: string;
   factoryBin: string;
+  factoryEngineProtocol?: FactoryEngineProtocol;
   factoryControlDir: string;
   runtime?: FactoryRuntimeSelection & { cacheDir: string };
   runtimeNode?: string;
@@ -80,11 +83,21 @@ export function selectedFactoryRuntimeConfig<T extends FactoryRouteLaunchPaths>(
   config: T,
   selected: FactoryRuntimeSelection,
 ) {
+  const descriptor = selected.packageId ? readFactoryGoDescriptor(selected.runtimeRoot) : null;
+
+  if (selected.packageId ? !descriptor : selected.engineBin !== config.factoryBin) {
+    throw runtimeError('factory_runtime_engine_retired');
+  }
+  if (descriptor && selected.engineBin !== path.join(selected.runtimeRoot, FACTORY_GO_BINARY)) {
+    throw runtimeError('factory_runtime_engine_invalid');
+  }
+
   return {
     ...config,
     rootDir: selected.runtimeRoot,
     factoryHome: selected.engineHome,
     factoryBin: selected.engineBin,
+    factoryEngineProtocol: 'go-v1' as const,
     runtimeNode: selected.node,
     runtimeHostEnv: {
       ...factoryBrowserRuntimeEnv(selected,
@@ -177,6 +190,7 @@ export async function prepareFactoryRouteLaunch<T extends FactoryRouteLaunchPath
     runtimeRoot: config.rootDir,
     engineHome: config.factoryHome,
     engineBin: config.factoryBin,
+    engineProtocol: config.factoryEngineProtocol,
     node: nodeExecutable(),
   } : null);
 
@@ -204,6 +218,7 @@ export async function prepareFactoryRouteLaunch<T extends FactoryRouteLaunchPath
     runtimeRoot: config.rootDir,
     engineHome: config.factoryHome,
     engineBin: config.factoryBin,
+    engineProtocol: config.factoryEngineProtocol,
     node: nodeExecutable(),
   };
 

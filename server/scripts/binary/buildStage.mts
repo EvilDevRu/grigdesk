@@ -27,6 +27,7 @@ async function main(): Promise<void> {
     cacheDir: string;
     archive: string;
     buildInputs: Record<string, string>;
+    factoryCandidate?: string;
   };
   const target = seaHostTarget();
   const runtime = await readTargetNodeRuntime(

@@ -2,7 +2,7 @@
 set -uo pipefail
 source "$FACTORY_TESTS_HOME/lib/testlib.sh"
 
-tool="$FACTORY_HOME/bin/factory-context"
+tool=fixture_context
 root="$TEST_ROOT/work/context"
 be_source="$root/be-source"
 fe_source="$root/fe-source"
@@ -283,15 +283,6 @@ assert_eq null "$(jq -r .evidence.findings.deferred[0].openedSequence <<<"$boots
 invalid_bootstrap=$(jq -c '.deferred[0].openedSequence = 1' <<<"$bootstrap_ledger")
 "$tool" "${common[@]}" --findings-ledger-json "$invalid_bootstrap" >/dev/null 2>&1
 assert_rc 78 "$?" "bootstrap sequence основного ledger отвергнут"
-python3 - "$tool" "$bootstrap_ledger" <<'PYTEST'
-import json, runpy, sys
-module = runpy.run_path(sys.argv[1])
-findings = module["findings_ledger"](sys.argv[2])
-bounded = module["bound_loop_findings"](findings)
-assert bounded["schema"] == 2
-assert bounded["deferred"][0]["source"]["phase"] == "bootstrap"
-assert module["finding_freshness"]("deferred", bounded["deferred"][0]) == (0, 0, 0)
-PYTEST
-assert_rc 0 "$?" "loop-bounding сохраняет schema/source и сортирует null sequence"
-
+grep -qx context "$TEST_ROOT/candidate.calls"
+assert_rc 0 "$?" "выполнена подкоманда context"
 finish_tests

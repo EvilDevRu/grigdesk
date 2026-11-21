@@ -1,0 +1,68 @@
+[
+  {
+    "engineId": "piper",
+    "id": "irina",
+    "name": "Ирина",
+    "language": "ru",
+    "timbre": "женский",
+    "url": "https://github.com/rhasspy/piper/releases/download/v0.0.2/voice-ru-irinia-medium.tar.gz",
+    "archiveSha256": "897b62f170faee38f21d0bc36411164166ae351977e898b6cf33f6206890b55f",
+    "archiveBytes": 58340190,
+    "modelName": "ru-irinia-medium.onnx",
+    "modelSha256": "8ff38212d23da300bbe3705c645e6e5b9475f0bfde01558eb17813e22acaaaaa",
+    "configName": "ru-irinia-medium.onnx.json",
+    "configSha256": "2cb86fe3fb3b5af5215c07d8d13a9026ac19f26da86098abb843260469d6e3dd",
+    "sampleRate": 22050,
+    "license": "GPLv2 (обучен на корпусе RHVoice)",
+    "requirements": [
+      "piper-tts==1.8.0",
+      "onnxruntime==1.23.2"
+    ],
+    "requirementsIndexUrl": null
+  },
+  {
+    "engineId": "silero",
+    "id": "v5_5_ru",
+    "name": "Silero v5.5",
+    "language": "ru",
+    "timbre": "три женских и два мужских",
+    "url": "https://models.silero.ai/models/tts/ru/v5_5_ru.pt",
+    "fileName": "v5_5_ru.pt",
+    "fileSha256": "50081637b602126ee06cb3bc8a744d25651d2da149ee8864b9a379bfdd934437",
+    "fileBytes": 145420684,
+    "engineBytes": 200000000,
+    "sampleRate": 48000,
+    "license": "CC BY-NC-SA 4.0 (некоммерческое использование)",
+    "requirements": [
+      "torch==2.13.0+cpu"
+    ],
+    "requirementsIndexUrl": "https://download.pytorch.org/whl/cpu",
+    "speakers": [
+      {
+        "id": "xenia",
+        "name": "Ксения",
+        "timbre": "женский"
+      },
+      {
+        "id": "baya",
+        "name": "Бая",
+        "timbre": "женский"
+      },
+      {
+        "id": "kseniya",
+        "name": "Ксюша",
+        "timbre": "женский"
+      },
+      {
+        "id": "aidar",
+        "name": "Айдар",
+        "timbre": "мужской"
+      },
+      {
+        "id": "eugene",
+        "name": "Евгений",
+        "timbre": "мужской"
+      }
+    ]
+  }
+]

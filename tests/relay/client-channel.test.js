@@ -1,17 +1,15 @@
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
 import test from 'node:test';
-import { readConfig } from '../../relay/src/config.ts';
-import { createRelayServer } from '../../relay/src/relayServer.ts';
-import { connect, hello, makeCert, readLine, relayEnv, temporary } from './helpers.js';
+import { connect, hello, makeCert, readLine, relayFixture, temporary } from './helpers.js';
 /**
  * Один настоящий relay связывает независимые v1/client пары через единственный control.
  * Закрытие каждого созданного сокета зарегистрировано до первого protocol hello.
  */
 async function fixture(t, capabilities) {
   const cert = await makeCert(await temporary(t), 'relay');
-  const relay = createRelayServer({ ...readConfig(relayEnv({ cert })), port: 0 }, { log: () => { } });
-  const port = await relay.listen('127.0.0.1');
+  const relay = await relayFixture(t, cert);
+  const port = relay.port;
 
   t.after(() => relay.close());
 
@@ -49,7 +47,14 @@ async function pair(f, v) {
     token: 'device-token',
     ...(v === 2 ? { target: 'client' } : {}),
   });
-  const notice = JSON.parse(await incoming);
+  const notice = JSON.parse(await Promise.race([
+    incoming,
+    deviceAck.then((reply) => {
+      assert.equal(reply.ok, true, `relay отклонил устройство с кодом ${reply.error}`);
+
+      return incoming;
+    }),
+  ]));
   const brain = await f.dial();
   const ack = await hello(brain, {
     v,

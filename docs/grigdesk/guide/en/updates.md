@@ -1,5 +1,12 @@
 # Updates and rollback
 
+Linux x64 server packages use the Go factory. An active attempt keeps its engine generation during an update.
+A v3 update keeps the Go helper and the data while moving forward.
+Run `grigdesk-ctl recover-update --job <uuid> [--json]` with the job ID shown
+in the update status. After the switch, startup of the selected generation
+requires confirmation. The rollback instructions below apply to earlier
+registered v2 releases.
+
 Release contains stable X.Y.Z versions; dev contains explicitly selected X.Y.Z-dev.N previews.
 Changing channels does not silently permit downgrading. Network and signature errors are shown
 separately from “no updates available”.
@@ -44,6 +51,8 @@ Signature, integrity and binary startup checks still run; you decide whether to 
 
 After confirmed restart, a separate process continues the update. Closing the old window then does not
 require reinstalling. If process state cannot be read, resolve that error and resume the existing job.
+On Linux, the AppImage window must belong to the installed release before the update can replace the pair.
+The update completes after both the new window and server start.
 
 On macOS, GrigDesk can hold window close or Cmd+Q when it cannot confirm the state of the local server.
 GrigDesk waits for a server it started to exit. A separately started server of the same installation

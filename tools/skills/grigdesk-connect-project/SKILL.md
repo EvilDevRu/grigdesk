@@ -172,13 +172,18 @@ configure, публикации, проверок и финального вкл
    копии временно включи `route-v2`; рабочая конфигурация ещё не включена. Направь
    `FACTORY_PROFILES_DIR` на проверочный root и выполни:
 
+   Используй выбранный GrigDesk бинарник из того же поколения. Для Go с
+   `native-subcommands` в `capabilities --format json` выполни:
+
    ```text
-   engine/bin/factory-check <profile> --quick
-   engine/bin/factory check --profile <profile> --route <route-id> --routes-dir <absolute-temp-store>
-   RUN_HOST_PREFLIGHT=1 engine/bin/factory-check <profile> --host-preflight
+   <absolute-factory-cli> profile-check <profile> --quick
+   <absolute-factory-cli> check --profile <profile> --route <route-id> --routes-dir <absolute-temp-store>
+   RUN_HOST_PREFLIGHT=1 <absolute-factory-cli> profile-check <profile> --host-preflight
    ```
 
-   Вторую команду выполни для каждого выбранного маршрута. Проверь rendering agent-узлов
+   У исторической Bash-поставки вызови `factory-check` из каталога выбранного
+   `factory` для быстрой и host-проверок. Общую команду `check` выполни
+   для каждого выбранного маршрута. Проверь rendering agent-узлов
    с полным synthetic typed context и переходы command/gate по инструкции образца.
    Host preflight — metadata-only readiness исполнителей, без model prompt. Недостающий
    CLI или доступ — остановка с ручным действием, а не повод включить рабочую capability.

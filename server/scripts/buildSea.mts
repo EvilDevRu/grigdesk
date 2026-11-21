@@ -1,14 +1,19 @@
+import { cp, mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { execFile } from 'node:child_process';
-import { cp, copyFile, readFile, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
 
 import { withWorkDirectory } from '../../shared/node/files.ts';
 import { sha256File } from '../../shared/node/hash.ts';
-import { ensureNodeArchive, readNodeRuntime } from '../../shared/node/nodeRuntime.ts';
+import { readNodeRuntime } from '../../shared/node/nodeRuntime.ts';
 import { nodeArchive } from '../../shared/node/seaBuild.ts';
+import { buildReleaseUtility } from '../../tools/goReleaseUtility.mts';
+import {
+  FACTORY_GO_BINARY, FACTORY_GO_DESCRIPTOR, FACTORY_PROFILE_ABI,
+} from '../src/lib/factoryGoDescriptor.ts';
 import { checkRuntime, writeReleaseManifest } from '../src/lib/releaseManifest.ts';
 import { buildSeaBinary } from './sea/buildSteps.mts';
+import { stageFactoryCandidate } from './binary/factoryCandidate.mts';
 import { bundleServer } from './sea/bundle.mts';
 import { collectLicenses } from './sea/dependencies.mts';
 import { createReleaseArchive, parseBuildArgs, publishRelease } from './sea/release.mts';
@@ -17,8 +22,10 @@ import { prepareRelease } from './sea/prepare.mts';
 import { smokeRelease } from './sea/smoke.mts';
 import { auditStage, normalizeStageModes } from './sea/stage.mts';
 
-const run = promisify(execFile);
 const sourceRoot = path.resolve(import.meta.dirname, '../..');
+const cliNames = ['grigdesk-ctl', 'tracker', 'pipeline', 'routes', 'voice', 'grigdesk-relay'] as const;
+const cliFiles = cliNames.map((name) => `bin/${name}`);
+const execute = promisify(execFile);
 
 /**
  * Читает публичный JSON-контракт сборки из текущего дерева.
@@ -28,52 +35,36 @@ async function json(relative: string) {
 }
 
 /**
- * Берёт только заранее сохранённый официальный Node; сборка не скачивает runtime.
- * Публикует копию атомарно; повреждённый cache допускает другой проверенный локальный вход.
+ * Проверяет SHA256 заранее сохранённого архива Node в указанном кэше.
+ * Повреждённый или отсутствующий файл останавливает сборку до подготовки staging.
  */
 export async function cachedRuntime(cache: string, root = sourceRoot): Promise<string> {
   const runtime = readNodeRuntime(JSON.parse(await readFile(
     path.join(root, 'server/build/node-runtime.json'), 'utf8',
   )),
     'server/build/node-runtime.json');
-  const archive = nodeArchive(runtime).name;
+  const archive = path.join(cache, nodeArchive(runtime).name);
 
-  return ensureNodeArchive(runtime, cache, {
-    attempts: 1,
-    download: async (_url, temporary) => {
-      for (const tool of ['b24', 'relay']) {
-        const candidate = path.join(root, tool, '.cache', archive);
+  if (await sha256File(archive).catch(() => '') !== runtime.sha256) {
+    throw new Error(`Нет проверенного архива ${archive}`);
+  }
 
-        if (await sha256File(candidate).catch(() => '') === runtime.sha256) {
-          await copyFile(candidate, temporary);
-
-          return;
-        }
-      }
-
-      throw new Error(`Нет проверенного архива ${archive} в cache, b24/.cache или relay/.cache`);
-    },
-  });
+  return archive;
 }
 
 /**
- * Собирает два самостоятельных CLI имеющимися закреплёнными сборщиками.
- * Выход обоих инструментов направлен в staging, рабочие bin машины не затрагиваются.
+ * Собирает утилиты того же выпуска в staging.
  */
-async function buildCli(directory: string, cache: string): Promise<void> {
-  for (const tool of ['b24', 'relay']) {
-    const args = [path.join(sourceRoot, tool, 'scripts/build.mts'), '--out-dir',
-      path.join(directory, 'bin')];
+async function buildCli(directory: string, cache: string, version: string): Promise<void> {
+  await mkdir(path.join(directory, 'bin'), { recursive: true });
 
-    if (tool === 'b24') {
-      args.push('--cache-dir', cache);
-    }
-
-    await run(process.execPath, args, {
-      cwd: sourceRoot,
-      env: { PATH: '/usr/bin:/bin' },
-      timeout: 60000,
-      maxBuffer: 4 * 1024 * 1024,
+  for (const name of cliNames) {
+    await buildReleaseUtility(name, {
+      root: sourceRoot,
+      output: path.join(directory, 'bin', name),
+      cache: path.join(cache, 'go'),
+      version,
+      env: process.env,
     });
   }
 }
@@ -93,6 +84,13 @@ export async function buildRelease(options: BuildArgs) {
   }
 
   return withWorkDirectory(options.cacheDir, async (work) => {
+    const factory = path.join(work, 'factory-bin');
+
+    await execute('bash', [path.join(sourceRoot, 'tools/build-factory.sh'), factory], {
+      cwd: sourceRoot,
+      timeout: 300_000,
+    });
+
     const result = await publishRelease({
       outDir: options.outDir,
       name: `grigdesk-server-${version}-linux-x64`,
@@ -106,7 +104,7 @@ export async function buildRelease(options: BuildArgs) {
           work,
         });
 
-        await buildCli(directory, options.cacheDir);
+        await buildCli(directory, options.cacheDir, version);
         process.stdout.write('SEA: CJS, blob и postject\n');
         await buildSeaBinary({
           packageDir: path.join(sourceRoot, 'server'),
@@ -126,21 +124,28 @@ export async function buildRelease(options: BuildArgs) {
           recursive: true,
         });
         await normalizeStageModes(directory);
+        await stageFactoryCandidate({
+          root: directory,
+          binary: path.join(factory, 'factory'),
+          profileAbi: path.join(sourceRoot, FACTORY_PROFILE_ABI),
+          os: 'linux',
+          arch: 'x64',
+        });
 
         const required = ['server/help/help.json', 'server/help/help.en.json', 'server/help/site/index.html',
           'server/help/site/help.json', 'server/help/site/help.en.json',
           'VERSION', 'server/grigdesk-server', 'runtime/node/bin/node',
           'server/package.json', 'server/node_modules/fastify/package.json',
           'server/runtime/esmBridge.cjs', 'licenses/NODE.txt', 'licenses/THIRD-PARTY.json',
-          'bin/grigdesk-ctl', 'bin/b24', 'bin/grigdesk-relay', ...helpers.helpers.map(
+          FACTORY_GO_BINARY, FACTORY_GO_DESCRIPTOR, FACTORY_PROFILE_ABI,
+          ...cliFiles, ...helpers.helpers.map(
             (helper) => `server/runtime/helpers/${helper.id}.mjs`,
           )];
         const files = await auditStage(directory, {
           required,
           sourceRoot,
           forbiddenRoots: [options.cacheDir, directory],
-          executables: ['server/grigdesk-server', 'runtime/node/bin/node',
-            'bin/grigdesk-ctl', 'bin/b24', 'bin/grigdesk-relay'],
+          executables: ['server/grigdesk-server', 'runtime/node/bin/node', ...cliFiles],
         });
         const manifest = await writeReleaseManifest(directory, {
           version,

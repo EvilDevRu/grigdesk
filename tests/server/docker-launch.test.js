@@ -8,6 +8,8 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 import { SOURCE_RUNTIME_FILES } from './helpers/sourceRuntimeFiles.mts';
+import { fixtureGo } from '../helpers/goBuildFixture.mts';
+import { freeAcceptancePort } from '../helpers/platformReleaseAcceptance.mts';
 
 const execute = promisify(execFile);
 const root = fileURLToPath(new URL('../../', import.meta.url));
@@ -29,7 +31,8 @@ async function fixture(t, { stubNpm = false } = {}) {
   t.after(() => rm(container, { recursive: true, force: true }));
 
   for (const relative of [
-    'bin', 'deploy/lib', 'tools', 'server/src', 'server/scripts', 'server/node_modules', 'web/node_modules',
+    'bin/utilities', 'deploy/lib', 'tools', 'server/src', 'server/scripts',
+    'server/node_modules', 'web/node_modules', 'desktop',
   ]) {
     await mkdir(path.join(directory, relative), { recursive: true });
   }
@@ -39,7 +42,10 @@ async function fixture(t, { stubNpm = false } = {}) {
     await copyFile(path.join(root, file), path.join(directory, file));
   }
 
-  await copyFile(path.join(root, 'bin/grigdesk-ctl'), path.join(directory, 'bin/grigdesk-ctl'));
+  await copyFile(fixtureGo('grigdesk-ctl'), path.join(directory, 'bin/utilities/ctl'));
+  await copyFile(path.join(root, 'VERSION'), path.join(directory, 'VERSION'));
+  await writeFile(path.join(directory, 'web/package.json'), '{}\n');
+  await writeFile(path.join(directory, 'desktop/package.json'), '{}\n');
   await copyFile(path.join(root, 'deploy/lib/runtime-env.sh'),
     path.join(directory, 'deploy/lib/runtime-env.sh'));
   await writeFile(path.join(directory, 'tools/node'), [
@@ -78,6 +84,7 @@ async function fixture(t, { stubNpm = false } = {}) {
   const env = {
     HOME: directory,
     GRIGDESK_HOME: path.join(container, 'data'),
+    GRIGDESK_PORT: String(await freeAcceptancePort()),
     NODE_ENV: 'test',
     npm_config_cache: process.env.npm_config_cache,
     PATH: `${path.join(directory, 'tools')}:${process.env.PATH || ''}`,
@@ -91,10 +98,10 @@ async function fixture(t, { stubNpm = false } = {}) {
   };
 }
 
-test('bin/grigdesk-ctl запускает TS Docker без отдельной компиляции и без флагов', async (t) => {
+test('bin/utilities/ctl запускает TS Docker без отдельной компиляции и без флагов', async (t) => {
   const { directory, proof, env } = await fixture(t, { stubNpm: true });
 
-  await execute('bash', [path.join(directory, 'bin/grigdesk-ctl'), 'run'], {
+  await execute(path.join(directory, 'bin/utilities/ctl'), ['run'], {
     cwd: directory,
     env,
     timeout: 10000,

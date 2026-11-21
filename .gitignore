@@ -57,14 +57,19 @@ BUGS.md
 web/.generated/markdown/
 
 # Готовый посредник и проверяемый кэш сборки SEA.
+/bin/utilities/
+/bin/grigdesk-ctl
+/bin/grigdesk-maintenance
+/bin/.go-utilities.*/
 /bin/grigdesk-relay
 /bin/grigdesk-relay.sha256
 /bin/.grigdesk-relay-*.tmp
-/relay/.cache/
 
 # Готовый tracker и проверяемый кэш его сборки SEA.
 /bin/tracker
 /bin/pipeline
+/bin/factory
+/bin/.factory-build.*/
 /bin/routes
 /bin/.tracker-*.tmp
 /bin/.pipeline-*.tmp

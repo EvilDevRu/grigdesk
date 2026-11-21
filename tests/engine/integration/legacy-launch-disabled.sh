@@ -15,6 +15,7 @@ mkdir -p "$profile_dir" "$routes_dir"
 
 cat >"$profile_dir/profile.sh" <<'PROFILE'
 PROFILE_NAME=legacy-fixture
+touch "${LEGACY_MARKER:?}"
 run_pipeline() { touch "${LEGACY_MARKER:?}"; }
 run_stage() { touch "${LEGACY_MARKER:?}"; }
 profile_sandbox_up() { touch "${LEGACY_MARKER:?}"; }
@@ -37,8 +38,9 @@ cat >"$ticket" <<JSON
 }
 JSON
 
+test_note "launcher: ${FACTORY_TEST_CANDIDATE:?}"
 start_error=$(FACTORY_FORBID_LIVE=0 LEGACY_MARKER="$legacy_marker" \
-  "$FACTORY_HOME/bin/factory" 71 start --profile "$profile_id" \
+  fixture_factory 71 start --profile "$profile_id" \
     --route feature \
     --ticket-json "$ticket" \
     --routes-dir "$routes_dir" \
@@ -55,7 +57,7 @@ assert_file_missing "$control_dir" \
   "rejected legacy start creates no trusted attempt state"
 
 resume_error=$(FACTORY_FORBID_LIVE=0 LEGACY_MARKER="$legacy_marker" \
-  "$FACTORY_HOME/bin/factory" 71 resume --profile "$profile_id" \
+  fixture_factory 71 resume --profile "$profile_id" \
     --attempt "$attempt" \
     --routes-dir "$routes_dir" \
     --state-dir "$state_dir" \

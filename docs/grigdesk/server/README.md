@@ -13,7 +13,7 @@
 ## Устройство
 
 - [Серверные области каталога проектов и явное чтение архива](../overview/projects-api.md#жизненный-цикл)
-- [Серверное задание relay: общий API, выбор и отмена ожидания, SSH, порт и откат VPS](relay-setup.md)
+- [Серверное задание relay: общий API, выбор и отмена ожидания, SSH, порт и возобновление VPS](relay-setup.md)
 
 - [Остановка до выхода ОС: независимые сторожа worker, потеря launcher, код 75 и поэтапный журнал](shutdown-watchdogs.md)
 - [Изоляция исходящих интеграций: буферизованный HTTP, DNS для потоков и восстановление](isolated-statistics-fetch.md)
@@ -36,12 +36,12 @@
 - [Прогресс сборки без мерцания и предложение открыть окно после успеха](cli-build-interaction.md)
 - [Пустой вызов CLI: меню или справка, открытие окна только по явному действию](cli-default-command.md)
 - [Терминальное меню CLI: язык, прогресс, уборка с подтверждением и прерывание](cli-terminal-menu.md)
-- [Ручная уборка артефактов, прогресс, подтверждение и защита папок запусков](artifacts-cleanup.md)
+- [Инвентаризация артефактов по объёму, ручная уборка и защита папок запусков](artifacts-cleanup.md)
 - [Оформление меню: тёмная палитра, выбор, ширина и безопасные стили](cli-menu-rendering.md)
 - [Общие экраны консоли: состояния, команды, ввод, QR, журналы и сборка](cli-terminal-screens.md)
 - [Переносимая папка: свежая сборка, архив, первый запуск и меню](portable-bundle.md)
 - [Каталог плагинов: автоматический выбор сайта и закрытый локальный API](../plugins/plugin-marketplace.md)
-- [Сборка из исходников: зависимости, параллельные цепочки, цельные события fd 3 и CLI](ctl-build.md)
+- [Сборка из исходников: Go-утилиты, зависимости, события fd 3 и CLI](ctl-build.md)
 - [Android APK в меню сборки и отдельной команде, пути и ошибки](ctl-build-apk.md)
 - [Полная сборка привязывает окно к новому серверу при следующем запуске](build-server-selection.md)
 - [E0 без baseline: функциональные ворота, cold-порог и приватный HOME независимо от umask](server-binary-smoke-baseline.md)
@@ -50,8 +50,8 @@
 - [Установка, private receipt и откат серверного ELF](server-binary-install.md)
 - [Пересборка проверяет совместимость сервера с установленными DeepSeek/GLM до замены](server-executor-install-guard.md)
 - [PATH одиночного ELF: пользовательские CLI и nvm без ссылок](server-binary-path.md)
-- [Движок поставки и физические профили одиночного ELF](server-binary-factory.md)
-- [Factory helpers: metadata, внешние npm-зависимости, статус и engine-пути от runtimeRoot](server-binary-factory-helpers.md)
+- [Go-фабрика в исходниках и серверном комплекте, перепривязка старых попыток](server-binary-factory.md)
+- [Factory helpers: metadata, внешние npm-зависимости, writer закреплённого запуска и редактор](server-binary-factory-helpers.md)
 - [Host hooks DeepSeek и GLM в payload](server-binary-hooks.md)
 - [Guard данных и внешние команды payload](server-binary-placement.md)
 - [CJS payload и ленивый запуск приложения](server-binary-entry.md)
@@ -70,7 +70,7 @@
 - [SEA и единое приложение: труба UI, TLS-вход, устройства и общий модал настроек](sea-unified-client.md)
 - [Сборка ESM-помощников: контекст, self-fork, worker ветки, медиа Qwen и Showcase](sea-helpers.md)
 - [Состав серверного комплекта: ресурсы и PTY входа, production npm, native ABI и лицензии](sea-package.md)
-- [Выпуск серверного SEA: сборка, manifest, атомарная публикация и проверка архива](sea-release.md)
+- [Выпуск серверного SEA: Go-утилиты, manifest, атомарная публикация и проверка архива](sea-release.md)
 - [Обновление SEA-пакета: manifest status, ранние отказы и отделение source updater](sea-update-mode.md)
 - [Окно с SEA-сервером: descriptor v3, выбор пакета, профили и возврат](sea-desktop.md)
 - [Запуск SEA, фазы LaunchAgent, проверка владельца перед остановкой](sea-launch.md)
@@ -83,7 +83,7 @@
 - [Сервер только API: встроенный интерфейс, снимки и страницы плагинов](api-only-server.md)
 - [Дочерний сервер приложения: владение по IPC, код 75, обновление и контроллер запуска](desktop-owned-server.md)
 - [Доступ приложения: ключ, сессии, восстановление и авторизованная dev-проверка](desktop-only-access.md)
-- [Единая команда: окно, сервер, посредник, статус и защита хода агента](grigdesk-cli.md)
+- [Единая команда: окно, сервер, статус связей посредников и защита хода агента](grigdesk-cli.md)
 - [Локальный доступ: один HTTP-сокет и вход по ключу](loopback-access.md)
 - [Удалённый доступ прежнего приложения через посредника](../mobile/architecture.md) —
   основной HTTP и мобильный вход v1 остаются на loopback; клиентский TLS-вход включается отдельно.
@@ -117,4 +117,4 @@
 
 - [История: Исторический embedded переход DeepSeek: публикация и восстановление](deepseek-release-transition.md)
 
-- [Установка, обновление, подтверждение выхода и откат при частичной остановке на macOS](installed-release-updates.md)
+- [Установка и обновление](installed-release-updates.md) — Go maintenance, владелец AppImage и восстановление handoff

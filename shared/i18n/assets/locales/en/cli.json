@@ -306,6 +306,35 @@
   },
   "artifactsCleanup": "Artifacts cleanup",
   "artifactsCleanupDescription": "preview and explicitly delete old artifacts",
+  "inventory": {
+    "scanning": "Measuring disk usage in the artifacts directory…",
+    "total": "Disk space used by scanned entries: {size}",
+    "groupHeading": "By category",
+    "entryHeading": "Largest entries",
+    "partial": "(partially scanned)",
+    "more": "Remaining entries: {count}. Use --json for the full list.",
+    "errors": "Read errors: {count}. Sizes may be understated.",
+    "interrupted": "Scan interrupted. Showing the data measured so far.",
+    "invalidTopic": "Use --topic with --inventory and provide one top-level directory name.",
+    "invalidFilters": "--inventory measures disk usage. Remove --older-than and --keep-generations.",
+    "openError": "Could not open the directory for inspection: {error}",
+    "kinds": {
+      "chat-runs": "Chat turns",
+      "factory-checks": "Factory checks",
+      "installer-checks": "Installation checks",
+      "runtime-checks": "Executor checks",
+      "builds": "Builds",
+      "release": "Release materials",
+      "other": "Other artifacts"
+    },
+    "units": {
+      "bytes": "bytes",
+      "kib": "KiB",
+      "mib": "MiB",
+      "gib": "GiB",
+      "tib": "TiB"
+    }
+  },
   "cleanup": {
     "root": "Directory: {path}",
     "policy": "Age threshold: {days} days; keep generations: {keep}",

@@ -11,6 +11,7 @@ import { ArbiterConversationApply } from '../../lib/arbiterConversationApply.ts'
 import type { ArbiterConversationStore } from '../../lib/arbiterConversationStore.ts';
 import { readArbiterStopContext } from '../../lib/arbiterStopContext.ts';
 import { probeFactoryGotoCapability } from '../../lib/factoryRuntimeCapabilities.ts';
+import { selectedFactoryRuntimeConfig } from '../../lib/factoryLaunch.ts';
 import { readExistingFactoryRuntimePin } from '../../lib/factoryRuntimePins.ts';
 import { normalizeArbiterSettings, resolveArbiterTarget } from '../../lib/factoryArbiter.ts';
 import { resolveModelRef } from '../../lib/chat/modelRef.ts';
@@ -60,22 +61,14 @@ async function visitStarted(options: FactoryModuleOptions, trusted: Trusted, rec
       return false;
     }
 
-    const result = await execute('python3', [
-      path.join(pin.engineHome, 'lib/attempt-lifecycle-state.py'),
-      '--schema', path.join(pin.runtimeRoot, 'schemas/analytics/lifecycle-event.schema.json'),
-      '--segment-bytes', '16777216', 'read',
-      path.join(
-        config.factoryControlDir,
-        'protocol-v2/tasks',
-        `t${trusted.task}`,
-        'attempts',
-        trusted.attempt
-      ),
-      `t${trusted.task}`, trusted.attempt,
-    ], {
+    const engine = selectedFactoryRuntimeConfig(config, pin);
+    const args = [
+      trusted.task, 'lifecycle-read', '--control-dir', config.factoryControlDir, '--attempt', trusted.attempt,
+    ];
+    const result = await execute(engine.factoryBin, args, {
       timeout: 10_000,
       maxBuffer: 16 * 1024 * 1024,
-      env: { ...process.env, PYTHONDONTWRITEBYTECODE: '1' }
+      env: process.env,
     });
 
     return result.stdout.trim().split('\n').some((line) => {

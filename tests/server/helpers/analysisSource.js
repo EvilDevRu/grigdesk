@@ -80,8 +80,13 @@ export async function recordAnalysis(options, prompts, resultFor = null) {
  * Подменяется только внешняя модель; все пути принадлежат временной фикстуре.
  */
 export async function analysisSourceFixture(t, {
-  held = false, resultFor = null, register = null, fetch = undefined,
+  held = false,
+  resultFor = null,
+  register = /** @type {((context: { app: any, config: any, runtime: any, analyzer: Analyzer }) =>
+    Promise<void>) | null} */ (null),
+  fetch = undefined,
 } = {}) {
+  /** @type {Analyzer | undefined} */
   let analyzer;
   let dependencies;
   const prompts = [];

@@ -189,7 +189,7 @@ export async function relayCliFixture(t: TestContext, installed = false, options
     await new Promise<void>((resolve) => server.close(() => resolve()));
   });
 
-  let argv = ['/bin/bash', path.join(box.root, 'bin/grigdesk-ctl')];
+  let argv = box.argv();
 
   if (installed) {
     const root = path.join(box.home, 'installed');
@@ -210,7 +210,7 @@ export async function relayCliFixture(t: TestContext, installed = false, options
 
     await build({
       stdin: {
-        contents: `import { runInstalledCli } from './cli/installedCli.ts';
+        contents: `import { runInstalledCli } from './tests/fixtures/legacy-ctl/cli/installedCli.ts';
 process.exitCode = await runInstalledCli(${JSON.stringify(root)}, process.argv.slice(2));`,
         resolveDir: repository,
         loader: 'ts'

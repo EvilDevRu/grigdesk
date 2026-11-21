@@ -44,16 +44,21 @@ export interface ReleasePayload extends ReleaseIdentity {
   serverApi: { major: number; minor: number };
   desktopRequiresServerApi: { major: number; minMinor: number };
   platform: ReleasePlatform;
-  artifacts: { desktop: ReleaseArtifact; server: ReleaseArtifact };
+  artifacts: {
+    desktop: ReleaseArtifact;
+    server: ReleaseArtifact;
+    control?: ReleaseArtifact;
+  };
 }
 
 export interface ReleaseEnvelope {
+  format?: 3;
   payload: ReleasePayload;
   signature: string;
 }
 
 export interface ReleaseChannelIndex {
-  format: 2;
+  format: 2 | 3;
   channel: ReleaseChannel;
   publishedAt: string;
   latest: ReleaseEnvelope | null;
@@ -156,13 +161,14 @@ function decodeArtifact(
 }
 
 /**
- * Format 2 имеет отдельный канал и подписывает описание вместе с обеими частями.
+ * Форматы 2 и 3 закрывают форму индекса и подписанной описи.
  * Этот разбор не устанавливает доверие: Node-потребитель обязан проверить Ed25519.
  */
 export function decodeReleaseChannelIndex(value: unknown): ReleaseChannelIndex {
   const index = object(value, ['format', 'channel', 'publishedAt', 'latest']);
 
-  if (index.format !== 2 || !['release', 'dev'].includes(String(index.channel)) || !iso(index.publishedAt)) {
+  if (![2, 3].includes(Number(index.format)) || typeof index.format !== 'number'
+    || !['release', 'dev'].includes(String(index.channel)) || !iso(index.publishedAt)) {
     throw new Error('release_channel_invalid');
   }
 
@@ -170,7 +176,8 @@ export function decodeReleaseChannelIndex(value: unknown): ReleaseChannelIndex {
     return index as unknown as ReleaseChannelIndex;
   }
 
-  const envelope = object(index.latest, ['payload', 'signature']);
+  const v3 = index.format === 3;
+  const envelope = object(index.latest, v3 ? ['format', 'payload', 'signature'] : ['payload', 'signature']);
   const source = object(envelope.payload, ['channel', 'version', 'commit', 'releaseId',
     'publishedAt', 'notes', 'dataCompatibility', 'serverApi', 'desktopRequiresServerApi',
     'platform', 'artifacts']);
@@ -180,9 +187,10 @@ export function decodeReleaseChannelIndex(value: unknown): ReleaseChannelIndex {
   const api = object(source.serverApi, ['major', 'minor']);
   const requires = object(source.desktopRequiresServerApi, ['major', 'minMinor']);
   const platform = decodePlatform(source.platform);
-  const artifacts = object(source.artifacts, ['desktop', 'server']);
+  const artifacts = object(source.artifacts, v3 ? ['desktop', 'server', 'control'] : ['desktop', 'server']);
 
-  if (source.channel !== identity.channel || source.releaseId !== identity.releaseId
+  if ((v3 && envelope.format !== 3) || source.channel !== identity.channel
+    || source.releaseId !== identity.releaseId
     || !iso(source.publishedAt) || source.publishedAt !== index.publishedAt
     || source.dataCompatibility !== 'unchanged-v1' || !count(api.major) || !count(api.minor)
     || !count(requires.major) || !count(requires.minMinor)
@@ -198,11 +206,18 @@ export function decodeReleaseChannelIndex(value: unknown): ReleaseChannelIndex {
     }
   }
 
-  for (const component of ['desktop', 'server'] as const) {
+  const components = v3 ? ['desktop', 'server', 'control'] as const : ['desktop', 'server'] as const;
+
+  for (const component of components) {
     const artifact = decodeArtifact(
       artifacts[component], identity, component === 'server',
       platform.os === 'darwin' && component === 'desktop',
     );
+
+    if (component === 'control' && (artifact.files.length !== 1
+      || artifact.files[0]?.path !== 'bin/grigdesk-ctl' || artifact.files[0].mode !== 0o555)) {
+      throw new Error('release_control_inventory_invalid');
+    }
 
     if (platform.os === 'darwin') {
       const url = new URL(artifact.url);
@@ -216,4 +231,39 @@ export function decodeReleaseChannelIndex(value: unknown): ReleaseChannelIndex {
   }
 
   return index as unknown as ReleaseChannelIndex;
+}
+
+/**
+ * Проверяет лексемы до JSON.parse. Дубли ключей должны отклоняться до того, как
+ * разбор заменит первое значение, а числовые поля выпуска содержат только safe integer.
+ */
+export function parseReleaseChannelIndex(text: string): ReleaseChannelIndex {
+  const objects: (Set<string> | null)[] = [];
+  const tokens = /"(?:\\[^\n\r]|[^"\\])*"|[{}[\]]|-?[0-9][0-9.eE+-]*/gu;
+
+  for (const match of text.matchAll(tokens)) {
+    const token = match[0];
+
+    if (token === '{' || token === '[') {
+      objects.push(token === '{' ? new Set() : null);
+    } else if (token === '}' || token === ']') {
+      objects.pop();
+    } else if (token.startsWith('"')) {
+      const parent = objects.at(-1);
+
+      if (parent && /^[ \t\r\n]*:/u.test(text.slice(match.index + token.length))) {
+        const key = JSON.parse(token) as string;
+
+        if (parent.has(key)) {
+          throw new Error('release_manifest_duplicate_key');
+        }
+
+        parent.add(key);
+      }
+    } else if (!/^(?:0|[1-9][0-9]*)$/u.test(token) || !Number.isSafeInteger(Number(token))) {
+      throw new Error('release_manifest_number_invalid');
+    }
+  }
+
+  return decodeReleaseChannelIndex(JSON.parse(text));
 }

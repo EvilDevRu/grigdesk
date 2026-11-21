@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -60,6 +61,7 @@ async function publicationBox(t: TestContext, channel = 'release') {
     await fs.writeFile(path.join(staging, `${channel}.json`), 'новый индекс\n');
     await fs.writeFile(path.join(staging, 'desktop.tar.gz'), 'desktop-архив\n');
     await fs.writeFile(path.join(staging, 'server.tar.gz'), 'server-архив\n');
+    await fs.writeFile(path.join(staging, 'control.tar.gz'), 'control-архив\n');
     await fs.writeFile(path.join(staging, 'grigdesk-install'), '#!/bin/sh\nexit 0\n');
     await fs.writeFile(path.join(staging, 'grigdesk-maintenance.gz'), 'helper-архив\n');
     await fs.writeFile(path.join(staging, 'grigdesk-install.sha256'), 'proof\n');
@@ -79,7 +81,8 @@ async function publicationBox(t: TestContext, channel = 'release') {
       root,
       staging,
       version,
-      channel
+      channel,
+      expectedSHA: { 'control.tar.gz': createHash('sha256').update('control-архив\n').digest('hex') },
     }),
   };
 }
@@ -208,4 +211,26 @@ test('PUBCMD-PREFLIGHT: низкий df блокирует загрузку, с�
   await assert.rejects(fs.stat(box.staging), { code: 'ENOENT' });
   await assert.rejects(fs.stat(stale), { code: 'ENOENT' });
   assert.ok((await fs.stat(fresh)).isDirectory());
+});
+
+test('PUBCMD-CONTROL: пропажа и подмена control сохраняют канал до полного read-back', async (t) => {
+  const box = await publicationBox(t);
+  const index = path.join(box.root, 'api/releases/v1', `${box.channel}.json`);
+  const control = path.join(box.staging, 'control.tar.gz');
+
+  await box.buildStaging();
+  await fs.rm(control);
+  await assert.rejects(execute('bash', ['-c', box.command()]));
+  assert.equal(await fs.readFile(index, 'utf8'), 'старый индекс\n');
+
+  await box.buildStaging();
+  await fs.writeFile(control, 'control-архив!\n');
+  await assert.rejects(execute('bash', ['-c', box.command()]));
+  assert.equal(await fs.readFile(index, 'utf8'), 'старый индекс\n');
+
+  await box.buildStaging();
+  await execute('bash', ['-c', box.command()]);
+  assert.equal(await fs.readFile(index, 'utf8'), 'новый индекс\n');
+  assert.equal(await fs.readFile(path.join(box.root, 'releases', box.version, 'control.tar.gz'), 'utf8'),
+    'control-архив\n');
 });

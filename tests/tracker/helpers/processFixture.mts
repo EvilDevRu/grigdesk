@@ -3,7 +3,6 @@ import { mkdtemp } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import type { TestContext } from 'node:test';
-import { fileURLToPath } from 'node:url';
 
 export interface ProcessResult {
   code: number | null;
@@ -17,9 +16,8 @@ export interface ProcessOptions {
   input?: Uint8Array | string;
   cwd?: string;
   timeoutMs?: number;
+  interrupt?: AbortSignal;
 }
-
-export const SOURCE_MAIN = fileURLToPath(new URL('../../../tracker/src/main.ts', import.meta.url));
 
 /**
  * Запускает исполняемый файл асинхронно и собирает оба потока как Buffer.
@@ -65,7 +63,20 @@ export async function runProcess(
   });
 
   if (options.input !== undefined) {
+    child.stdin?.on('error', (error: NodeJS.ErrnoException) => {
+      if (error.code !== 'EPIPE') {
+        child.kill('SIGKILL');
+      }
+    });
     child.stdin?.end(options.input);
+  }
+
+  const interrupt = () => child.kill('SIGINT');
+
+  options.interrupt?.addEventListener('abort', interrupt, { once: true });
+
+  if (options.interrupt?.aborted) {
+    interrupt();
   }
 
   const timer = setTimeout(() => {
@@ -75,6 +86,7 @@ export async function runProcess(
   try {
     return await done;
   } finally {
+    options.interrupt?.removeEventListener('abort', interrupt);
     clearTimeout(timer);
   }
 }
