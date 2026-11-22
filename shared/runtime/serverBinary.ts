@@ -74,7 +74,10 @@ function sha256Text(value: unknown, field: string): string {
 export function decodeServerBinaryInfo(value: unknown): ServerBinaryInfo {
   const info = decodeInfo(value, 'runtime-info');
 
-  if ((info.runtime.platform === 'darwin') !== (info.runtime.arch === 'arm64')) {
+  // Darwin выпускается только под arm64; x64 — только Linux.
+  // Linux ARM64 допустим наравне с Linux x64 и Darwin arm64.
+  if ((info.runtime.platform === 'darwin' && info.runtime.arch !== 'arm64')
+    || (info.runtime.arch === 'x64' && info.runtime.platform !== 'linux')) {
     invalidMetadata('runtime-info.runtime');
   }
 

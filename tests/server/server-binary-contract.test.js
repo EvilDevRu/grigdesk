@@ -104,11 +104,23 @@ test('SB01: публичная проекция проверяет pin и иск
   }
 
   for (const [key, value] of [
-    ['platform', 'darwin'], ['arch', 'arm64'], ['abi', '127'], ['node', '22.0.0'],
+    ['platform', 'darwin'], ['abi', '127'], ['node', '22.0.0'],
   ]) {
     assert.throws(() => decodeServerBinaryInfo({ ...info, runtime: { ...info.runtime, [key]: value } }), {
       code: 'server_metadata_invalid',
     });
+  }
+
+  // Linux ARM64 и Darwin arm64 допустимы; Darwin x64 и Linux x64→darwin отвергаются.
+  for (const runtime of [
+    { ...info.runtime, arch: 'arm64' },
+    {
+      ...info.runtime,
+      platform: 'darwin',
+      arch: 'arm64',
+    },
+  ]) {
+    assert.doesNotThrow(() => decodeServerBinaryInfo({ ...info, runtime }));
   }
 
   for (const payload of [
