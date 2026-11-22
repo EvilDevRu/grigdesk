@@ -15,7 +15,7 @@ import { freePort } from './pluginBootFixture.js';
 import { relayRelease } from './relayDeploymentRelease.js';
 import { relayDeploymentSsh } from './relayDeploymentSsh.js';
 import { legacyRelay } from './legacyRelay.js';
-import { goCandidate } from '../../helpers/goCandidate.mts';
+import { fixtureGo } from '../../helpers/goBuildFixture.mts';
 
 /**
  * Публичный TEST-NET адрес сохраняется до production VPN-проверки.
@@ -193,7 +193,7 @@ export async function channelFixture(t, options = {}) {
  * Тот же файл будет запущен из физических /opt и /proc временного VPS.
  */
 async function nativeRelease() {
-  const file = goCandidate('grigdesk-relay');
+  const file = fixtureGo('grigdesk-relay');
   const info = JSON.parse(execFileSync(file, ['--runtime-info', '--json'], { encoding: 'utf8' }));
 
   return relayRelease({

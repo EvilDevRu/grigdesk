@@ -141,20 +141,8 @@ test('прошлый no-progress не перебивает свежую оста
 // именно так «маршрут завершён» когда-то показывался как оборванный прогон. Сверяем
 // шаблон в `bin/factory` с тем, что фактически ловит правило.
 test('формат строки движка и правило GrigDesk сходятся', async () => {
-  const root = path.resolve(fileURLToPath(new URL('../..', import.meta.url)));
-  const factory = await fs.readFile(path.join(root, 'engine', 'bin', 'factory'), 'utf8');
-
-  assert.equal(
-    factory.includes('v2_log "${stop_node^^}: маршрут остановлен: ${stop}${stop_suffix}"'),
-    true,
-    'движок больше не пишет узел в строке остановки — правило в stall.js осталось без источника',
-  );
-  assert.equal(
-    factory.includes('stop_suffix=" — $ROUTE_V2_EVIDENCE_STOP_REASON"'),
-    true,
-    'движок больше не дописывает причину сторожа в строку остановки — правило про сторожа осталось без источника',
-  );
-
+  // Go-движок больше не несёт shell-шаблоны остановки в бинарнике; правило проверяем
+  // на фактической строке журнала, которую движок пишет.
   const stall = detectStall({
     registry: stalledRegistry,
     logText: logOf(line('2026-08-27 18:25:32', 'HYPOSKEPTIC: маршрут остановлен: human')),
@@ -245,24 +233,9 @@ test('исчерпание без цифр остаётся исчерпание
   assert.equal(fork.title, 'PLAN: узел вернул решение человеку');
 });
 
-// Формат суффикса принадлежит движку: комментарий узла собирает route-runtime, суффикс
-// строки остановки — `route_v2_stop_line_suffix`. Сверяем оба источника с правилом.
-test('формат исчерпания в движке и правило GrigDesk сходятся', async () => {
-  const root = path.resolve(fileURLToPath(new URL('../..', import.meta.url)));
-  const runtime = await fs.readFile(path.join(root, 'engine', 'lib', 'route-runtime.sh'), 'utf8');
-  const factory = await fs.readFile(path.join(root, 'engine', 'bin', 'factory'), 'utf8');
-
-  assert.equal(
-    runtime.includes('exhausted_reason="исчерпан бюджет повторов: $(_route_v2_runs_phrase "$attempt_no")"'),
-    true,
-    'route-runtime больше не собирает комментарий исчерпания с цифрами — правило осталось без источника',
-  );
-  assert.equal(
-    factory.includes('stop_suffix=$(route_v2_stop_line_suffix "$TASK" "$attempt")'),
-    true,
-    'движок больше не дописывает причину исчерпания в строку остановки — правило осталось без источника',
-  );
-});
+// Проверка формата исчерпания по shell-исходникам (route-runtime.sh и шаблоны в
+// бинарнике) удалена: Go-переход убрал engine/lib/route-runtime.sh, а движок больше
+// не несёт shell-шаблоны. Правило разбора исчерпания покрыто тестами ниже.
 
 // Задачи, остановленные ПРЕЖНИМ движком, несут голое `human`: суффикс с причиной он
 // дописывать ещё не умел. Комментарий узла писался всегда — по нему видно, что вердикта
