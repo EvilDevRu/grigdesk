@@ -223,6 +223,9 @@ for (const provider of ['deepseek', 'glm']) {
           modelRef: { provider: 'test-provider', model },
           messages: [{ role: 'user', text: `legacy-${provider}-first-prompt` }],
           revision: 0,
+          // Без workdir чат резолвится в home и расходится с cwd binding, требуя
+          // подтверждения переноса памяти; фиксируем корень runtime.
+          workdir: { kind: 'path', path: runtime.cwd },
         }
       },
     });
@@ -376,6 +379,7 @@ test('HTTP cutover сохраняет только прежнюю формулу
           modelRef: { provider: 'test-provider', model },
           messages: [],
           revision: 0,
+          workdir: { kind: 'path', path: f.root },
         } },
       });
       await bindings.compareAndSwap({
