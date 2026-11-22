@@ -302,12 +302,19 @@ test('DH-16 дочерние процессы получают общую пап
     credential: { name: 'KEY', value: 'fake' },
   }).GRIGDESK_HOME, '/tmp/data');
 
-  for (const relative of ['runnerControl.ts', 'factoryDebug.ts', 'sandboxSlots.ts',
+  for (const relative of ['factoryDebug.ts', 'sandboxSlots.ts',
     'factoryLaunch.ts', 'showcase/seed.ts']) {
     const source = new URL('../../server/src/lib/' + relative, import.meta.url);
 
     assert.match(readFileSync(source, 'utf8'), /GRIGDESK_HOME/);
   }
+
+  // Runner control после Go-перехода делегирует движку через runRouteEngine,
+  // который и передаёт ребёнку GRIGDESK_HOME (проверяется выше по routeLaunchEnv).
+  const runnerControl = readFileSync(
+    new URL('../../server/src/lib/runnerControl.ts', import.meta.url), 'utf8');
+
+  assert.match(runnerControl, /runRouteEngine/u);
 });
 
 

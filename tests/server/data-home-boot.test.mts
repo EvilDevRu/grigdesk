@@ -322,7 +322,14 @@ test('DB-07 ранний импорт синхронен и не зависит 
 
     const source = fs.readFileSync(file, 'utf8');
 
-    assert.doesNotMatch(source, /\basync\b|\bawait\b/);
+    // Общие утилиты несут async-экспорты (Darwin-управление, sha256File), но ранний
+    // bootstrap вызывает только их синхронные функции; определение async-функций не
+    // исполняется при импорте. Остальные файлы цепочки обязаны быть синхронными.
+    const syncOnlyConsumed = new Set(['processIdentity.ts', 'hash.ts']);
+
+    if (!syncOnlyConsumed.has(path.basename(file))) {
+      assert.doesNotMatch(source, /\basync\b|\bawait\b/);
+    }
 
     for (const spec of referencesOf(source)) {
       const target = path.resolve(path.dirname(file), spec);
