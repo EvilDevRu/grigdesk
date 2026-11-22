@@ -468,7 +468,8 @@ export async function verifyFirstLaunch(
   try {
     while (!log.includes('grigdesk_windows_local_ready')) {
       if (launchError || child.exitCode !== null || Date.now() >= deadline) {
-        throw launchError ?? new Error('windows_verify_window_session_not_ready');
+        throw launchError ?? new Error('windows_verify_window_session_not_ready'
+          + ` exit=${child.exitCode} signal=${child.signalCode} log=${log.slice(-600)}`);
       }
 
       if (Date.now() >= nextReport) {
