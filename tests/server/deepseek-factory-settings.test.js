@@ -325,105 +325,10 @@ test('Factory только ENOENT считает отсутствием prefs; �
   await assert.rejects(prepare());
 });
 
-/**
- * Terminal status проходит через тот же настоящий MCP и host consumer для обеих поставок.
- * Доставка runtime не меняет run identity, capability или проверку единственного результата.
- */
-function registerFactoryStatus(delivery) {
-  test(`${delivery}: настоящий compiled Factory завершает узел через host status MCP`, async (t) => {
-    const f = await fixture(t);
-    const candidate = await ensureTestDeepSeekBinary();
-    const state = path.join(f.root, 'state');
-    const runDir = path.join(state, 'logs/runs/t123/BUILD/compiled-status');
-    const requestDir = path.join(runDir, 'control-requests');
-    const env = {
-      PATH: process.env.PATH,
-      HOME: f.root,
-      FACTORY_HOME: path.join(REPO_ROOT, 'engine'),
-      FACTORY_STATE: state,
-      STATE_DIR: state,
-      FACTORY_TESTING: '1',
-      DEEPSEEK_API_KEY: 'grigdesk-loopback-only',
-      GRIGDESK_PROVIDER_PREFS_PATH: f.prefsPath,
-      GRIGDESK_DEEPSEEK_RUNTIME_MODE: delivery,
-      FACTORY_RUN_TASK: '123',
-      FACTORY_RUN_STAGE: 'BUILD',
-      FACTORY_RUN_ID: 'compiled-status',
-      FACTORY_RUN_EPOCH: '1',
-      FACTORY_STATUS_MODE: 'request',
-      FACTORY_STATUS_REQUEST_DIR: requestDir,
-    };
-    const hostScript = `
-      source "$FACTORY_HOME/lib/pipeline-store.sh"
-      source "$FACTORY_HOME/lib/run-state.sh"
-      source "$FACTORY_HOME/lib/status-request.sh"
-    `;
-
-    await fs.mkdir(requestDir, { recursive: true });
-    await exec('bash', ['-c', hostScript + `
-      pipeline_store_route_init 123 BUILD
-      factory_control_init fixture-control
-      run_state_begin 123 BUILD compiled-status 1 fixture-status-token
-    `], { env });
-
-    const mock = await startDeepSeekLoopback({
-      respond: (payload, index) => {
-        if (index === 0) {
-          const tool = payload.tools.find((entry) => entry.function.name.includes('stage_result'));
-
-          assert.ok(tool, 'host status tool объявлен настоящим MCP client');
-
-          return {
-            deltas: [{ tool_calls: [{
-              index: 0,
-              id: 'status',
-              type: 'function',
-              function: {
-                name: tool.function.name,
-                arguments: JSON.stringify({ result: 'done', comment: 'compiled host status' }),
-              },
-            }] }],
-            finishReason: 'tool_calls',
-          };
-        }
-
-        return { deltas: [{ content: 'готово' }], finishReason: 'stop' };
-      },
-    });
-
-    t.after(() => mock.stop());
-    await fs.writeFile(path.join(runDir, 'prompt.md'), 'use host stage_result once', { mode: 0o600 });
-    await runDeepSeekFactory([
-      '--bin', candidate.binary, '--cache-dir', candidate.cacheDir,
-      '--cwd', f.root,
-      '--run-dir', runDir, '--runtime-home', path.join(runDir, 'runtime'),
-      '--prompt-file', path.join(runDir, 'prompt.md'),
-      '--model', '["deepseek-official","deepseek-v4-flash"]', '--mode', 'workspace-write', '--effort', 'off',
-    ], env, {
-      emit: () => {},
-      runTurn: (options) => runDeepSeekTurn({
-        ...options,
-        deps: {
-          prepareLaunch: async (args) => {
-            return factoryLoopbackLaunch(args, mock.endpoint);
-          },
-        },
-      }),
-    });
-
-    assert.equal((await fs.readdir(requestDir)).filter((name) => name.endsWith('.request')).length, 1);
-
-    const { stdout } = await exec('bash', ['-c', hostScript + `
-    status_request_consume_all 123 BUILD compiled-status 1 fixture-status-token "$FACTORY_STATUS_REQUEST_DIR"
-      pipeline_store_get 123 BUILD
-      pipeline_store_get 123 BUILD_COMMENT
-    `], { env });
-
-    assert.equal(stdout.trim(), 'done\ncompiled host status');
-  });
-}
-
-registerFactoryStatus('binary');
+// Проверка host status MCP для compiled Factory удалена вместе с shell-движком
+// (engine/lib/pipeline-store.sh, run-state.sh, status-request.sh): Go-переход
+// 3510328a1 убрал эти библиотеки, а run identity/terminal status покрыты
+// Go-тестами фабрики и deepseek-binary-cutover-sessions.
 
 test('Factory env по умолчанию закрепляет binary без embedded roots поверх extra env', () => {
   const config = {

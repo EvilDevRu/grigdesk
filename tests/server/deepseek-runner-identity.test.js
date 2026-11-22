@@ -11,33 +11,15 @@ import { routeFailure } from '../../server/src/lib/factoryRouteCli.ts';
 import { resolveDeepSeekRuntimeAsync } from '../../server/src/lib/deepseek/runtimeProcess.ts';
 import { ensureTestDeepSeekBinaryPair } from '../helpers/deepseekBinary.mts';
 import { prepareDeepSeekLaunch } from '../../server/src/lib/deepseek/runtime.ts';
-import { writeDeepSeekBinaryStub } from '../helpers/deepseekBinaryStub.mts';
 import { runtimeInfoFixture } from '../helpers/deepseekMetadataFixture.mts';
 
 const exec = promisify(execFile);
 // Корень репозитория не зависит от cwd: `npm test` запускает набор из server/.
 const ROOT = path.resolve(fileURLToPath(new URL('../..', import.meta.url)));
 
-test('binary Factory: coverage parser сохраняет packageId и у стабильной upstream версии', async (t) => {
-  const info = runtimeInfoFixture();
-  const { binary, root } = await writeDeepSeekBinaryStub(t,
-    `process.stdout.write(${JSON.stringify(JSON.stringify(info))});`);
-  const env = {
-    PATH: process.env.PATH,
-    HOME: root,
-    FACTORY_HOME: path.join(ROOT, 'engine'),
-  };
-  const { stdout } = await exec(process.execPath, [path.join(ROOT, 'server/scripts/deepseekRuntimeInfo.mts'),
-    '--binary', binary, '--cache-dir', path.join(root, 'cache'), '--probe'], { env });
-  const version = stdout.trim();
-  const parsed = await exec('bash', ['-c', `
-    source "$FACTORY_HOME/lib/multi-runner.sh"
-    _multi_probe_version "$1"
-  `, 'fixture', version], { env });
-
-  assert.match(version, new RegExp(info.packageId));
-  assert.equal(parsed.stdout.trim(), version, 'Общий parser не обрезает packageId после stable version');
-});
+// Coverage-parser проверка удалена: она сорсила engine/lib/multi-runner.sh
+// (_multi_probe_version), удалённый Go-переходом 3510328a1. Парсинг версии теперь
+// выполняет deepseekRuntimeInfo.mts и проверяется остальными probe-тестами набора.
 
 /**
  * Настоящая пара ELF проверяет Factory без model call и без доступного legacy current.
@@ -127,35 +109,9 @@ test('binary Factory: descriptor равен чату, probe/catalog/coverage в�
   assert.ok(catalogB.every((row) => row.split('\t').slice(9).every((value) => value === b.runnerVersion)));
 });
 
-test('binary Factory: dispatcher запрещает старый probe после A→B без failover', {
-  timeout: 900000,
-}, async (t) => {
-  const f = await binaryFixture(t);
-  const config = path.join(f.root, 'runners.env');
-
-  await fs.writeFile(config, 'MODEL_DEFAULT_DEEPSEEK_FAMILY=default\n');
-
-  const { stdout, stderr } = await f.run(`
-    source "$FACTORY_HOME/lib/multi-runner.sh"
-    runner_registry_add deepseek "$FACTORY_HOME/lib/runners/deepseek.sh"
-    config_file=$1
-    multi_runner_config_file() { printf '%s\\n' "$config_file"; }
-    MULTI_STAGE=BUILD
-    MULTI_CATALOG_ROOT="$PWD/catalog"
-    mkdir "$MULTI_CATALOG_ROOT"
-    declare -A MULTI_PROBE_READY=() MULTI_PROBE_VERSION=() MULTI_PLAN_LEVEL=() MULTI_PLAN_DEGRADED=()
-    _multi_resolve deepseek || exit 51
-    [[ "$DISPATCH_RUNNER_VERSION" == *"$2"* ]] || exit 52
-    ln -s "$3" "$GRIGDESK_DEEPSEEK_BIN.next"
-    mv "$GRIGDESK_DEEPSEEK_BIN.next" "$GRIGDESK_DEEPSEEK_BIN"
-    _multi_resolve deepseek && exit 53
-    [[ "$DISPATCH_RESOLVE_RESULT" == runtime_changed ]] || exit 54
-    printf '%s\\n' "$DISPATCH_RESOLVE_RESULT"
-  `, [config, f.pair.a.info.packageId, f.pair.b.binary]);
-
-  assert.equal(stdout.trim(), 'runtime_changed');
-  assert.match(stderr, /FACTORY_ERROR=runtime_changed/u);
-});
+// Dispatcher-проверка старого probe после A→B удалена: она использовала внутренности
+// shell-движка (multi-runner.sh, MULTI_PROBE_*, _multi_resolve), удалённые Go-переходом.
+// Отказ runtime_changed при смене binary покрыт chat-runtime-binding и тестом ниже.
 
 test('binary Factory: служебный Harness probe передаёт cache/prefix и завершает ACP без prompt', {
   timeout: 900000,
@@ -245,54 +201,10 @@ async function fixture(t) {
   };
 }
 
-test('binary metadata probe/catalog/version parser сохраняют полный suffix и exact min/max', async (t) => {
-  const f = await fixture(t);
-  const { stdout } = await f.run(`
-    source "$FACTORY_HOME/lib/runners/deepseek.sh"
-    source "$FACTORY_HOME/lib/runners/catalog.sh"
-    version=$(runner_deepseek_probe) || exit
-    [[ "$version" == "$1" ]] || exit 41
-    parsed=$(grep -oE '[0-9]+([.][0-9]+)+(-[0-9A-Za-z.-]+)?([+][0-9A-Za-z.-]+)?' <<<"$version")
-    [[ "$parsed" == "$version" ]] || exit 42
-    mkdir snapshot
-    runner_deepseek_catalog >snapshot/models.tsv || exit
-    awk -F '\t' -v version="$version" \
-      'NF != 11 || $10 != version || $11 != version {exit 43}' snapshot/models.tsv
-    catalog_resolve snapshot deepseek default latest auto "$version" || exit
-    catalog_resolve snapshot deepseek default latest auto "$2" >/dev/null && exit 44
-    exit 0
-  `, [f.a.runnerVersion, f.b.runnerVersion]);
-
-  assert.match(stdout, /deepseek-v4-flash/);
-});
-
-test('долгоживущий dispatcher не использует probe A для нового узла B', async (t) => {
-  const f = await fixture(t);
-  const config = path.join(f.root, 'runners.env');
-
-  await fs.writeFile(config, 'MODEL_DEFAULT_DEEPSEEK_FAMILY=default\n');
-
-  const { stdout, stderr } = await f.run(`
-    source "$FACTORY_HOME/lib/multi-runner.sh"
-    runner_registry_add deepseek "$FACTORY_HOME/lib/runners/deepseek.sh"
-    multi_runner_config_file() { printf '%s\n' "$1"; }
-    config_file=$1
-    multi_runner_config_file() { printf '%s\n' "$config_file"; }
-    MULTI_STAGE=BUILD
-    MULTI_CATALOG_ROOT="$PWD/catalog"
-    mkdir "$MULTI_CATALOG_ROOT"
-    declare -A MULTI_PROBE_READY=() MULTI_PROBE_VERSION=() MULTI_PLAN_LEVEL=() MULTI_PLAN_DEGRADED=()
-    _multi_resolve deepseek || exit 51
-    [[ "$DISPATCH_RUNNER_VERSION" == "$2" ]] || exit 52
-    ln -sfn builds/B "$3/current"
-    _multi_resolve deepseek && exit 53
-    [[ "$DISPATCH_RESOLVE_RESULT" == runtime_changed ]] || exit 54
-    printf '%s\n' "$DISPATCH_RESOLVE_RESULT"
-  `, [config, f.a.runnerVersion, f.runtimeRoot]);
-
-  assert.equal(stdout.trim(), 'runtime_changed');
-  assert.match(stderr, /FACTORY_ERROR=runtime_changed/);
-});
+// Metadata probe/catalog/version parser и долгоживущий dispatcher удалены: они
+// сорсили shell-адаптеры engine/lib/runners/*.sh и multi-runner.sh (MULTI_PROBE_*,
+// _multi_resolve, catalog_resolve), удалённые Go-переходом 3510328a1. Probe версии
+// и catalog покрыты descriptor-тестом выше и Go-тестами фабрики.
 
 test('runtime_changed остаётся отдельным понятным отказом route hash', () => {
   const failure = routeFailure('FACTORY_ERROR=runtime_changed RUNNERS=deepseek');
@@ -301,82 +213,10 @@ test('runtime_changed остаётся отдельным понятным от�
   assert.match(failure.message, /runtime|сборк/i);
 });
 
-test('новая сборка DeepSeek в резерве обновляет host coverage, узел Claude продолжает', async (t) => {
-  const f = await fixture(t);
-  const profiles = path.join(f.root, 'profiles');
-  const config = path.join(profiles, 'fixture/runners.env');
-  const bin = path.join(f.root, 'bin');
-
-  // Claude CLI нужен preflight только как версия; prompt этот fixture не исполняет.
-  await fs.mkdir(bin);
-  await fs.writeFile(path.join(bin, 'claude'), '#!/bin/sh\nprintf "2.1.220 (Claude Code)\\n"\n',
-    { mode: 0o755 });
-  await fs.mkdir(path.dirname(config), { recursive: true });
-  await fs.writeFile(config, [
-    'RUNNERS_SCHEMA=1', 'CONFIG_REVISION=1', 'RUNNERS_COVERAGE=required',
-    'PROJECT_RUNNER_PRIMARY=claude', 'PROJECT_RUNNER_FAILOVER=deepseek',
-    'MODEL_DEFAULT_DEEPSEEK_FAMILY=default', '',
-  ].join('\n'));
-
-  const { stdout, stderr } = await f.run(`
-    export FACTORY_PROFILES_DIR="$1"
-    PROFILE_NAME=fixture
-    source "$FACTORY_HOME/lib/profile-preflight.sh"
-    flog() { printf '%s\\n' "$*" >>"$PWD/flog"; }
-    profile_runner_host_preflight fixture || exit 61
-    host="$STATE_DIR/coverage/fixture/host.env"
-    [[ "$(coverage_artifact_get "$host" RUNTIME_VERSION_deepseek)" == "$3" ]] || exit 62
-    [[ -z "$(coverage_artifact_get "$host" RUNTIME_VERSION_claude)" ]] || exit 63
-    _multi_require_coverage 1 BUILD "$2" claude deepseek || exit 64
-    [[ ! -e flog ]] || exit 65
-    ln -sfn builds/B "$4/current"
-    _multi_require_coverage 1 BUILD "$2" claude deepseek || exit 66
-    [[ "$(coverage_artifact_get "$host" RUNTIME_VERSION_deepseek)" == "$5" ]] || exit 67
-    grep -q 'сменилась сборка' flog || exit 68
-    ln -sfn builds/missing "$4/current"
-    _multi_require_coverage 1 BUILD "$2" claude deepseek || exit 69
-    [[ "$(coverage_artifact_get "$host" PROVIDER_deepseek)" == unavailable ]] || exit 70
-    [[ "$(coverage_artifact_get "$host" PROVIDER_claude)" == ready ]] || exit 71
-    _multi_require_coverage 1 BUILD "$2" deepseek '' && exit 72
-    runner_transition_allowed preflight runtime_changed auto 0 && exit 73
-    printf 'refreshed-then-blocked\\n'
-  `, [profiles, config, f.a.runnerVersion, f.runtimeRoot, f.b.runnerVersion], {
-    PATH: `${bin}:${process.env.PATH}`,
-  });
-
-  assert.equal(stdout.trim(), 'refreshed-then-blocked');
-  assert.doesNotMatch(stderr, /FACTORY_ERROR=runtime_changed/);
-});
-
-test('отказ каталога без смены сборки сохраняет invalid_config и route_unavailable', async (t) => {
-  const f = await fixture(t);
-  const config = path.join(f.root, 'runners.env');
-
-  const { stdout, stderr } = await f.run(`
-    source "$FACTORY_HOME/lib/multi-runner.sh"
-    runner_registry_add deepseek "$FACTORY_HOME/lib/runners/deepseek.sh"
-    config_file=$1
-    multi_runner_config_file() { printf '%s\\n' "$config_file"; }
-    MULTI_STAGE=BUILD
-    MULTI_CATALOG_ROOT="$PWD/catalog"
-    mkdir "$MULTI_CATALOG_ROOT"
-    declare -A MULTI_PROBE_READY=() MULTI_PROBE_VERSION=() MULTI_PLAN_LEVEL=() MULTI_PLAN_DEGRADED=()
-    printf 'MODEL_DEFAULT_DEEPSEEK_EXACT=["deepseek-official","missing"]\\n' >"$config_file"
-    _multi_resolve deepseek && exit 81
-    printf '%s\\n' "$DISPATCH_RESOLVE_RESULT"
-    printf 'MODEL_DEFAULT_DEEPSEEK_FAMILY=default\\n' >"$config_file"
-    _multi_resolve deepseek || exit 82
-    printf 'MODEL_DEFAULT_DEEPSEEK_EXACT=["deepseek-official","missing"]\\n' >"$config_file"
-    _multi_resolve deepseek && exit 83
-    printf '%s\\n' "$DISPATCH_RESOLVE_RESULT"
-    printf 'MODEL_DEFAULT_DEEPSEEK_FAMILY=missing\\n' >"$config_file"
-    _multi_resolve deepseek && exit 84
-    printf '%s\\n' "$DISPATCH_RESOLVE_RESULT"
-  `, [config]);
-
-  assert.deepEqual(stdout.trim().split('\n'), ['invalid_config', 'invalid_config', 'route_unavailable']);
-  assert.doesNotMatch(stderr, /runtime_changed/);
-});
+// Проверки host coverage при смене сборки и отказа каталога удалены: они сорсили
+// engine/lib/profile-preflight.sh, coverage.sh и multi-runner.sh (_multi_require_coverage,
+// coverage_artifact_get, _multi_resolve), удалённые Go-переходом 3510328a1. Coverage и
+// invalid_config/route_unavailable теперь покрыты Go-тестами фабрики и route-наборами.
 
 test('смена binary после preflight запрещает рабочий spawn; missing ELF не ищет PATH dsh', async (t) => {
   const f = await fixture(t);
