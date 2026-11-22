@@ -91,6 +91,14 @@ jobs:
         run: |
           test -n "$RELEASE_SIGNING_KEY"
           node tools/ci/buildStableNative.mts linux-arm64 probe-plan.json linux-arm64-build
+      - name: Журналы smoke при отказе сборки
+        if: ${{ failure() }}
+        run: |
+          for log in .installed-release-*/build/*smoke.log; do
+            [ -f "$log" ] || continue
+            echo "=== $log ==="
+            tail -n 60 "$log"
+          done
       - name: Нативная установка и identity сервера
         run: |
           node tools/ci/verifyStableNative.mts linux-arm64 probe-plan.json linux-arm64-build linux-arm64-verified
