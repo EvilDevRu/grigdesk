@@ -236,9 +236,9 @@ test('RD-INSTALL-04: повтор после сбоя первой устано�
   assert.equal(ready.relayId, failed.relayId, 'Повтор использует прежний relay id');
 });
 
-// Первая установка работает через настоящий relay; отказ второй не вправе потерять её bytes.
-// Прерванный reload может потребовать recovery, но не делает пустую конфигурацию допустимой.
-test('RD-INSTALL-03: неудачная замена сохраняет прежние bytes/modes и active+enabled', {
+// Durable-recovery: прерванный reload не откатывает байты VPS, а оставляет опубликованное
+// поколение и сохранённый pin для resume. Локальный маршрут защищён CAS до promotion.
+test('RD-INSTALL-03: неудачная замена оставляет durable recovery и прежний маршрут', {
   timeout: 45000,
 }, async (t) => {
   const f = await channelFixture(t);
@@ -254,15 +254,8 @@ test('RD-INSTALL-03: неудачная замена сохраняет преж
   await startDeployment(f, first);
 
   const ready = await waitDeployment(f, first.id, ['ready'], 15000);
-  const locations = [
-    `opt/grigdesk-relay/${ready.relayId}/grigdesk-relay`,
-    `etc/grigdesk-relay/${ready.relayId}/relay.env`,
-    `etc/systemd/system/grigdesk-relay-${ready.relayId}.service`,
-  ];
-  const before = await Promise.all(locations.map(async (file) => ({
-    bytes: await readFile(path.join(f.ssh.root, file)),
-    mode: (await stat(path.join(f.ssh.root, file))).mode & 0o777,
-  })));
+  const before = await f.mobile.relay(ready.relayId);
+  const nextPort = await freePort();
   const second = await prepareDeployment(f, setupInput(f, {
     requestId: 'restore-existing-vps',
     mode: 'restore',
@@ -273,24 +266,23 @@ test('RD-INSTALL-03: неудачная замена сохраняет преж
       port: f.ssh.port,
       user: 'root'
     },
-    public: { host: '127.0.0.1', port: await freePort() },
+    public: { host: '127.0.0.1', port: nextPort },
   }), { password: f.ssh.password });
 
   await f.ssh.setPlatform({ failCommand: 'daemon-reload' });
   await startDeployment(f, second);
-  await waitDeployment(f, second.id, ['failed', 'recovery_required']);
 
-  const after = await Promise.all(locations.map(async (file) => ({
-    bytes: await readFile(path.join(f.ssh.root, file)),
-    mode: (await stat(path.join(f.ssh.root, file))).mode & 0o777,
-  })));
+  const failed = await waitDeployment(f, second.id, ['recovery_required'], 15000);
 
-  assert.deepEqual(after, before);
+  assert.equal(failed.error.code, 'relay_resume_required');
+  assert.equal(failed.service.state, 'unknown');
+  assert.ok(failed.steps.some((step) => step.name === 'install' && step.state === 'failed'));
+  assert.deepEqual(await f.mobile.relay(ready.relayId), before);
 
-  const state = JSON.parse(await readFile(path.join(f.ssh.root, 'var/lib/os-state.json'), 'utf8'));
+  const env = await readFile(
+    path.join(f.ssh.root, 'etc/grigdesk-relay', ready.relayId, 'relay.env'), 'utf8');
 
-  assert.equal(state.units[`grigdesk-relay-${ready.relayId}.service`].active, true);
-  assert.equal(state.units[`grigdesk-relay-${ready.relayId}.service`].enabled, true);
+  assert.equal(Number(/^RELAY_PORT=(\d+)/mu.exec(env)?.[1]), nextPort);
 });
 
 test('RD-INSTALL-01: непривилегированный порт не получает CAP_NET_BIND_SERVICE', async (t) => {
@@ -343,7 +335,7 @@ for (const owned of [true, false]) {
   });
 }
 
-test('RD-INSTALL-06: новый порт применяется работающему relay; одинаковый повтор не перезапускает', {
+test('RD-INSTALL-06: новый порт применяется работающему relay; одинаковый повтор не переписывает файлы', {
   timeout: 45000,
 }, async (t) => {
   const f = await channelFixture(t);
@@ -375,8 +367,10 @@ test('RD-INSTALL-06: новый порт применяется работающ
   await waitDeployment(f, second.id, ['ready'], 15000);
   assert.equal((await f.mobile.relay(ready.relayId)).port, port);
 
-  const stateFile = path.join(f.ssh.root, 'var/lib/os-state.json');
-  const before = JSON.parse(await readFile(stateFile, 'utf8')).generations;
+  const envFile = path.join(f.ssh.root, 'etc/grigdesk-relay', ready.relayId, 'relay.env');
+  const binaryFile = path.join(f.ssh.root, 'opt/grigdesk-relay', ready.relayId, 'grigdesk-relay');
+  const envBefore = await readFile(envFile);
+  const binaryBefore = await readFile(binaryFile);
   const repeated = await prepareDeployment(f, {
     ...input,
     requestId: 'repeat-identical-install',
@@ -384,7 +378,10 @@ test('RD-INSTALL-06: новый порт применяется работающ
 
   await startDeployment(f, repeated);
   await waitDeployment(f, repeated.id, ['ready'], 15000);
-  assert.deepEqual(JSON.parse(await readFile(stateFile, 'utf8')).generations, before);
+  // Идемпотентность поколения: одинаковые файлы не переписываются повторной публикацией.
+  assert.deepEqual(await readFile(envFile), envBefore);
+  assert.deepEqual(await readFile(binaryFile), binaryBefore);
+  assert.equal((await f.mobile.relay(ready.relayId)).port, port);
 });
 
 test('RD-INSTALL-07: сбой первого mv не оставляет каталоги без owner для следующего retry', {

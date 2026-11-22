@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { readdir, stat } from 'node:fs/promises';
+import { readdir } from 'node:fs/promises';
 import path from 'node:path';
 import test from 'node:test';
 
@@ -8,7 +8,10 @@ import { deploymentFixture, prepareDeployment, setupInput, startDeployment, wait
 import { relayDeploymentSsh } from './helpers/relayDeploymentSsh.js';
 import { relayRelease } from './helpers/relayDeploymentRelease.js';
 
-test('RD-ROLLBACK: неудачный shell rollback оставляет old-* и достоверный recovery_required', {
+// Durable-recovery: сбой remote-команды при замене не выдаёт ложный ready и не откатывает
+// байты shell-скриптом. Прежний маршрут защищён CAS, а staging не переживает попытку —
+// резерв поколения хранится в durable pin, а не в old-* файлах временного каталога.
+test('RD-RECOVERY: сбой remote-команды оставляет достоверный recovery_required', {
   timeout: 45000,
 }, async (t) => {
   const ssh = await relayDeploymentSsh(t);
@@ -36,26 +39,25 @@ test('RD-ROLLBACK: неудачный shell rollback оставляет old-* и
   const before = await f.mobile.relay(ready.relayId);
   const next = await prepareDeployment(f, {
     ...input,
-    requestId: 'restart-and-rollback-stop-failed',
+    requestId: 'restore-remote-command-failed',
     mode: 'restore',
     name: undefined,
     relayId: ready.relayId,
     public: { host: '127.0.0.1', port: 5443 },
   }, { password: ssh.password });
 
-  await ssh.setPlatform({ failCommand: 'restart', failStop: true });
+  await ssh.setPlatform({ failCommand: 'daemon-reload' });
   await startDeployment(f, next);
 
-  const failed = await waitDeployment(f, next.id, ['recovery_required', 'failed'], 15000);
+  const failed = await waitDeployment(f, next.id, ['recovery_required'], 15000);
 
   assert.equal(failed.state, 'recovery_required');
-  assert.equal(failed.error.code, 'remote_rollback_failed');
+  assert.equal(failed.error.code, 'relay_resume_required');
   assert.equal(failed.service.state, 'unknown');
   assert.deepEqual(await f.mobile.relay(ready.relayId), before);
 
   const stages = await readdir(path.join(ssh.root, 'tmp'));
-  const backup = stages.find((entry) => entry.startsWith('grigdesk-relay-'));
 
-  assert.ok(backup, 'Неподтверждённый rollback не удаляет staging с резервной копией');
-  assert.ok((await stat(path.join(ssh.root, 'tmp', backup, 'old-env'))).size > 0);
+  assert.equal(stages.some((entry) => entry.startsWith('grigdesk-relay-')), false,
+    'Staging не переживает попытку: резерв поколения хранится в durable pin');
 });
