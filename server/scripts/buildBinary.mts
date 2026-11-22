@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 
 import { runDarwinBuildProcess } from '../../cli/darwinBuildProcesses.ts';
 import {
-  readTargetNodeRuntime, SEA_FUSE, seaHostTarget, serverNodeRuntimeManifest,
+  readTargetNodeRuntime, SEA_FUSE, serverSeaHostTarget, serverNodeRuntimeManifest,
 } from '../../shared/node/nodeRuntime.ts';
 import { injectSea } from '../../shared/node/seaBuild.ts';
 import {
@@ -152,7 +152,7 @@ export async function loggedStage(input: {
  */
 async function buildBinaryWithSignal(options: BinaryBuildOptions, signal?: AbortSignal) {
   const streamOutput = process.env.GRIGDESK_CTL_BUILD_OBSERVED === '1';
-  const target = seaHostTarget();
+  const target = serverSeaHostTarget();
   const manifestPath = path.join(sourceRoot, serverNodeRuntimeManifest(target));
   const runtime = await readTargetNodeRuntime(manifestPath, target);
   const archive = await localRuntimeArchive(options.cacheDir, runtime);

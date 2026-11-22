@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createPublicKey } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs/promises';
 import os from 'node:os';
@@ -103,7 +104,7 @@ test('RP-2: без окружения отказ с перечнем перем�
 
 const { installedBuild, loadInstalledModule } = await import('../helpers/installedBuildFixture.mjs');
 const { isolatedEnvironment } = await import('../helpers/installedUpdateFixture.mjs');
-const { signedMacIndex } = await import('../helpers/releaseV2Fixture.mjs');
+const { signedIndex, signedMacIndex } = await import('../helpers/releaseV2Fixture.mjs');
 const { compileHelpSources } = await import('../../shared/node/helpSources.ts');
 const { HELP_LOCALES, helpResourceFile } = await import('../../shared/help/helpContracts.ts');
 
@@ -111,7 +112,7 @@ const { HELP_LOCALES, helpResourceFile } = await import('../../shared/help/helpC
  * Синтетический builder выдаёт исполняемый серверный контракт, содержащий настоящий help.
  * Publisher запускает его и проверяет корпус; SSH/SCP исполняют те же команды в локальном site-root.
  */
-async function installedPublicationFixture(t, channel) {
+async function installedPublicationFixture(t, channel, siteTransaction = false) {
   const temporary = await fs.mkdtemp(path.join(os.tmpdir(), 'installed-site-'));
   const bins = path.join(temporary, 'bin');
   const site = path.join(temporary, 'site');
@@ -215,8 +216,13 @@ async function installedPublicationFixture(t, channel) {
       'OTHER');
   }
 
+  // Эта транзакционная фикстура не заявляет нативную приёмку на испытательных платформах.
+  // Формат и ворота Go proof отдельно проверяет go-release-evidence.test.mts.
+  const stubs = siteTransaction ? {
+    'tools/verifyGoReleaseEvidence.mts': 'export async function verifyGoReleaseEvidence() {}',
+  } : {};
   const { publishInstalledRelease } = await loadInstalledModule(t, 'tools/installedPublication.mts',
-    built.signer.publicKeyPem);
+    built.signer.publicKeyPem, stubs);
   const targets = [site, mirror].map((dir, index) => ({
     host: index ? 'mirror' : 'primary',
     user: 'fixture',
@@ -239,10 +245,24 @@ async function installedPublicationFixture(t, channel) {
 
 for (const channel of ['release', 'dev']) {
   test(`PUB-CHANNELS: ${channel}, partial upload/retry, immutable site и отказ зеркала`, async (t) => {
-    const box = await installedPublicationFixture(t, channel);
+    const box = await installedPublicationFixture(t, channel, true);
     const latest = path.join(box.site, `api/releases/v1/${channel}.json`);
     const other = path.join(box.site, `api/releases/v1/${channel === 'dev' ? 'release' : 'dev'}.json`);
     const version = box.built.index.latest.payload.version;
+    const keys = {
+      privateKey: box.built.signer.privateKey,
+      publicKey: createPublicKey(box.built.signer.privateKey),
+    };
+    const older = signedIndex({
+      channel,
+      version: channel === 'release' ? '0.2.0' : '0.2.0-dev.2',
+      keys,
+    });
+    const olderBytes = JSON.stringify(older.index);
+
+    for (const site of [box.site, box.mirror]) {
+      await fs.writeFile(path.join(site, 'api/releases/v1', `${channel}.json`), olderBytes);
+    }
 
     await fs.writeFile(path.join(box.built.directory, `grigdesk_${version}_amd64.deb`),
       'DEB-PAYLOAD', { mode: 0o644 });
@@ -253,12 +273,12 @@ for (const channel of ['release', 'dev']) {
     await fs.rm(translatedSite);
     await assert.rejects(box.publishInstalledRelease(box.built.directory, box.targets),
       /help_site_mismatch/u);
-    assert.equal(await fs.readFile(latest, 'utf8'), 'OLD');
+    assert.equal(await fs.readFile(latest, 'utf8'), olderBytes);
     await fs.writeFile(translatedSite, translatedBytes);
 
     isolatedEnvironment(t, { PUBLISH_FAIL_SCP: '1' });
     await assert.rejects(box.publishInstalledRelease(box.built.directory, box.targets));
-    assert.equal(await fs.readFile(latest, 'utf8'), 'OLD');
+    assert.equal(await fs.readFile(latest, 'utf8'), olderBytes);
     delete process.env.PUBLISH_FAIL_SCP;
 
     await box.publishInstalledRelease(box.built.directory, box.targets);
@@ -295,6 +315,16 @@ for (const channel of ['release', 'dev']) {
     isolatedEnvironment(t, { PUBLISH_FAIL_MIRROR: '1' });
     await box.publishInstalledRelease(box.built.directory, box.targets);
     assert.deepEqual(JSON.parse(await fs.readFile(latest, 'utf8')), box.built.index);
+
+    if (channel === 'release') {
+      const newer = signedIndex({ version: '9.0.0', keys });
+      const newerBytes = JSON.stringify(newer.index);
+
+      await fs.writeFile(latest, newerBytes);
+      await assert.rejects(box.publishInstalledRelease(box.built.directory, box.targets),
+        /release_site_downgrade_forbidden/u);
+      assert.equal(await fs.readFile(latest, 'utf8'), newerBytes);
+    }
   });
 }
 

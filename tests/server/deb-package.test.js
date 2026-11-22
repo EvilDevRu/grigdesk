@@ -27,6 +27,11 @@ async function artifactsFixture(t, channel = 'release') {
   await fs.writeFile(path.join(directory, 'grigdesk-install'),
     '#!/bin/sh\n: заглушка installer\n', { mode: 0o755 });
 
+  for (const file of ['grigdesk-install.sha256', 'grigdesk-install.sig',
+    'grigdesk-maintenance.gz', 'desktop.tar.gz', 'server.tar.gz', 'control.tar.gz']) {
+    await fs.writeFile(path.join(directory, file), `fixture ${file}\n`);
+  }
+
   return { fixture, directory };
 }
 
@@ -72,10 +77,47 @@ test('DEB-2: бутстрап ставит комплект в пределах 
   const installed = await fs.readFile(path.join(tree, 'usr/lib/grigdesk/grigdesk-install'), 'utf8');
 
   assert.match(installed, /заглушка/);
+  assert.deepEqual(await fs.readdir(path.join(tree, 'usr/lib/grigdesk')), ['grigdesk-install']);
 
   const desktop = await fs.readFile(path.join(tree, 'usr/share/applications/grigdesk.desktop'), 'utf8');
 
   assert.match(desktop, /Exec=\/usr\/bin\/grigdesk/);
+});
+
+test('DEB-OFFLINE: пакет несёт локальный индекс и байты двух компонентов', async (t) => {
+  const { directory } = await artifactsFixture(t);
+  const tree = await fs.mkdtemp(path.join(os.tmpdir(), 'deb-offline-'));
+
+  t.after(() => fs.rm(tree, { recursive: true, force: true }));
+
+  const deb = await buildDeb({
+    root: repository(),
+    artifacts: directory,
+    offline: true,
+  });
+
+  await execute('dpkg-deb', ['-x', deb, tree]);
+
+  const payload = path.join(tree, 'usr/lib/grigdesk');
+  const names = [
+    'grigdesk-install', 'grigdesk-install.sha256', 'grigdesk-install.sig',
+    'grigdesk-maintenance.gz', 'release.json', 'desktop.tar.gz', 'server.tar.gz', 'control.tar.gz',
+  ];
+
+  assert.deepEqual((await fs.readdir(payload)).sort(), [...names].sort());
+
+  for (const name of names) {
+    assert.deepEqual(await fs.readFile(path.join(payload, name)),
+      await fs.readFile(path.join(directory, name)));
+  }
+
+  await fs.rm(path.join(directory, 'server.tar.gz'));
+  await assert.rejects(buildDeb({
+    root: repository(),
+    artifacts: directory,
+    offline: true,
+  }),
+    /offline_input_invalid/u);
 });
 
 test('DEB-3: без индекса канала сборка отказывает', async (t) => {
@@ -102,7 +144,11 @@ test('DEB-ONLINE: прежний ELF нельзя упаковать как лё
 
 test('DEB-BOOTSTRAP: первый запуск ставит, повтор запускает пользовательский launcher', async (t) => {
   const { directory } = await artifactsFixture(t);
-  const deb = await buildDeb({ root: repository(), artifacts: directory });
+  const deb = await buildDeb({
+    root: repository(),
+    artifacts: directory,
+    offline: true,
+  });
   const extract = await fs.mkdtemp(path.join(os.tmpdir(), 'deb-bootstrap-'));
 
   t.after(() => fs.rm(extract, { recursive: true, force: true }));
@@ -137,7 +183,8 @@ test('DEB-BOOTSTRAP: первый запуск ставит, повтор зап
 
   await execute(bootstrap, [], { env });
 
-  assert.match(await fs.readFile(installerLog, 'utf8'), /install local --launch/u);
+  assert.equal(await fs.readFile(installerLog, 'utf8'),
+    'installer install local --launch --source-dir /usr/lib/grigdesk\n');
   assert.match(await fs.readFile(launcherLog, 'utf8'), /.*/u);
 
   await fs.rm(installerLog, { force: true });

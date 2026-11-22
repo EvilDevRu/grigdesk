@@ -5,6 +5,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 
 import { verifyDistributionArtifacts } from './releaseArtifactVerification.mts';
+import { verifyLinuxPackages } from './verifyLinuxPackages.mts';
 import { verifyInstallation } from './verifyInstallation.mts';
 import { RELEASE_SIGNING_PUBLIC_KEY } from '../shared/runtime/releaseChannelContracts.ts';
 import { decodeReleaseChecks } from './releaseChecks.mts';
@@ -31,6 +32,8 @@ const execute = promisify(execFile);
  * Реальные бинарники запускаются в отдельном HOME; GUI-приёмка сюда не входит.
  */
 export async function verifyBuiltRelease(directory: string, expectedCommit: string) {
+  await fs.rm(path.join(directory, 'verified-proof.json'), { force: true });
+
   assert.match(expectedCommit, /^[a-f0-9]{40}$/u);
 
   const names = (await fs.readdir(directory))
@@ -83,6 +86,9 @@ export async function verifyBuiltRelease(directory: string, expectedCommit: stri
 
   const counts: Record<string, number> = {};
   const runtime: Record<string, unknown> = {};
+
+  assert.equal(index.latest.payload.platform.os, 'linux');
+
   const deb = path.join(directory, `grigdesk_${index.latest.payload.version}_amd64.deb`);
   const debFields: Record<string, string> = {};
 
@@ -90,6 +96,7 @@ export async function verifyBuiltRelease(directory: string, expectedCommit: stri
     Package: 'grigdesk',
     Version: index.latest.payload.version,
     Architecture: 'amd64',
+    Depends: `libc6 (>= ${index.latest.payload.platform.glibc}), curl, gzip, coreutils`,
   })) {
     const result = await execute('dpkg-deb', ['--field', deb, field],
       { timeout: 15000, maxBuffer: 65536 });
@@ -98,6 +105,9 @@ export async function verifyBuiltRelease(directory: string, expectedCommit: stri
     assert.equal(result.stdout.trim(), expected);
     debFields[field] = expected;
   }
+
+  const publicAssets = index.channel === 'release'
+    ? await verifyLinuxPackages(directory, index.latest.payload.version) : [];
 
   const work = await fs.mkdtemp(path.join(directory, 'inventory-check-'));
 
@@ -239,6 +249,7 @@ export async function verifyBuiltRelease(directory: string, expectedCommit: stri
     runtime,
     guiAcceptance: 'not-performed',
     deb: debFields,
+    publicAssets,
     testValidation: checks,
   };
 

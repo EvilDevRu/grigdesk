@@ -1,0 +1,158 @@
+name: Стабильный пакет нативной платформы
+on:
+  workflow_call:
+    inputs:
+      target:
+        required: true
+        type: string
+      runner:
+        required: true
+        type: string
+      plan_id:
+        required: true
+        type: string
+      plan_digest:
+        required: true
+        type: string
+    outputs:
+      artifact_id:
+        value: ${{ jobs.verify.outputs.artifact_id }}
+      proof_sha256:
+        value: ${{ jobs.verify.outputs.proof_sha256 }}
+permissions:
+  contents: read
+  actions: read
+env:
+  STABLE_NATIVE_TARGET: ${{ inputs.target }}
+  STABLE_PLAN_SHA256: ${{ inputs.plan_digest }}
+  STABLE_PLAN_ARTIFACT_ID: ${{ inputs.plan_id }}
+jobs:
+  build:
+    name: Сборка
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: 180
+    environment: platform-candidate
+    outputs:
+      artifact_id: ${{ steps.upload.outputs.artifact-id }}
+    steps:
+      - name: Исходники
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+      - name: Входы нативной платформы
+        shell: bash
+        run: |
+          [[ "$STABLE_PLAN_ARTIFACT_ID" =~ ^[1-9][0-9]*$ ]]
+          if [ ! -f tools/ci/buildStableNative.mts ] || [ ! -f tools/ci/verifyStableNative.mts ]; then
+            echo "::error::stable_native_adapter_missing ($STABLE_NATIVE_TARGET)"
+            exit 1
+          fi
+      - name: Версия Node из manifest
+        id: node_runtime
+        shell: bash
+        run: |
+          node -p '"version="+require("./server/build/node-runtime.json").version' >> "$GITHUB_OUTPUT"
+      - name: Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: ${{ steps.node_runtime.outputs.version }}
+          architecture: ${{ inputs.target == 'windows-x64' && 'x64' || inputs.target == 'windows-arm64' && 'arm64' || '' }}
+      - name: Go для Windows
+        if: ${{ startsWith(inputs.target, 'windows-') }}
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16
+        with:
+          go-version: '1.27.4'
+      - name: Зависимости Windows-комплекта
+        if: ${{ startsWith(inputs.target, 'windows-') }}
+        shell: bash
+        run: |
+          npm --prefix server ci --include=dev --ignore-scripts --no-audit --no-fund
+          npm --prefix web ci --include=dev --ignore-scripts --no-audit --no-fund
+          npm --prefix desktop ci --include=dev --ignore-scripts --no-audit --no-fund
+      - name: План выпуска по ID
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          artifact-ids: ${{ inputs.plan_id }}
+          path: release-plan
+          merge-multiple: true
+      - name: Сверка плана
+        shell: bash
+        run: node tools/stableReleasePlan.mts check release-plan/stable-plan.json
+      - name: Сборка пакета
+        shell: bash
+        env:
+          RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
+        run: |
+          test -n "$RELEASE_SIGNING_KEY"
+          node tools/ci/buildStableNative.mts "$STABLE_NATIVE_TARGET"             release-plan/stable-plan.json stable-native-build
+      - name: Сборка для отдельной проверки
+        id: upload
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: grigdesk-native-build-${{ inputs.target }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: stable-native-build/
+          if-no-files-found: error
+  verify:
+    name: Проверка
+    needs: [build]
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: 120
+    outputs:
+      artifact_id: ${{ steps.upload.outputs.artifact-id }}
+      proof_sha256: ${{ steps.proof.outputs.proof_sha256 }}
+    steps:
+      - name: Исходники
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+      - name: Версия Node из manifest
+        id: node_runtime
+        shell: bash
+        run: |
+          node -p '"version="+require("./server/build/node-runtime.json").version' >> "$GITHUB_OUTPUT"
+      - name: Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: ${{ steps.node_runtime.outputs.version }}
+          architecture: ${{ inputs.target == 'windows-x64' && 'x64' || inputs.target == 'windows-arm64' && 'arm64' || '' }}
+      - name: Допуск ID артефактов
+        shell: bash
+        env:
+          BUILD_ARTIFACT_ID: ${{ needs.build.outputs.artifact_id }}
+        run: |
+          [[ "$STABLE_PLAN_ARTIFACT_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$BUILD_ARTIFACT_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$STABLE_PLAN_ARTIFACT_ID" != "$BUILD_ARTIFACT_ID" ]]
+      - name: План выпуска по ID
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          artifact-ids: ${{ inputs.plan_id }}
+          path: release-plan
+          merge-multiple: true
+      - name: Сверка плана
+        shell: bash
+        run: node tools/stableReleasePlan.mts check release-plan/stable-plan.json
+      - name: Готовый пакет по ID
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          artifact-ids: ${{ needs.build.outputs.artifact_id }}
+          path: stable-native-build
+          merge-multiple: true
+      - name: Нативная приёмка
+        shell: bash
+        run: |
+          node tools/ci/verifyStableNative.mts "$STABLE_NATIVE_TARGET"             release-plan/stable-plan.json stable-native-build stable-native-verified
+      - name: Проверка формата выдачи и SHA proof
+        id: proof
+        shell: bash
+        run: |
+          node tools/collectStableAssets.mts check-native release-plan/stable-plan.json             "$STABLE_NATIVE_TARGET" stable-native-verified
+      - name: Проверенный пакет
+        id: upload
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: grigdesk-native-verified-${{ inputs.target }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: stable-native-verified/
+          if-no-files-found: error

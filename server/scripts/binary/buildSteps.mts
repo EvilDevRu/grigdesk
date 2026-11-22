@@ -4,7 +4,7 @@ import path from 'node:path';
 import { withWorkDirectory, syncDirectory } from '../../../shared/node/files.ts';
 import { sha256File } from '../../../shared/node/hash.ts';
 import {
-  assertUntracked, readNodeRuntime, seaHostTarget, serverNodeRuntimeManifest, type NodeRuntime,
+  assertUntracked, readNodeRuntime, serverSeaHostTarget, serverNodeRuntimeManifest, type NodeRuntime,
 } from '../../../shared/node/nodeRuntime.ts';
 import { nodeArchive, seaConfig } from '../../../shared/node/seaBuild.ts';
 import { HELP_LOCALES } from '../../../shared/help/helpContracts.ts';
@@ -151,7 +151,7 @@ export async function localRuntimeArchive(cacheDir: string, runtime: NodeRuntime
  * Инъекция портов проверяет каждый отказ без настоящей сборки и без изменения старого ELF.
  */
 export async function executeBinaryBuild(options: BinaryBuildOptions, steps: BinaryBuildSteps) {
-  const hostTarget = seaHostTarget(steps.platform, steps.arch);
+  const hostTarget = serverSeaHostTarget(steps.platform, steps.arch);
   const runtime = readNodeRuntime(steps.runtime, serverNodeRuntimeManifest(hostTarget));
 
   if (runtime.version !== '24.21.0' || runtime.platform !== hostTarget) {

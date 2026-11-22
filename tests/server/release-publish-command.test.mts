@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { createHash } from 'node:crypto';
+import { createHash, createPublicKey, sign } from 'node:crypto';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -8,6 +8,9 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import type { TestContext } from 'node:test';
 
+import { signedIndex } from '../helpers/releaseV2Fixture.mjs';
+import { canonicalJson } from '../../shared/lib/canonicalJson.ts';
+import { releaseSignedBytes } from '../../shared/node/releaseTrust.ts';
 import { loadInstalledModule } from '../helpers/installedBuildFixture.mjs';
 import { HELP_LOCALES, helpResourceFile } from '../../shared/help/helpContracts.ts';
 
@@ -77,11 +80,12 @@ async function publicationBox(t: TestContext, channel = 'release') {
     channel,
     helpFiles,
     buildStaging,
-    command: () => installedPublicationCommand({
+    command: (expectedActiveIndex?: string | null) => installedPublicationCommand({
       root,
       staging,
       version,
       channel,
+      expectedActiveIndex,
       expectedSHA: { 'control.tar.gz': createHash('sha256').update('control-архив\n').digest('hex') },
     }),
   };
@@ -233,4 +237,65 @@ test('PUBCMD-CONTROL: пропажа и подмена control сохраняю�
   assert.equal(await fs.readFile(index, 'utf8'), 'новый индекс\n');
   assert.equal(await fs.readFile(path.join(box.root, 'releases', box.version, 'control.tar.gz'), 'utf8'),
     'control-архив\n');
+});
+
+test('PUBCMD-ACTIVE-CAS: более свежий индекс после preflight оставляет сайт без изменений', async (t) => {
+  const box = await publicationBox(t);
+  const current = path.join(box.root, 'api/releases/v1/release.json');
+  const latestHelp = path.join(box.root, 'help/latest-release.html');
+  const a = signedIndex({ version: '0.2.0' });
+  const keys = { privateKey: a.privateKey, publicKey: createPublicKey(a.privateKey) };
+  const b = signedIndex({ version: '0.2.1', keys });
+  const next = signedIndex({ version: box.version, keys });
+  const aBytes = JSON.stringify(a.index);
+  const bBytes = JSON.stringify(b.index);
+  const nextBytes = JSON.stringify(next.index);
+
+  await fs.writeFile(current, aBytes);
+  await fs.writeFile(latestHelp, 'справка B');
+  await box.buildStaging();
+  await fs.writeFile(path.join(box.staging, 'release.json'), nextBytes);
+
+  const stale = box.command(createHash('sha256').update(aBytes).digest('hex'));
+
+  await fs.writeFile(current, bBytes);
+  await assert.rejects(execute('bash', ['-c', stale]), (error: { code: number; stderr: string }) => {
+    assert.equal(error.code, 3);
+    assert.match(error.stderr, /release_active_index_changed/u);
+
+    return true;
+  });
+
+  assert.equal(await fs.readFile(current, 'utf8'), bBytes);
+  assert.equal(await fs.readFile(latestHelp, 'utf8'), 'справка B');
+
+  const currentCommand = box.command(createHash('sha256').update(bBytes).digest('hex'));
+
+  await execute('bash', ['-c', currentCommand]);
+  assert.equal(await fs.readFile(current, 'utf8'), nextBytes);
+});
+
+test('PUBCMD-READ-ACTIVE: подписанный индекс сверяется до допуска новой версии', async (t) => {
+  const { activeStableIndex } = await loadInstalledModule(t, 'tools/installedPublication.mts');
+  const older = signedIndex({ version: '1.2.3' });
+  const keys = { privateKey: older.privateKey, publicKey: createPublicKey(older.privateKey) };
+  const current = signedIndex({ version: '1.2.4', keys });
+  const exact = current.index.latest;
+  const bytes = Buffer.from(JSON.stringify(current.index));
+
+  assert.equal(activeStableIndex(null, exact, current.publicKeyPem), null);
+  assert.equal(activeStableIndex(bytes, exact, current.publicKeyPem),
+    createHash('sha256').update(bytes).digest('hex'));
+  assert.throws(() => activeStableIndex(bytes, older.index.latest, current.publicKeyPem),
+    /release_site_downgrade_forbidden/u);
+
+  const payload = { ...exact.payload, notes: { ru: 'Другой выпуск', en: 'Different release' } };
+  const different = { payload, signature: '' };
+
+  different.signature = sign(null, releaseSignedBytes(different), keys.privateKey).toString('base64');
+
+  const conflicting = Buffer.from(canonicalJson({ ...current.index, latest: different }));
+
+  assert.throws(() => activeStableIndex(conflicting, exact, current.publicKeyPem),
+    /release_site_version_conflict/u);
 });

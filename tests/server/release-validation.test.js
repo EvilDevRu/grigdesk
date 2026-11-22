@@ -334,3 +334,38 @@ test('VALIDATION-PIPELINE-RECEIPT: reuse требует receipt с текущи�
   assert.equal((await decodePipelineReceipt(good, recipeText, repository)).recipeDigest,
     good.recipeDigest);
 });
+
+test('reuse: нативные jobs допустимы только пропущенными в новом классическом графе', async () => {
+  const f = fixture();
+  const jobs = classicJobs();
+
+  f.source().tree.at(-1).sha = 'c'.repeat(40);
+  jobs.at(-1).name = 'Выдача проверенных кандидатов';
+
+  const nativeWorkflow = {
+    path: '.github/workflows/grigdesk-stable-native.yml',
+    type: 'blob',
+    mode: '100644',
+    sha: 'd'.repeat(40),
+  };
+
+  f.tree().tree.push(nativeWorkflow);
+  f.source().tree.push(nativeWorkflow);
+
+  for (const name of ['Подготовка всех стабильных загрузок', 'Стабильный пакет Android / Сборка']) {
+    jobs.push({
+      name,
+      run_id: 42,
+      head_sha: prior,
+      status: 'completed',
+      conclusion: 'skipped',
+      steps: [],
+    });
+  }
+
+  f.attemptJobs(jobs);
+  assert.equal((await f.verify()).validatedCommit, prior);
+
+  jobs.at(-1).conclusion = 'success';
+  await assert.rejects(f.verify(), /release_validation_candidate_run/u);
+});

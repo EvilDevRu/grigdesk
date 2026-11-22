@@ -11,7 +11,8 @@ import { parseReleaseChannelIndex, type ReleaseEnvelope }
 import { RELEASE_SIGNING_PUBLIC_KEY } from '../shared/runtime/releaseChannelContracts.ts';
 import { verifyReleaseEnvelope } from '../shared/node/releaseTrust.ts';
 import { extractReleaseArtifact } from '../shared/node/releaseArchive.ts';
-import { sha256File } from '../shared/node/hash.ts';
+import { compareProductVersions } from '../shared/runtime/productReleaseVersion.ts';
+import { sha256, sha256File } from '../shared/node/hash.ts';
 import { prepareServerBinary, probeServerBinary, releaseServerPreparation }
   from '../shared/node/serverBinaryRuntime.ts';
 import { readContainedText } from '../shared/node/readContainedText.ts';
@@ -89,6 +90,70 @@ async function prepareInstalledHelp(work: string, envelope: ReleaseEnvelope): Pr
   }
 }
 
+const activeIndexLimit = 1024 ** 2;
+const remoteIndexMissing = 44;
+
+/**
+ * Проверяет подписанный индекс перед заменой и запоминает точные байты для CAS.
+ * Равная версия допустима при совпадении commit и подписанного содержимого.
+ */
+export function activeStableIndex(bytes: Uint8Array | null, next: ReleaseEnvelope, publicKey: string) {
+  if (bytes === null) {
+    return null;
+  }
+
+  if (bytes.byteLength === 0 || bytes.byteLength > activeIndexLimit) {
+    throw new Error('release_active_index_invalid');
+  }
+
+  const index = parseReleaseChannelIndex(new TextDecoder('utf-8', {
+    fatal: true,
+  }).decode(bytes));
+
+  if (index.channel !== 'release' || !index.latest) {
+    throw new Error('release_active_index_invalid');
+  }
+
+  const digest = verifyReleaseEnvelope(index.latest, publicKey);
+  const comparison = compareProductVersions(index.latest.payload.version, next.payload.version);
+
+  if (comparison > 0) {
+    throw new Error('release_site_downgrade_forbidden');
+  }
+
+  if (comparison === 0 && (index.latest.payload.commit !== next.payload.commit
+    || digest !== verifyReleaseEnvelope(next, publicKey))) {
+    throw new Error('release_site_version_conflict');
+  }
+
+  return sha256(bytes);
+}
+
+/**
+ * Читает ограниченный объём через тот же SSH-порт, что использует публикация.
+ * Отсутствие файла отличается от отказа чтения, битой ссылки и ошибки SSH.
+ */
+async function readStableSiteIndex(root: string, remote: (command: string) => Promise<{ stdout: Buffer }>) {
+  const directory = path.join(root, 'api/releases/v1');
+  const result = await remote(`set -eu
+dir=${shellQuote(directory)}
+file="$dir/release.json"
+test -d "$dir" && test -r "$dir" && test -x "$dir" || exit 3
+if ! test -e "$file" && ! test -L "$file"; then
+  exit ${remoteIndexMissing}
+fi
+test -f "$file" && test ! -L "$file" || exit 3
+head -c ${activeIndexLimit + 1} -- "$file"`).catch((error: { code?: number }) => {
+    if (error.code !== remoteIndexMissing) {
+      throw error;
+    }
+
+    return null;
+  });
+
+  return result?.stdout ?? null;
+}
+
 /**
  * Remote commit публикует immutable выпуск и help раньше одного выбранного индекса.
  * Повтор сверяет manifest целиком; другой канал остаётся прежним. Deb-бутстрап
@@ -101,6 +166,7 @@ export function installedPublicationCommand(input: {
   channel: string;
   deb?: string;
   expectedSHA?: Readonly<Record<string, string>>;
+  expectedActiveIndex?: string | null;
 }): string {
   const releaseNames = ['desktop.tar.gz', 'server.tar.gz', 'control.tar.gz', 'grigdesk-install',
     'grigdesk-install.sha256', 'grigdesk-install.sig', 'grigdesk-maintenance.gz'];
@@ -128,6 +194,29 @@ if test -e "$stage/${input.deb}"; then
 fi
 ` : '';
 
+  if (typeof input.expectedActiveIndex === 'string' && !/^[a-f0-9]{64}$/u.test(input.expectedActiveIndex)) {
+    throw new Error('release_active_index_invalid');
+  }
+
+  const compareActive = input.expectedActiveIndex === undefined ? '' : `
+expected_active_index=${shellQuote(input.expectedActiveIndex ?? 'missing')}
+current_index="$root/api/releases/v1/$channel.json"
+if test -e "$current_index" || test -L "$current_index"; then
+  if ! test -f "$current_index" || test -L "$current_index"; then
+    echo 'release_active_index_changed' >&2
+    exit 3
+  fi
+  current_hash=$(sha256sum < "$current_index")
+  current_hash=\${current_hash%% *}
+else
+  current_hash=missing
+fi
+if test "$current_hash" != "$expected_active_index"; then
+  echo 'release_active_index_changed' >&2
+  exit 3
+fi
+`;
+
   return `set -eu
 umask 022
 root=${shellQuote(input.root)}
@@ -139,7 +228,7 @@ mkdir "$lock"
 trap 'rmdir "$lock"' EXIT
 trap 'exit 129' HUP
 trap 'exit 130' INT
-trap 'exit 143' TERM
+trap 'exit 143' TERM${compareActive}
 for file in ${releaseFiles} "$channel.json"; do
   test -f "$stage/$file"
   test ! -L "$stage/$file"
@@ -346,7 +435,10 @@ export async function publishInstalledRelease(
       const sshOptions = ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=15',
         '-o', 'StrictHostKeyChecking=accept-new', '-i', target.key];
       const remote = (command: string) => execute('ssh', [...sshOptions, '-p', target.port,
-        `${target.user}@${target.host}`, command]);
+        `${target.user}@${target.host}`, command], {
+        encoding: 'buffer',
+        maxBuffer: activeIndexLimit + 1,
+      });
 
       try {
         const bytes = (await Promise.all(upload.map(async (file) => (await fs.stat(file)).size)))
@@ -354,6 +446,11 @@ export async function publishInstalledRelease(
         const preflight = await remote(installedPublicationPreflight(target.dir, staging, bytes));
 
         process.stdout.write(preflight.stdout);
+
+        const expectedActiveIndex = index.channel === 'release'
+          ? activeStableIndex(await readStableSiteIndex(target.dir, remote), index.latest, publicKey)
+          : undefined;
+
         await execute('scp', [...sshOptions, '-P', target.port, ...upload,
           `${target.user}@${target.host}:${staging}/`]);
 
@@ -363,6 +460,7 @@ export async function publishInstalledRelease(
           version: index.latest.payload.version,
           channel: index.channel,
           expectedSHA,
+          expectedActiveIndex,
           ...(debPresent ? { deb: debName } : {}),
         }));
 

@@ -1,8 +1,12 @@
-import { publishInstalledRelease } from './installedPublication.mts';
-
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+
+import { publishInstalledRelease } from './installedPublication.mts';
+import { assertStableLinuxFiles, readStablePromotionProof } from './promoteArtifact.mts';
+import { parseReleaseChannelIndex } from '../shared/runtime/installedUpdateContracts.ts';
+import { verifyReleaseEnvelope } from '../shared/node/releaseTrust.ts';
+import { RELEASE_SIGNING_PUBLIC_KEY } from '../shared/runtime/releaseChannelContracts.ts';
 
 interface SiteTarget {
   host: string;
@@ -47,6 +51,36 @@ function targets(): SiteTarget[] {
 }
 
 /**
+ * Публикация стабильного канала повторно связывает проверенный proof и подписанный индекс.
+ * Dev и локальная проверка без SSH сохраняют прежний вход.
+ */
+async function verifyStableSitePublication(directory: string): Promise<void> {
+  const names = await fs.readdir(directory);
+
+  if (!names.includes('release.json')) {
+    return;
+  }
+
+  const bytes = await fs.readFile(path.join(directory, 'release.json'), 'utf8');
+  const index = parseReleaseChannelIndex(bytes);
+
+  if (index.channel !== 'release' || !index.latest) {
+    throw new Error('stable_promotion_proof_invalid');
+  }
+
+  const digest = verifyReleaseEnvelope(index.latest, RELEASE_SIGNING_PUBLIC_KEY);
+  const proof = await readStablePromotionProof(process.env.GRIGDESK_STABLE_PROOF_DIR ?? '', {
+    runId: process.env.GRIGDESK_GO_SOURCE_RUN_ID ?? '',
+    artifactId: process.env.GRIGDESK_GO_LINUX_ARTIFACT_ID ?? '',
+    commit: index.latest.payload.commit,
+    version: index.latest.payload.version,
+    digest,
+  });
+
+  await assertStableLinuxFiles(directory, proof);
+}
+
+/**
  * Публикация единственного формата: подписанные артефакты обычной установки
  * из release-artifacts/ уходят на сайт с проверкой до SSH (см. installedPublication).
  * Историческая публикация переносного комплекта (channel.json format 1) удалена:
@@ -88,6 +122,10 @@ export async function publishRelease(directory: string | undefined, ports: {
     process.exitCode = 3;
 
     return;
+  }
+
+  if (!ports.dryRun) {
+    await verifyStableSitePublication(installedArtifacts);
   }
 
   await publishInstalledRelease(installedArtifacts, targets(), ports.dryRun);

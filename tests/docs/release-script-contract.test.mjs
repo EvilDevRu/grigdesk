@@ -53,12 +53,16 @@ async function commitChange(work, message) {
  * Запуск скрипта с подменой тестов и сборки. Маркер вне дерева доказывает, что
  * проверки действительно вызывались, и не делает checkout грязным.
  */
-async function release(repo, args, { check } = {}) {
+async function release(repo, args, { check, env } = {}) {
   const command = check ?? `printf ok > '${path.join(repo.temp, 'checked')}'`;
   const options = {
     cwd: repo.work,
     encoding: 'utf8',
-    env: { ...process.env, GRIGDESK_RELEASE_CHECK_COMMAND: command },
+    env: {
+      ...process.env,
+      ...env,
+      GRIGDESK_RELEASE_CHECK_COMMAND: command,
+    },
   };
 
   try {
@@ -217,4 +221,37 @@ test('publish отвергает lightweight-тег: GrigDesk такие тег�
   assert.notEqual(result.code, 0);
   assert.match(result.stderr, /не аннотированный/);
   assert.equal(await git(repo.origin, 'tag', '-l'), '');
+});
+
+test('Пакетный checkout закрывает автоматическую публикацию GitHub', async (t) => {
+  const repo = await makeRepo(t);
+  const bin = path.join(repo.temp, 'bin');
+  const journal = path.join(repo.temp, 'gh.log');
+  const origin = await git(repo.origin, 'rev-parse', 'main');
+
+  await commitChange(repo.work, 'GrigDesk: изменения готового пакета');
+  await writeFile(path.join(repo.work, 'tools/stablePlatformRelease.mts'), 'export {};\n');
+  await git(repo.work, 'add', 'tools/stablePlatformRelease.mts');
+  await git(repo.work, 'commit', '-qm', 'GrigDesk: общий proof');
+  await mkdir(bin);
+  await writeFile(path.join(bin, 'gh'), '#!/bin/sh\nprintf "%s\n" "$*" >> "$FIXTURE_GH_LOG"\nexit 0\n',
+    { mode: 0o755 });
+
+  const env = {
+    PATH: bin + ':' + process.env.PATH,
+    FIXTURE_GH_LOG: journal,
+  };
+
+  for (const args of [['publish'], ['patch', '--push']]) {
+    const result = await release(repo, args, { env });
+
+    assert.notEqual(result.code, 0);
+    assert.match(result.stderr, /пакетный выпуск требует общей проверки и публикации по docs\/releases.md/u);
+  }
+
+  assert.equal(await git(repo.origin, 'rev-parse', 'main'), origin);
+  assert.equal(await git(repo.origin, 'tag', '-l'), '');
+  assert.equal(await git(repo.work, 'tag', '-l'), '');
+  assert.equal(await readFile(path.join(repo.work, 'VERSION'), 'utf8'), '0.1.0\n');
+  await assert.rejects(stat(journal), { code: 'ENOENT' });
 });

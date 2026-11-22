@@ -11,13 +11,22 @@ const root = path.resolve(import.meta.dirname, '../..');
 const execute = promisify(execFile);
 
 test('INSTALL-GUIDE: обе редакции используют shell и разделяют два источника доверия', async () => {
-  const help = await execute(fixtureGo('grigdesk-ctl'), ['dist', '--help'], { cwd: root });
+  const help = await execute(fixtureGo('grigdesk-ctl'), ['dist', '--help'], {
+    cwd: root,
+    env: {
+      ...process.env,
+      GRIGDESK_CTL_CHECKOUT_ROOT: root,
+    },
+  });
 
   for (const language of ['ru', 'en']) {
     const guide = await fs.readFile(path.join(root,
       `docs/grigdesk/guide/${language}/installation.md`), 'utf8');
 
     assert.match(guide, /sh \.\/grigdesk-install/u);
+    assert.match(guide, /grigdesk-X\.Y\.Z-linux-x64-offline\.zip/u);
+    assert.match(guide, /sh \.\/grigdesk-install --source-dir "\$PWD"/u);
+    assert.match(guide, /sudo apt install \.\/grigdesk_X\.Y\.Z_amd64\.deb/u);
     assert.doesNotMatch(guide, /grigdesk-install --verify/u);
     assert.match(guide, /dist check --from/u);
     assert.match(guide, /dist check --local-run/u);

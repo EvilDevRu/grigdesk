@@ -5,6 +5,8 @@ import test from 'node:test';
 import { execFileSync } from 'node:child_process';
 
 import { shellQuote } from '../../shared/lib/shellQuote.ts';
+import { sha256File } from '../../shared/node/hash.ts';
+import { buildStableLinuxZip } from '../../tools/linuxOfflinePackage.mts';
 import { buildDeb } from '../../tools/buildDeb.mts';
 import { resolveReleaseChecks } from '../../tools/releaseChecks.mts';
 import { installedBuild, loadInstalledModule } from '../helpers/installedBuildFixture.mjs';
@@ -24,16 +26,22 @@ const root = path.resolve(import.meta.dirname, '../..');
  */
 test('VERIFY-BUILT-INSTALLATION: официальный verifier доказывает три завершённые установки', async (t) => {
   const built = await installedBuild(t, 'release', {
-    maintenanceSource: async (signer: { publicKeyPem: string }) => {
-      const module = await loadInstalledModule(t, 'tests/fixtures/release-v2/maintenance.mts', signer.publicKeyPem);
-      const entry = `import { runMaintenance } from ${JSON.stringify(module.fixtureModuleUrl)};
-        process.execPath = process.argv[1];
-        process.exitCode = await runMaintenance(process.argv.slice(2));`;
-
-      return `#!/bin/sh\nexec ${shellQuote(process.execPath)} --input-type=module -e `
-        + `${shellQuote(entry)} "$0" "$@"\n`;
-    },
+    realGoUtilities: true,
     builderSource: async (name: string, _input: unknown, metadata: FixtureBinaryMetadata) => {
+      if (['tracker', 'pipeline', 'routes', 'voice', 'relay'].includes(name)) {
+        const info = {
+          schema: 1,
+          kind: name === 'relay' ? 'grigdesk-relay' : name,
+          version: metadata.version,
+          runtime: 'go',
+          go: 'go1.27.4',
+          os: 'linux',
+          arch: 'amd64',
+        };
+
+        return `#!/bin/sh\nprintf '%s\\n' ${shellQuote(JSON.stringify(info))}\n`;
+      }
+
       const server = {
         format: 1,
         hostContract: 1,
@@ -84,7 +92,13 @@ test('VERIFY-BUILT-INSTALLATION: официальный verifier доказыв�
   acceptance.testValidation = checks;
   await fs.writeFile(acceptanceFile, JSON.stringify(acceptance));
   await fs.writeFile(path.join(built.directory, 'release-checks.json'), JSON.stringify(checks));
-  await buildDeb({ root: built.root, artifacts: built.directory });
+  await buildDeb({
+    root: built.root,
+    artifacts: built.directory,
+    offline: true,
+  });
+
+  const zip = await buildStableLinuxZip(built.directory, built.index.latest.payload.version);
 
   const baseline = process.env.VERIFY_RELEASE_BASELINE === '1' ? {
     'tools/verifyRelease.mts': execFileSync('git', ['show', 'HEAD:tools/verifyRelease.mts'],
@@ -101,4 +115,78 @@ test('VERIFY-BUILT-INSTALLATION: официальный verifier доказыв�
     assert.equal(mode.guiAcceptance, 'not-performed');
     assert.equal(mode.digest, acceptance.manifestDigest);
   }
+
+  assert.ok(Array.isArray(proof.publicAssets));
+
+  const expected = [
+    'grigdesk-install', path.basename(zip),
+    `grigdesk_${built.index.latest.payload.version}_amd64.deb`,
+  ];
+
+  assert.deepEqual(proof.publicAssets.map((asset: { name: string }) => asset.name), expected);
+
+  for (const asset of proof.publicAssets) {
+    const file = path.join(built.directory, asset.name);
+
+    assert.equal(asset.sha256, await sha256File(file));
+    assert.equal(asset.size, (await fs.stat(file)).size);
+  }
+
+  const resultFile = path.join(built.directory, 'verified-proof.json');
+
+  await fs.stat(resultFile);
+  await fs.writeFile(path.join(built.directory, 'unexpected.json'), '[]');
+  execFileSync('7z', ['a', '-tzip', zip, 'unexpected.json'], { cwd: built.directory });
+  await assert.rejects(verifyBuiltRelease(built.directory, built.index.latest.payload.commit),
+    /offline_zip_inventory_invalid/u);
+  await assert.rejects(fs.stat(resultFile), { code: 'ENOENT' });
+
+  await buildStableLinuxZip(built.directory, built.index.latest.payload.version);
+  await verifyBuiltRelease(built.directory, built.index.latest.payload.commit);
+  await fs.stat(resultFile);
+
+  const deb = path.join(built.directory, expected[2]!);
+  const tree = path.join(built.root, 'wrong-deb');
+  const changed = path.join(built.root, 'different.deb');
+
+  await fs.mkdir(tree);
+  execFileSync('dpkg-deb', ['--raw-extract', deb, tree]);
+  await fs.chmod(path.join(tree, 'usr/bin/grigdesk'), 0o644);
+  execFileSync('dpkg-deb', ['--build', '--root-owner-group', '-Znone', tree, changed]);
+  await fs.copyFile(changed, deb);
+
+  await assert.rejects(verifyBuiltRelease(built.directory, built.index.latest.payload.commit),
+    /offline_deb_entry_invalid/u);
+  await assert.rejects(fs.stat(resultFile), { code: 'ENOENT' });
+
+  await fs.chmod(path.join(tree, 'usr/bin/grigdesk'), 0o755);
+
+  const maintainerScript = path.join(tree, 'DEBIAN/postinst');
+
+  await fs.writeFile(maintainerScript, '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+  await fs.rm(changed);
+  execFileSync('dpkg-deb', ['--build', '--root-owner-group', '-Znone', tree, changed]);
+  await fs.copyFile(changed, deb);
+  await assert.rejects(verifyBuiltRelease(built.directory, built.index.latest.payload.commit),
+    /offline_deb_inventory_invalid/u);
+  await fs.rm(maintainerScript);
+
+  const serverArchive = path.join(tree, 'usr/lib/grigdesk/server.tar.gz');
+  const originalServer = await fs.readFile(serverArchive);
+
+  await fs.writeFile(serverArchive, 'other content');
+  await fs.rm(changed);
+  execFileSync('dpkg-deb', ['--build', '--root-owner-group', '-Znone', tree, changed]);
+  await fs.copyFile(changed, deb);
+  await assert.rejects(verifyBuiltRelease(built.directory, built.index.latest.payload.commit),
+    /offline_package_bytes_mismatch/u);
+
+  await fs.writeFile(serverArchive, originalServer);
+  await fs.chmod(path.join(tree, 'usr/lib/grigdesk/grigdesk-maintenance.gz'), 0o600);
+  await fs.rm(changed);
+  execFileSync('dpkg-deb', ['--build', '--root-owner-group', '-Znone', tree, changed]);
+  await fs.copyFile(changed, deb);
+  await assert.rejects(verifyBuiltRelease(built.directory, built.index.latest.payload.commit),
+    /offline_deb_inventory_invalid/u);
+  await assert.rejects(fs.stat(resultFile), { code: 'ENOENT' });
 });

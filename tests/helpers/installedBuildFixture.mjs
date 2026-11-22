@@ -32,8 +32,8 @@ export async function loadInstalledModule(t, relative, publicKeyPem, stubs = {})
     plugins: [{
       name: 'installed-fixture-ports',
       setup(builder) {
-        builder.onLoad({ filter: /\.(?:ts|mts)$/ }, async ({ path: file }) => {
-          const stub = stubs[path.relative(repository, file)];
+        builder.onLoad({ filter: /\.(?:ts|mts)$/ }, async ({ path: file, suffix }) => {
+          const stub = suffix ? undefined : stubs[path.relative(repository, file)];
 
           if (stub) {
             return {
@@ -131,8 +131,20 @@ export async function installedBuild(t, channel, options = {}) {
   const helperSource = options.maintenanceSource
     ? await options.maintenanceSource(signer) : 'готовый helper';
 
-  const { executeInstalledBundle } = await loadInstalledModule(t, 'tools/installedBundle.mts',
-    signer.publicKeyPem, {
+  const releaseStubs = options.realGoUtilities
+    ? {
+      'tools/goReleaseUtility.mts': [
+        "import { execFileSync } from 'node:child_process';",
+        "import { buildReleaseUtility as build } from './goReleaseUtility.mts?fixture';",
+        'export async function buildReleaseUtility(name, input) {',
+        "  const modules = execFileSync('go', ['env', 'GOMODCACHE'], { encoding: 'utf8' }).trim();",
+        "  const env = { ...input.env, GOMODCACHE: modules, GOPROXY: 'off', GOSUMDB: 'off' };",
+        '  env.GOCACHE = process.env.GOCACHE;',
+        `  return build(name, { ...input, root: ${JSON.stringify(repository)}, env });`,
+        '}',
+      ].join('\n'),
+    }
+    : {
       'tools/goReleaseUtility.mts': [
         "import fs from 'node:fs/promises';",
         'export async function buildReleaseUtility(name, input) {',
@@ -140,7 +152,9 @@ export async function installedBuild(t, channel, options = {}) {
         `    ? ${JSON.stringify(helperSource)} : 'контрольный файл', { mode: 0o555 });`,
         '}',
       ].join('\n'),
-    });
+    };
+  const { executeInstalledBundle } = await loadInstalledModule(t, 'tools/installedBundle.mts',
+    signer.publicKeyPem, releaseStubs);
 
   await executeInstalledBundle({
     root,

@@ -14,6 +14,8 @@ import {
   macPackagedChecks, resolveCandidatePlan, verifyAndCopyCandidate,
   type CandidatePlan, type CandidatePlatform, type CandidateVerification,
 } from '../../tools/platformCandidate.mts';
+import { resolveStablePlatformRelease, previousStablePlatformIdentity }
+  from '../../tools/stablePlatformRelease.mts';
 import { renderBootstrap } from '../../tools/installBootstrap.mts';
 import { archiveBytes } from '../helpers/installedUpdateFixture.mjs';
 import { signedIndex, signedMacIndex } from '../helpers/releaseV2Fixture.mjs';
@@ -327,4 +329,51 @@ test('Verified pair binds the source receipt and the complete packaged Mac outco
     info: { 'darwin-arm64': input.info['darwin-arm64'] },
   });
   assert.deepEqual(await fs.readdir(single.output), ['darwin-arm64']);
+});
+
+test('STABLE-PLATFORM-IDENTITY: только полная стабильная матрица допускается к сборке', () => {
+  const platforms = [
+    'linux-x64', 'darwin-arm64', 'linux-arm64', 'windows-x64',
+    'windows-arm64', 'android-arm64', 'android-x86_64',
+  ];
+  const input = {
+    platforms,
+    publish: false,
+    testMode: 'full',
+    reason: '',
+    validationRun: '',
+    attempt: '1',
+    runNumber: '500',
+    version: '0.3.0',
+    commit: '6'.repeat(40),
+  };
+  const plan = resolveStablePlatformRelease(input);
+
+  assert.deepEqual(plan.platforms, platforms);
+  assert.equal(plan.current.releaseId, 'release/0.3.0/' + input.commit);
+  assert.equal(plan.previous.version, '0.2.0');
+  assert.equal(plan.previous.channel, 'release');
+  assert.equal(plan.androidPrevious.version, '0.3.0-dev.999');
+  assert.equal(plan.androidPrevious.channel, 'dev');
+
+  for (const platform of ['android-arm64', 'android-x86_64'] as const) {
+    assert.deepEqual(previousStablePlatformIdentity(plan, platform), plan.androidPrevious);
+  }
+
+  assert.deepEqual(previousStablePlatformIdentity(plan, 'windows-arm64'), plan.previous);
+
+  for (const change of [
+    { platforms: platforms.slice(0, -1) },
+    { platforms: [...platforms.slice(0, -1), 'android-arm64'] },
+    { publish: true },
+    { testMode: 'skip' },
+    { reason: 'already tested' },
+    { validationRun: '40' },
+    { version: '0.3.0-dev.20' },
+    { attempt: '2' },
+    { runNumber: '2.5' },
+  ]) {
+    assert.throws(() => resolveStablePlatformRelease({ ...input, ...change }),
+      /stable_platform_(input|version)_invalid/u);
+  }
 });

@@ -90,6 +90,12 @@ if [ -z "$MODE" ]; then
   exit 2
 fi
 
+if [ "$NO_GITHUB" = 0 ] && [ "$DRY_RUN" = 0 ] \
+  && { [ "$MODE" = publish ] || [ "$PUSH" = 1 ]; } \
+  && [ -f "$ROOT/tools/stablePlatformRelease.mts" ]; then
+  fail "пакетный выпуск требует общей проверки и публикации по docs/releases.md"
+fi
+
 # ── Проверки состояния ────────────────────────────────────────────────────────────
 
 # Релиз делается только из чистой main с валидным VERSION: это те же условия, что и у

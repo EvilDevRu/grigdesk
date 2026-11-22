@@ -7,7 +7,7 @@ import { build } from 'esbuild';
 import { canonicalJson } from '../../../shared/lib/canonicalJson.ts';
 import { sha256, sha256File } from '../../../shared/node/hash.ts';
 import {
-  readTargetNodeRuntime, seaHostTarget, serverNodeRuntimeManifest,
+  readTargetNodeRuntime, serverSeaHostTarget, serverNodeRuntimeManifest,
 } from '../../../shared/node/nodeRuntime.ts';
 import { createServerManifest } from '../../src/binary/metadata.ts';
 import { buildPayload } from './buildPayload.mts';
@@ -29,7 +29,7 @@ async function main(): Promise<void> {
     buildInputs: Record<string, string>;
     factoryCandidate?: string;
   };
-  const target = seaHostTarget();
+  const target = serverSeaHostTarget();
   const runtime = await readTargetNodeRuntime(
     path.join(input.sourceRoot, serverNodeRuntimeManifest(target)), target,
   );

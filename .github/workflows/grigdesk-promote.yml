@@ -24,6 +24,10 @@ on:
       digest:
         description: 'Ожидаемый manifestDigest'
         required: true
+      stable_proof_id:
+        description: 'ID общего доказательства стабильного выпуска'
+        type: string
+        required: false
       publish:
         description: 'Опубликовать после проверки'
         type: boolean
@@ -39,6 +43,7 @@ jobs:
     name: Проверка и продвижение точного артефакта
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    environment: ${{ inputs.publish && inputs.channel == 'release' && 'release-site-stable' || 'release-site-dev' }}
     steps:
       - name: Исходники
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -59,13 +64,38 @@ jobs:
           gh api "repos/${GITHUB_REPOSITORY}/actions/runs/$SOURCE_RUN_ID" > run.json
           attempt=$(jq -er '.run_attempt|select(type == "number" and . >= 1)' run.json)
           printf 'GRIGDESK_GO_SOURCE_ATTEMPT=%s\n' "$attempt" >> "$GITHUB_ENV"
-          node tools/promoteArtifact.mts --run run.json \
-            --artifact-id "$ARTIFACT_ID" --output release-artifacts
+          if git cat-file -e "$GRIGDESK_RELEASE_COMMIT:tools/stablePlatformRelease.mts"; then
+            args=(--mode "$PROMOTION_MODE")
+            if [ "$PROMOTION_MODE" = publish ] && [ "$GRIGDESK_RELEASE_CHANNEL" = release ]; then
+              args+=(--stable-proof-id "$STABLE_PROOF_ID" --proof-output "$RUNNER_TEMP/stable-promotion-proof")
+            fi
+            node tools/promoteArtifact.mts --run run.json \
+              --artifact-id "$ARTIFACT_ID" --output release-artifacts "${args[@]}"
+          else
+            node tools/promoteArtifact.mts --run run.json \
+              --artifact-id "$ARTIFACT_ID" --output release-artifacts
+          fi
         env:
           GH_TOKEN: ${{ github.token }}
           SOURCE_RUN_ID: ${{ inputs.source_run_id }}
           ARTIFACT_ID: ${{ inputs.artifact_id }}
           GRIGDESK_RELEASE_COMMIT: ${{ inputs.commit }}
+          GRIGDESK_RELEASE_CHANNEL: ${{ inputs.channel }}
+          GRIGDESK_RELEASE_VERSION: ${{ inputs.version }}
+          GRIGDESK_RELEASE_EXPECTED_DIGEST: ${{ inputs.digest }}
+          PROMOTION_MODE: ${{ inputs.publish && 'publish' || 'inspect' }}
+          STABLE_PROOF_ID: ${{ inputs.stable_proof_id }}
+      - name: Допуск общего стабильного выпуска
+        if: ${{ inputs.channel == 'release' && inputs.publish }}
+        env:
+          RELEASE_COMMIT: ${{ inputs.commit }}
+        run: |
+          if [ "$GITHUB_REF" != refs/heads/main ] ||
+            ! git cat-file -e "$RELEASE_COMMIT:tools/stablePlatformRelease.mts"; then
+            echo 'stable_promotion_mode_required' >&2
+            exit 1
+          fi
+          test -f "$RUNNER_TEMP/stable-promotion-proof/stable-assets-proof.json"
       - name: Зависимости проверки и средства установки
         run: bash tools/ci/provision-ubuntu.sh --disposable-environment
       - name: Проверка кандидата без пересборки
@@ -84,9 +114,10 @@ jobs:
       - name: Ключ сайта
         if: ${{ inputs.publish }}
         env:
-          SITE_KEY: ${{ secrets.RELEASE_SITE_KEY }}
-          MIRROR_KEY: ${{ secrets.RELEASE_SITE_MIRROR_KEY }}
+          SITE_KEY: ${{ secrets[inputs.channel == 'release' && 'RELEASE_SITE_STABLE_KEY' || 'RELEASE_SITE_KEY'] }}
+          MIRROR_KEY: ${{ secrets[inputs.channel == 'release' && 'RELEASE_SITE_STABLE_MIRROR_KEY' || 'RELEASE_SITE_MIRROR_KEY'] }}
         run: |
+          test -n "$SITE_KEY"
           install -m 600 /dev/null "$RUNNER_TEMP/release-site-key"
           printf '%s' "$SITE_KEY" > "$RUNNER_TEMP/release-site-key"
           if [ -n "$MIRROR_KEY" ]; then
@@ -98,6 +129,7 @@ jobs:
         run: node tools/release-publish.mts "$PWD"
         env:
           RELEASE_CHANNEL: ${{ inputs.channel }}
+          GRIGDESK_STABLE_PROOF_DIR: ${{ runner.temp }}/stable-promotion-proof
           GRIGDESK_GO_LINUX_ARTIFACT_ID: ${{ inputs.artifact_id }}
           GRIGDESK_GO_SOURCE_RUN_ID: ${{ inputs.source_run_id }}
           RELEASE_SITE_HOST: ${{ secrets.RELEASE_SITE_HOST }}

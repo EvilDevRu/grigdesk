@@ -12,6 +12,22 @@ on:
         description: Собрать macOS Apple Silicon
         type: boolean
         default: true
+      linux-arm64:
+        description: Собрать Linux ARM64
+        type: boolean
+        default: false
+      windows-x64:
+        description: Собрать Windows x64
+        type: boolean
+        default: false
+      windows-arm64:
+        description: Собрать Windows ARM64
+        type: boolean
+        default: false
+      android:
+        description: Собрать Android ARM64 и x86_64
+        type: boolean
+        default: false
       channel:
         description: Канал выпуска
         type: choice
@@ -58,6 +74,7 @@ jobs:
     timeout-minutes: 10
     outputs:
       platforms: ${{ steps.accepted.outputs.platforms }}
+      stable_plan_sha256: ${{ steps.stable_plan.outputs.digest }}
       candidate_plan_sha256: ${{ steps.candidate_plan.outputs.digest }}
       recipe_digest: ${{ steps.candidate_plan.outputs.recipe_digest }}
       version: ${{ steps.candidate_plan.outputs.version }}
@@ -75,7 +92,25 @@ jobs:
         env:
           BUILD_LINUX: ${{ inputs.linux }}
           BUILD_MACOS: ${{ inputs.macos }}
+          BUILD_LINUX_ARM64: ${{ inputs['linux-arm64'] }}
+          BUILD_WINDOWS_X64: ${{ inputs['windows-x64'] }}
+          BUILD_WINDOWS_ARM64: ${{ inputs['windows-arm64'] }}
+          BUILD_ANDROID: ${{ inputs.android }}
+          CHANNEL: ${{ inputs.channel }}
         run: |
+          native="${BUILD_LINUX_ARM64:-false}/${BUILD_WINDOWS_X64:-false}"
+          native="$native/${BUILD_WINDOWS_ARM64:-false}/${BUILD_ANDROID:-false}"
+          case "$BUILD_LINUX/$BUILD_MACOS/$native/${CHANNEL:-dev}" in
+            true/true/true/true/true/true/release)
+              printf 'platforms=stable-all\n' >> "$GITHUB_OUTPUT"
+              exit 0
+              ;;
+            */false/false/false/false/*) ;;
+            *)
+              echo '::error::Для дополнительных платформ нужен полный стабильный комплект.'
+              exit 1
+              ;;
+          esac
           case "$BUILD_LINUX/$BUILD_MACOS" in
             true/true) platforms=linux-and-macos ;;
             true/false) platforms=linux ;;
@@ -89,6 +124,11 @@ jobs:
           persist-credentials: false
           ref: ${{ github.sha }}
           fetch-depth: 0
+      - name: Допуск прямой публикации
+        if: ${{ inputs.channel == 'release' && inputs.publish }}
+        run: |
+          echo 'stable_promotion_mode_required' >&2
+          exit 1
       - name: Версия Node из manifest
         id: node_runtime
         run: |
@@ -107,7 +147,7 @@ jobs:
           await fs.appendFile(process.env.GITHUB_OUTPUT, `source_digest=${digest}\n`);
           NODE
       - name: План кандидатов
-        if: ${{ inputs.macos }}
+        if: ${{ inputs.macos && steps.accepted.outputs.platforms != 'stable-all' }}
         id: candidate_plan
         env:
           CANDIDATE_PLATFORMS: ${{ steps.accepted.outputs.platforms }}
@@ -125,7 +165,7 @@ jobs:
           go-version: '1.27.4'
           cache-dependency-path: go.sum
       - name: Идентичность выпуска
-        if: ${{ steps.accepted.outputs.platforms == 'linux' }}
+        if: ${{ steps.accepted.outputs.platforms == 'linux' || steps.accepted.outputs.platforms == 'stable-all' }}
         run: node tools/release-identity.mts
         env:
           RELEASE_CHANNEL: ${{ inputs.channel }}
@@ -136,6 +176,18 @@ jobs:
           if [ "$RELEASE_CHANNEL" = release ]; then
             git merge-base --is-ancestor "$GITHUB_SHA" refs/remotes/origin/main
           fi
+      - name: План полного стабильного комплекта
+        id: stable_plan
+        if: ${{ steps.accepted.outputs.platforms == 'stable-all' }}
+        env:
+          RELEASE_CHANNEL: ${{ inputs.channel }}
+          PUBLISH: ${{ inputs.publish }}
+          TEST_MODE: ${{ inputs.test_mode }}
+          TEST_SKIP_REASON: ${{ inputs.skip_reason }}
+          VALIDATION_RUN: ${{ inputs.validation_run }}
+        run: |
+          mkdir -p release-plan
+          node tools/stableReleasePlan.mts write release-plan/stable-plan.json
       - name: План проверок
         id: checks
         run: |-
@@ -200,7 +252,7 @@ jobs:
 
           df -h "$GITHUB_WORKSPACE"
       - name: Идентичность кандидатов
-        if: ${{ needs.plan.outputs.platforms != 'linux' }}
+        if: ${{ needs.plan.outputs.platforms == 'macos' || needs.plan.outputs.platforms == 'linux-and-macos' }}
         env:
           CANDIDATE_VERSION: ${{ needs.plan.outputs.version }}
         run: node tools/platformCandidate.mts identity
@@ -210,7 +262,7 @@ jobs:
           go-version: '1.27.4'
           cache-dependency-path: go.sum
       - name: Идентичность выпуска
-        if: ${{ needs.plan.outputs.platforms == 'linux' }}
+        if: ${{ needs.plan.outputs.platforms == 'linux' || needs.plan.outputs.platforms == 'stable-all' }}
         run: node tools/release-identity.mts
         env:
           RELEASE_CHANNEL: ${{ inputs.channel }}
@@ -297,7 +349,7 @@ jobs:
         with:
           node-version: ${{ steps.node_runtime.outputs.version }}
       - name: Идентичность кандидатов
-        if: ${{ needs.plan.outputs.platforms != 'linux' }}
+        if: ${{ needs.plan.outputs.platforms == 'macos' || needs.plan.outputs.platforms == 'linux-and-macos' }}
         env:
           CANDIDATE_VERSION: ${{ needs.plan.outputs.version }}
         run: node tools/platformCandidate.mts identity
@@ -307,7 +359,7 @@ jobs:
           go-version: '1.27.4'
           cache-dependency-path: go.sum
       - name: Идентичность выпуска
-        if: ${{ needs.plan.outputs.platforms == 'linux' }}
+        if: ${{ needs.plan.outputs.platforms == 'linux' || needs.plan.outputs.platforms == 'stable-all' }}
         run: node tools/release-identity.mts
         env:
           RELEASE_CHANNEL: ${{ inputs.channel }}
@@ -346,7 +398,9 @@ jobs:
       - plan
       - server
       - web
-    if: ${{ !cancelled() && needs.plan.outputs.platforms == 'linux' && needs.plan.result == 'success' }}
+    if: >-
+      ${{ !cancelled() && needs.plan.result == 'success' &&
+          (needs.plan.outputs.platforms == 'linux' || needs.plan.outputs.platforms == 'stable-all') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 120
     outputs:
@@ -470,7 +524,17 @@ jobs:
           GRIGDESK_CTL_BUILD_OBSERVED: '1'
           GRIGDESK_RELEASE_ORIGIN: ${{ secrets.RELEASE_SITE_PUBLIC_ORIGIN || 'https://grigdesk.com' }}
       - name: Deb-пакет
-        run: node tools/buildDeb.mts
+        env:
+          OFFLINE_DEB: ${{ inputs.channel == 'release' }}
+        run: |
+          if [ "$OFFLINE_DEB" = true ]; then
+            node tools/buildDeb.mts "$PWD" --offline
+          else
+            node tools/buildDeb.mts
+          fi
+      - name: Офлайн-ZIP стабильного Linux x64
+        if: ${{ inputs.channel == 'release' }}
+        run: node tools/linuxOfflinePackage.mts release-artifacts
       - name: Свидетельство проверок
         run: |-
           cp release-plan/*.json release-artifacts/
@@ -490,9 +554,13 @@ jobs:
     needs:
       - plan
       - build
-    if: ${{ !cancelled() && needs.plan.outputs.platforms == 'linux' && needs.build.result == 'success' }}
+    if: >-
+      ${{ !cancelled() && needs.build.result == 'success' &&
+          (needs.plan.outputs.platforms == 'linux' || needs.plan.outputs.platforms == 'stable-all') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20
+    outputs:
+      proof_artifact_id: ${{ steps.proof_upload.outputs.artifact-id }}
     steps:
       - name: Исходники
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -530,6 +598,7 @@ jobs:
           GRIGDESK_RELEASE_REQUIRE_PIPELINE_RECEIPT: ${{ needs.plan.outputs.require_pipeline_receipt }}
           GRIGDESK_RELEASE_SOURCE_DIGEST: ${{ needs.plan.outputs.source_digest }}
       - name: Сохранение результата проверки
+        id: proof_upload
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: grigdesk-verified-${{ github.run_id }}-${{ github.run_attempt }}
@@ -542,7 +611,7 @@ jobs:
       - build
       - verify
     if: >-
-      ${{ !cancelled() && inputs.publish && needs.plan.outputs.platforms == 'linux' && needs.plan.result == 'success' &&
+      ${{ !cancelled() && inputs.publish && inputs.channel == 'dev' && needs.plan.outputs.platforms == 'linux' && needs.plan.result == 'success' &&
       needs.build.result == 'success' && needs.verify.result == 'success' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -1114,3 +1183,218 @@ jobs:
             printf '| Linux x64 | %s | %s | Пройдены |\n' "$LINUX_ID" "$LINUX_SHA" >> "$GITHUB_STEP_SUMMARY"
           fi
           printf '| macOS ARM64 | %s | %s | Пройдены |\n' "$MACOS_ID" "$MACOS_SHA" >> "$GITHUB_STEP_SUMMARY"
+
+  macos_stable_verify:
+    name: Стабильный пакет macOS Apple Silicon
+    needs: [plan, server, web]
+    if: ${{ success() && needs.plan.outputs.platforms == 'stable-all' }}
+    uses: ./.github/workflows/grigdesk-stable-native.yml
+    with:
+      target: darwin-arm64
+      runner: macos-15
+      plan_id: ${{ needs.plan.outputs.artifact_id }}
+      plan_digest: ${{ needs.plan.outputs.stable_plan_sha256 }}
+
+  linux_arm64_verify:
+    name: Стабильный пакет Linux ARM64
+    needs: [plan, server, web]
+    if: ${{ success() && needs.plan.outputs.platforms == 'stable-all' }}
+    uses: ./.github/workflows/grigdesk-stable-native.yml
+    with:
+      target: linux-arm64
+      runner: ubuntu-24.04-arm
+      plan_id: ${{ needs.plan.outputs.artifact_id }}
+      plan_digest: ${{ needs.plan.outputs.stable_plan_sha256 }}
+
+  windows_x64_verify:
+    name: Стабильный пакет Windows x64
+    needs: [plan, server, web]
+    if: ${{ success() && needs.plan.outputs.platforms == 'stable-all' }}
+    uses: ./.github/workflows/grigdesk-stable-native.yml
+    with:
+      target: windows-x64
+      runner: windows-2025
+      plan_id: ${{ needs.plan.outputs.artifact_id }}
+      plan_digest: ${{ needs.plan.outputs.stable_plan_sha256 }}
+
+  windows_arm64_verify:
+    name: Стабильный пакет Windows ARM64
+    needs: [plan, server, web]
+    if: ${{ success() && needs.plan.outputs.platforms == 'stable-all' }}
+    uses: ./.github/workflows/grigdesk-stable-native.yml
+    with:
+      target: windows-arm64
+      runner: windows-11-arm
+      plan_id: ${{ needs.plan.outputs.artifact_id }}
+      plan_digest: ${{ needs.plan.outputs.stable_plan_sha256 }}
+
+  android_verify:
+    name: Стабильный пакет Android
+    needs: [plan, server, web]
+    if: ${{ success() && needs.plan.outputs.platforms == 'stable-all' }}
+    uses: ./.github/workflows/grigdesk-stable-native.yml
+    with:
+      target: android
+      runner: ubuntu-24.04
+      plan_id: ${{ needs.plan.outputs.artifact_id }}
+      plan_digest: ${{ needs.plan.outputs.stable_plan_sha256 }}
+
+  stable_assets:
+    name: Подготовка всех стабильных загрузок
+    needs:
+      - plan
+      - build
+      - verify
+      - macos_stable_verify
+      - linux_arm64_verify
+      - windows_x64_verify
+      - windows_arm64_verify
+      - android_verify
+    if: >-
+      ${{ !cancelled() && needs.plan.outputs.platforms == 'stable-all' &&
+          needs.plan.result == 'success' &&
+          needs.build.result == 'success' &&
+          needs.verify.result == 'success' &&
+          needs.macos_stable_verify.result == 'success' &&
+          needs.linux_arm64_verify.result == 'success' &&
+          needs.windows_x64_verify.result == 'success' &&
+          needs.windows_arm64_verify.result == 'success' &&
+          needs.android_verify.result == 'success' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    outputs:
+      artifact_id: ${{ steps.assets.outputs.artifact-id }}
+      proof_artifact_id: ${{ steps.proof.outputs.artifact-id }}
+    env:
+      PLAN_ARTIFACT_ID: ${{ needs.plan.outputs.artifact_id }}
+      STABLE_PLAN_SHA256: ${{ needs.plan.outputs.stable_plan_sha256 }}
+      LINUX_BUILD_ARTIFACT_ID: ${{ needs.build.outputs.artifact_id }}
+      LINUX_VERIFY_PROOF_ARTIFACT_ID: ${{ needs.verify.outputs.proof_artifact_id }}
+      STABLE_NATIVE_ARTIFACTS: >-
+        {
+          "darwin-arm64": {
+            "id": "${{ needs.macos_stable_verify.outputs.artifact_id }}",
+            "digest": "${{ needs.macos_stable_verify.outputs.proof_sha256 }}"
+          },
+          "linux-arm64": {
+            "id": "${{ needs.linux_arm64_verify.outputs.artifact_id }}",
+            "digest": "${{ needs.linux_arm64_verify.outputs.proof_sha256 }}"
+          },
+          "windows-x64": {
+            "id": "${{ needs.windows_x64_verify.outputs.artifact_id }}",
+            "digest": "${{ needs.windows_x64_verify.outputs.proof_sha256 }}"
+          },
+          "windows-arm64": {
+            "id": "${{ needs.windows_arm64_verify.outputs.artifact_id }}",
+            "digest": "${{ needs.windows_arm64_verify.outputs.proof_sha256 }}"
+          },
+          "android": {
+            "id": "${{ needs.android_verify.outputs.artifact_id }}",
+            "digest": "${{ needs.android_verify.outputs.proof_sha256 }}"
+          }
+        }
+    steps:
+      - name: Исходники
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+      - name: Версия Node из manifest
+        id: node_runtime
+        run: |
+          node -p '"version="+require("./server/build/node-runtime.json").version' >> "$GITHUB_OUTPUT"
+      - name: Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: ${{ steps.node_runtime.outputs.version }}
+      - name: Допуск ID артефактов
+        run: |
+          jq -en '
+            [env.PLAN_ARTIFACT_ID, env.LINUX_BUILD_ARTIFACT_ID, env.LINUX_VERIFY_PROOF_ARTIFACT_ID,
+              (env.STABLE_NATIVE_ARTIFACTS | fromjson | .[].id)] |
+            all(test("^[1-9][0-9]*$")) and (length == (unique | length))
+          ' > /dev/null
+      - name: План точного выпуска
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          artifact-ids: ${{ needs.plan.outputs.artifact_id }}
+          path: release-plan
+          merge-multiple: true
+      - name: Сборка Linux x64
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          artifact-ids: ${{ needs.build.outputs.artifact_id }}
+          path: stable-input/linux-build
+          merge-multiple: true
+      - name: Доказательство Linux x64
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          artifact-ids: ${{ needs.verify.outputs.proof_artifact_id }}
+          path: stable-input/linux-proof
+          merge-multiple: true
+      - name: Проверенный пакет macOS Apple Silicon
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          artifact-ids: ${{ needs.macos_stable_verify.outputs.artifact_id }}
+          path: stable-input/native/darwin-arm64
+          merge-multiple: true
+      - name: Проверенный пакет Linux ARM64
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          artifact-ids: ${{ needs.linux_arm64_verify.outputs.artifact_id }}
+          path: stable-input/native/linux-arm64
+          merge-multiple: true
+      - name: Проверенный пакет Windows x64
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          artifact-ids: ${{ needs.windows_x64_verify.outputs.artifact_id }}
+          path: stable-input/native/windows-x64
+          merge-multiple: true
+      - name: Проверенный пакет Windows ARM64
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          artifact-ids: ${{ needs.windows_arm64_verify.outputs.artifact_id }}
+          path: stable-input/native/windows-arm64
+          merge-multiple: true
+      - name: Проверенный пакет Android
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          artifact-ids: ${{ needs.android_verify.outputs.artifact_id }}
+          path: stable-input/native/android
+          merge-multiple: true
+      - name: Инструменты ZIP
+        run: |
+          if ! command -v 7z >/dev/null || ! command -v unzip >/dev/null; then
+            sudo apt-get update
+            sudo apt-get install -y p7zip-full unzip
+          fi
+      - name: Подготовка девяти файлов
+        run: |
+          node tools/collectStableAssets.mts collect release-plan/stable-plan.json \
+            stable-input/linux-build stable-input/linux-proof stable-input/native stable-downloads
+      - name: Девять стабильных загрузок
+        id: assets
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: grigdesk-stable-downloads-${{ github.run_id }}-${{ github.run_attempt }}
+          path: stable-downloads/
+          if-no-files-found: error
+          compression-level: 0
+      - name: Отдельное доказательство выпуска
+        id: proof
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: grigdesk-stable-proof-${{ github.run_id }}-${{ github.run_attempt }}
+          path: stable-downloads/stable-assets-proof.json
+          if-no-files-found: error
+      - name: Итог стабильной выдачи
+        env:
+          ASSET_ID: ${{ steps.assets.outputs.artifact-id }}
+          PROOF_ID: ${{ steps.proof.outputs.artifact-id }}
+        run: |
+          {
+            printf '### Стабильные загрузки GrigDesk\n\n'
+            printf 'Комплект: ID %s. Доказательство: ID %s.\n\n' "$ASSET_ID" "$PROOF_ID"
+            jq -r '.assets[] | "- " + .name + " · SHA-256 `" + .sha256 + "`"' \
+              stable-downloads/stable-assets-proof.json
+          } >> "$GITHUB_STEP_SUMMARY"

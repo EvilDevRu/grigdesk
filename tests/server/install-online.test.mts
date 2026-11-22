@@ -4,13 +4,14 @@ import os from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
 import test from 'node:test';
-import { sign } from 'node:crypto';
+import { createPublicKey, sign } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import type { AddressInfo } from 'node:net';
 import type { TestContext } from 'node:test';
 
 import { canonicalJson } from '../../shared/lib/canonicalJson.ts';
+import { InstalledUpdateManager } from '../fixtures/release-v2/installedUpdate.ts';
 import { sha256, sha256File } from '../../shared/node/hash.ts';
 import { installedRelease } from '../helpers/installedUpdateFixture.mjs';
 import { loadInstalledModule } from '../helpers/installedBuildFixture.mjs';
@@ -341,4 +342,79 @@ test('ONLINE-SPACES: server unit сохраняет пути с пробелам
 
   assert.ok(unit.includes(`ExecStart="${box.paths.root}/bin/grigdesk-server"`));
   assert.ok(unit.includes(`EnvironmentFile=-"${box.paths.dataHome}/.env"`));
+});
+
+test('ONLINE-OFFLINE-RECEIPT: локальный источник оставляет штатный канал обновлений', async (t) => {
+  for (const updateSource of ['channel', 'directory'] as const) {
+    const box = await onlineBox(t);
+    const sourceDir = path.join(box.temporary, 'offline files');
+
+    await fs.mkdir(sourceDir, { mode: 0o700 });
+    await fs.writeFile(path.join(sourceDir, 'desktop.tar.gz'),
+      [...box.release.archives.values()][0]!);
+
+    const args = [...argvFor(box, 'remote'), '--source-dir', sourceDir];
+
+    assert.equal(await box.runMaintenance(args), 0);
+
+    const currentPath = path.join(box.paths.root, 'current.json');
+    const before = await fs.readFile(currentPath, 'utf8');
+    const receiptPath = path.join(box.paths.root, 'installation.json');
+    const receipt = JSON.parse(await fs.readFile(receiptPath, 'utf8'));
+    const marker = path.join(box.paths.dataHome, 'release-test.marker');
+
+    await fs.mkdir(box.paths.dataHome, { recursive: true, mode: 0o700 });
+    await fs.writeFile(marker, 'saved', { mode: 0o600 });
+
+    assert.equal(receipt.channel, 'release');
+    assert.equal(receipt.format, 1);
+
+    const next = installedRelease({
+      version: '0.3.1',
+      keys: {
+        privateKey: box.release.privateKey,
+        publicKey: createPublicKey(box.release.privateKey),
+      },
+    });
+
+    if (updateSource === 'channel') {
+      const manager = new InstalledUpdateManager({
+        root: box.paths.root,
+        channel: { latest: async () => next.envelope },
+        publicKeyPem: box.release.publicKeyPem,
+        probe: async () => assert.fail('createJob не запускает компонент'),
+      });
+      const job = await manager.createJob({
+        requestId: 'offline-to-channel',
+        manifestDigest: next.manifestDigest,
+        scope: 'desktop',
+      });
+
+      assert.equal(job.stage, 'queued');
+      assert.equal(job.target.desktop, 'generations/0.3.1/desktop');
+    } else {
+      const previousIndex = await fs.readFile(box.indexFile, 'utf8');
+      const previousArchive = await fs.readFile(path.join(sourceDir, 'desktop.tar.gz'));
+
+      await fs.writeFile(box.indexFile, JSON.stringify(next.index));
+      await fs.writeFile(path.join(sourceDir, 'desktop.tar.gz'), [...next.archives.values()][0]!);
+      assert.equal(await box.runMaintenance(args), 10);
+
+      const job = JSON.parse(await fs.readFile(path.join(box.paths.root, 'update/job.json'),
+        'utf8'));
+
+      assert.equal(job.stage, 'ready');
+      assert.equal(job.target.desktop, 'generations/0.3.1/desktop');
+
+      await fs.writeFile(box.indexFile, previousIndex);
+      await fs.writeFile(path.join(sourceDir, 'desktop.tar.gz'), previousArchive);
+      assert.equal(await box.runMaintenance(args), 10);
+      assert.equal(JSON.parse(await fs.readFile(path.join(box.paths.root, 'update/job.json'),
+        'utf8')).id, job.id);
+    }
+
+    assert.equal(await fs.readFile(marker, 'utf8'), 'saved');
+    assert.equal(await fs.readFile(currentPath, 'utf8'), before);
+    assert.deepEqual(box.source.requests(), []);
+  }
 });

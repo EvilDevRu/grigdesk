@@ -8,6 +8,8 @@ import { createRuntimeContextPlugin } from './context.mts';
 import { createModuleUrlsPlugin } from './moduleUrls.mts';
 import { engineEntries, executorEntries, renderEngineTable, renderExecutorTable } from './registries.mts';
 
+export type { BuildOptions } from 'esbuild';
+
 export interface ServerBundleInput {
   sourceRoot: string;
   workDir: string;
@@ -19,7 +21,7 @@ export interface ServerBundleInput {
  * Подменяет только таблицы сборки, не записывая сгенерированный код в исходники.
  * Относительные импорты разрешаются от прежнего каталога таблицы, без абсолютных строк в bundle.
  */
-function registryPlugin(root: string): Plugin {
+export function createRegistryPlugin(root: string): Plugin {
   const executors = path.join(root, 'server/src/lib/executors');
   const database = path.join(root, 'server/src/lib/db');
   const sources = new Map([
@@ -73,7 +75,7 @@ async function bundleServerGraph(
     banner: {
       js: mode === 'sea' ? SEA_REQUIRE_BANNER : "require = require('node:module').createRequire(__filename);",
     },
-    plugins: [...input.plugins ?? [], registryPlugin(input.sourceRoot),
+    plugins: [...input.plugins ?? [], createRegistryPlugin(input.sourceRoot),
       createRuntimeContextPlugin(input.sourceRoot, mode),
       urls.plugin],
     metafile: true,

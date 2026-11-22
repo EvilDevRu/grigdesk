@@ -7,6 +7,7 @@ import { sha256 } from '../shared/node/hash.ts';
 import { parseProductVersion } from '../shared/runtime/productReleaseVersion.ts';
 
 const WORKFLOW = '.github/workflows/grigdesk-release.yml';
+const STABLE_NATIVE_WORKFLOW = '.github/workflows/grigdesk-stable-native.yml';
 const PREVIOUS_FULL_WORKFLOW = '327853e9c7720731964077c47570ca1e0be46f6b';
 const CLASSIC_WORKFLOWS = new Set([
   '48a9468743794c93e8450336b400725e4b4d5079',
@@ -25,6 +26,13 @@ const CANDIDATE_JOBS = new Set([
   'Сборка кандидата Linux x64', 'Проверка кандидата Linux x64',
   'Сборка кандидата macOS ARM64', 'Проверка кандидата macOS ARM64', 'Выдача пары кандидатов',
 ]);
+const STABLE_NATIVE_JOB = [
+  'macOS Apple Silicon', 'Linux ARM64', 'Windows x64', 'Windows ARM64', 'Android',
+].map((target) => 'Стабильный пакет ' + target);
+const STABLE_SKIPPED = [
+  'Подготовка всех стабильных загрузок',
+  ...STABLE_NATIVE_JOB.flatMap((name) => [name, name + ' / Сборка', name + ' / Проверка']),
+];
 const ORCHESTRATION = new Set([
   WORKFLOW,
   'tools/releaseValidation.mts',
@@ -63,12 +71,20 @@ type Reader = (route: string) => Promise<Record<string, unknown>>;
  * Активный кандидат, неожиданный job или пропущенный test step дисквалифицируют reuse.
  */
 function verifyClassicJobs(
-  jobs: unknown[], pairedWorkflow: boolean, runId: number, headSha: string,
+  jobs: unknown[], pairedWorkflow: boolean, runId: number, headSha: string, stableLayout: boolean,
 ): void {
-  const expected = new Set([...CLASSIC_JOBS.keys(), ...(pairedWorkflow ? CANDIDATE_JOBS : [])]);
+  const candidates = new Set(pairedWorkflow ? CANDIDATE_JOBS : []);
+
+  if (stableLayout) {
+    candidates.delete('Выдача пары кандидатов');
+    candidates.add('Выдача проверенных кандидатов');
+  }
+
+  const expected = new Set([...CLASSIC_JOBS.keys(), ...candidates]);
+  const stableSkipped = new Set(stableLayout ? STABLE_SKIPPED : []);
 
   for (const job of jobs) {
-    if (!isRecord(job) || typeof job.name !== 'string' || !expected.delete(job.name)
+    if (!isRecord(job) || typeof job.name !== 'string'
       || job.status !== 'completed' || !Array.isArray(job.steps)
       || pairedWorkflow && (job.run_id !== runId || job.head_sha !== headSha)) {
       throw new Error('release_validation_jobs_incomplete');
@@ -76,7 +92,19 @@ function verifyClassicJobs(
 
     const skippedWithEmptySteps = job.conclusion === 'skipped' && job.steps.length === 0;
 
-    if (CANDIDATE_JOBS.has(job.name)) {
+    if (stableSkipped.delete(job.name)) {
+      if (!skippedWithEmptySteps) {
+        throw new Error('release_validation_candidate_run');
+      }
+
+      continue;
+    }
+
+    if (!expected.delete(job.name)) {
+      throw new Error('release_validation_jobs_incomplete');
+    }
+
+    if (candidates.has(job.name)) {
       if (!skippedWithEmptySteps) {
         throw new Error('release_validation_candidate_run');
       }
@@ -241,7 +269,10 @@ export async function validatePriorReleaseRun(input: ValidationInput, read: Read
       }
     }
   } else {
-    verifyClassicJobs(jobs.jobs, pairedWorkflow, Number(input.runId), run.head_sha);
+    const stableLayout = pairedWorkflow && priorWorkflow === currentWorkflow
+      && prior.some((entry) => entry.path === STABLE_NATIVE_WORKFLOW && entry.type === 'blob');
+
+    verifyClassicJobs(jobs.jobs, pairedWorkflow, Number(input.runId), run.head_sha, stableLayout);
   }
 
   const product = (files: TreeEntry[]) => JSON.stringify(
