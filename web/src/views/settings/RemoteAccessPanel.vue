@@ -189,14 +189,6 @@ const failureMessage = computed(() => {
     return t('settings.remotePortBusy');
   }
 
-  if (code === 'previous_installation_restored') {
-    return t('settings.remotePreviousRestored');
-  }
-
-  if (code === 'remote_rollback_failed') {
-    return t('settings.remoteRollbackFailed');
-  }
-
   if (code === 'relay_resume_required') {
     return t('settings.remoteResumeRequired');
   }

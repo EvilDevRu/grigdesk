@@ -335,31 +335,6 @@ test('RD-UI-04: недоступное чтение после lost ACK сохр
 });
 
 for (const locale of ['ru', 'en']) {
-  for (const code of ['previous_installation_restored', 'remote_rollback_failed']) {
-    test(`RD-UI-05: результат rollback имеет точную подпись, ${locale}/${code}`, async (t) => {
-      const h = await relayUi(t, { locale, jobs: [{
-        id: 'rollback-job',
-        revision: 8,
-        state: 'failed',
-        mode: 'restore',
-        error: { code },
-        steps: [{ name: 'rollback', state: code === 'remote_rollback_failed' ? 'failed' : 'completed' }],
-      }] });
-
-      await h.click(locale === 'ru' ? /Продолжить/iu : /Continue|Resume/iu);
-      assert.match(h.text(), locale === 'ru'
-        ? /Восстановление прежней службы/u : /Restore the previous service/u);
-
-      if (code === 'remote_rollback_failed') {
-        assert.match(h.text(), locale === 'ru'
-          ? /Откат на VPS не подтверждён/u : /rollback was not confirmed/u);
-      } else {
-        assert.match(h.text(), locale === 'ru'
-          ? /Прежняя служба VPS восстановлена/u : /previous VPS service was restored/u);
-      }
-    });
-  }
-
   test(`RD-UI-05: продолжение выбранного выпуска после обрыва, ${locale}`, async (t) => {
     const h = await relayUi(t, { locale, jobs: [{
       id: 'resume-job',

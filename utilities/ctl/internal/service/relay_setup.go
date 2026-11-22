@@ -505,8 +505,7 @@ func (ui wizard) waitForJob(job relayJob) (relayJob, error) {
 func (ui wizard) reportFailure(job relayJob) {
 	code := map[string]string{
 		"ssh_auth_failed": "authFailed", "unsupported_platform": "platformFailed", "relay_port_busy": "portBusy",
-		"route_conflict": "routeConflict", "previous_installation_restored": "rolledBack",
-		"remote_rollback_failed": "rollbackFailed", "deployment_cancelled": "cancelled",
+		"route_conflict": "routeConflict", "deployment_cancelled": "cancelled",
 	}[job.Error.Code]
 	if code == "" {
 		code = "failedGeneric"

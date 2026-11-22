@@ -218,8 +218,6 @@ export async function relaySetup(args: CliArgs, settings: Settings): Promise<num
               relay_port_busy: 'portBusy',
               waiting_vpn: 'waiting_vpn',
               route_conflict: 'routeConflict',
-              previous_installation_restored: 'rolledBack',
-              remote_rollback_failed: 'rollbackFailed',
               deployment_cancelled: 'cancelled',
             };
 
