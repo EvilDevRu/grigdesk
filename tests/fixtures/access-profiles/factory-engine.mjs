@@ -14,6 +14,11 @@ if (args[0] === 'slots') {
   process.exit(0);
 }
 
+if (args[0] === 'runners') {
+  process.stdout.write('deepseek\n');
+  process.exit(0);
+}
+
 const root = process.env.GRIGDESK_HOME;
 const registry = fs.readFileSync(path.join(root, 'seed.pipeline'), 'utf8');
 const value = (flag) => args.includes(flag) ? args[args.indexOf(flag) + 1] : '';

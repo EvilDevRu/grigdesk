@@ -6,6 +6,21 @@ import { test } from 'node:test';
 import { probeFactoryGotoCapability } from '../../server/src/lib/factoryRuntimeCapabilities.ts';
 import * as capabilities from '../../server/src/lib/factoryRuntimeCapabilities.ts';
 import { readExistingFactoryRuntimePin } from '../../server/src/lib/factoryRuntimePins.ts';
+import { stageFactoryCandidate } from '../../server/scripts/binary/factoryCandidate.mts';
+import { fixtureGo } from '../helpers/goBuildFixture.mts';
+
+const repoRoot = path.resolve(new URL('../..', import.meta.url).pathname);
+
+// Packaged-закрепление после Go-перехода обязано нести дескриптор фабрики и ELF.
+async function stageFactory(root) {
+  await stageFactoryCandidate({
+    root,
+    binary: fixtureGo('factory'),
+    profileAbi: path.join(repoRoot, 'engine/lib/delivery_contract.py'),
+    os: process.platform,
+    arch: process.arch,
+  });
+}
 
 test('probe запускает выбранный A с его окружением, а не текущий B; unknown не кэшируется', async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'arbiter-capability-a-'));
@@ -17,6 +32,7 @@ test('probe запускает выбранный A с его окружение
     schema: 1,
     helpers: [{ id: 'factory-runtime-pin', entry: 'pin.ts' }],
   }));
+  await stageFactory(root);
 
   let calls = 0;
   const selected = {
@@ -125,11 +141,18 @@ test('settings-pin-A-not-B', async (t) => {
     'нужен самостоятельный probe stage-runner-settings-v1');
 
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'stage-capability-A-'));
+  await stageFactory(root);
+  const helpers = path.join(root, 'server/runtime/helpers');
+  await fs.mkdir(helpers, { recursive: true });
+  await fs.writeFile(path.join(helpers, 'helpers.json'), JSON.stringify({
+    schema: 1,
+    helpers: [{ id: 'factory-runtime-pin', entry: 'pin.ts' }],
+  }));
   const selected = {
-    packageId: null,
+    packageId: 'stage-capability-a',
     runtimeRoot: root,
-    engineHome: root,
-    engineBin: `${root}/A with spaces`,
+    engineHome: path.join(root, 'engine'),
+    engineBin: path.join(root, 'engine', 'bin', 'factory'),
     node: `${root}/own-node`,
   };
   const config = {
