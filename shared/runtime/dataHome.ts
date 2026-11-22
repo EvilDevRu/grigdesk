@@ -66,7 +66,11 @@ function windowsDataPath(value: string): string | null {
 }
 
 function isWindows(platform?: string): boolean {
-  return (platform ?? (typeof process === 'undefined' ? undefined : process.platform)) === 'win32';
+  // Web-сборка компилирует этот модуль без node-типов, поэтому process берётся
+  // структурно из globalThis, а не как необъявленное глобальное имя.
+  const runtime = (globalThis as { process?: { platform?: string } }).process;
+
+  return (platform ?? runtime?.platform) === 'win32';
 }
 
 /**
