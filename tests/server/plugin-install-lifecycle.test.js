@@ -98,7 +98,9 @@ const requireFromServer = createRequire(new URL('../../server/package.json', imp
  */
 async function admissionFixture(t, options = {}) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-admission-'));
-  const app = requireFromServer('fastify')({ logger: false });
+  // Как у рабочего сервера: закрытие рвёт и висящие stream/WS ответы, иначе уборка
+  // фикстуры виснет на drain соединений (B6/B7 держат native stream), а не падает на проверке.
+  const app = requireFromServer('fastify')({ logger: false, forceCloseConnections: true });
   const lifecycle = createPluginLifecycle();
   const gate = new PluginAdmission({
     lifecycle,
