@@ -74,9 +74,14 @@ export interface EnvironmentProbes {
  * Выбирает цель по нативной паре ОС и архитектуры сборщика.
  * Системные условия проверяются после выбора цели.
  */
-export function selectDistributionTarget(platform: string, arch: string): 'linux-x64' | 'darwin-arm64' {
+export function selectDistributionTarget(platform: string, arch: string):
+'linux-x64' | 'linux-arm64' | 'darwin-arm64' {
   if (platform === 'linux' && arch === 'x64') {
     return 'linux-x64';
+  }
+
+  if (platform === 'linux' && arch === 'arm64') {
+    return 'linux-arm64';
   }
 
   if (platform === 'darwin' && arch === 'arm64') {

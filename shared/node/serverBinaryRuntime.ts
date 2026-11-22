@@ -160,8 +160,12 @@ export async function verifyServerBinary(binary: string,
   options: ServerBinaryProbeOptions & { home: string }): Promise<ServerBinaryVerification> {
   const expectedHost = options.expectedHost ?? process;
 
-  if (!(expectedHost.platform === 'linux' && expectedHost.arch === 'x64')
-    && !(expectedHost.platform === 'darwin' && expectedHost.arch === 'arm64')) {
+  // Linux выпускается под x64 и arm64, Darwin — только arm64.
+  const hostSupported = (expectedHost.platform === 'linux'
+    && (expectedHost.arch === 'x64' || expectedHost.arch === 'arm64'))
+    || (expectedHost.platform === 'darwin' && expectedHost.arch === 'arm64');
+
+  if (!hostSupported) {
     invalidRuntime();
   }
 
