@@ -443,10 +443,7 @@ export async function verifyFirstLaunch(
 
   delete env.GRIGDESK_ENV_FILE;
 
-  // Headless CI-раннер может не поддерживать GPU/sandbox Electron; флаги снимают
-  // ранний завис до инициализации логирования и запуска локального сервера.
-  const child = spawn(desktop, ['--no-sandbox', '--disable-gpu', '--disable-dev-shm-usage'],
-    { env, stdio: ['ignore', 'pipe', 'pipe'] });
+  const child = spawn(desktop, [], { env, stdio: ['ignore', 'pipe', 'pipe'] });
   let log = '';
   let launchError: Error | undefined;
 
