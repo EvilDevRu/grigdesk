@@ -1,7 +1,5 @@
 name: Проба Linux ARM64 (временная)
 on:
-  push:
-    branches: [ci/native-platforms-20261122]
   workflow_dispatch:
 permissions:
   contents: read
@@ -38,7 +36,11 @@ jobs:
           PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
         run: |
           sudo rm -rf -- /usr/share/dotnet /usr/local/.ghcup /opt/ghc /opt/hostedtoolcache/CodeQL
-          bash tools/ci/provision-ubuntu.sh --disposable-environment
+          # Сборке комплекта не нужен браузерный sandbox: на ARM64-раннере
+          # AppArmor/userns ограничены, поэтому ставим только системные пакеты.
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            bubblewrap ffmpeg ripgrep python3-pil xvfb libfuse2t64 unzip p7zip-full
           npm --prefix server ci --ignore-scripts --no-audit --no-fund
           npm --prefix web ci --ignore-scripts --no-audit --no-fund
           npm --prefix mobile ci --ignore-scripts --no-audit --no-fund

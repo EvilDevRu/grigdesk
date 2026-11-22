@@ -457,7 +457,9 @@ export async function verifyFirstLaunch(
     });
   }
 
-  const deadline = Date.now() + 180_000;
+  // На загруженном CI-раннере первый запуск окна и сервера может занимать
+  // несколько минут (антивирус проверяет свежие exe), поэтому запас больше обычного.
+  const deadline = Date.now() + 300_000;
 
   try {
     while (!log.includes('grigdesk_windows_local_ready')) {
