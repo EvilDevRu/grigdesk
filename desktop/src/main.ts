@@ -50,6 +50,7 @@ import { fitSurfaceBounds, placeSurfaceBounds } from './surfaceGeometry.ts';
 import type { SurfaceTarget } from '../../shared/desktop/surfaceContract.ts';
 
 import { windowKeyPath } from '../../shared/desktop/windowKeyPath.ts';
+import { DESKTOP_WINDOW_KEY_MESSAGE } from '../../server/src/lib/desktopParent.ts';
 import { clientUiDirectory } from './clientUi.ts';
 import { loadDocument } from './windowDocuments.ts';
 import {
@@ -63,7 +64,7 @@ import { RotatingLog } from '../../shared/node/rotatingLog.ts';
 import { finished } from 'node:stream/promises';
 import { createServerSupervisor } from './serverSupervisor.ts';
 import type { ServerStartupStage } from './serverSupervisor.ts';
-import { readSettings, writeSettings, updateSettings } from './settings.ts';
+import { prepareWindowsSettings, readSettings, writeSettings, updateSettings } from './settings.ts';
 import { API_VERSION } from '../../shared/client/apiVersion.ts';
 import { createClientRuntime } from './clientRuntime.ts';
 import { createKeyboardLayoutReader } from './keyboardLayout.ts';
@@ -176,6 +177,21 @@ function startOwnServer(runtime: ServerRuntime): ChildProcess {
 
   const child = spawnServer(runtime, 'pipe');
 
+  if (runtime.windowsInstalled) {
+    windowsWindowKey = null;
+    child.on('message', (message: { type?: string; key?: unknown } | null) => {
+      if (message?.type === DESKTOP_WINDOW_KEY_MESSAGE && typeof message.key === 'string'
+        && /^[A-Za-z0-9_-]{43}$/u.test(message.key) && child.connected) {
+        windowsWindowKey = { child, origin: runtime.origin, key: message.key };
+      }
+    });
+    child.once('close', () => {
+      if (windowsWindowKey?.child === child) {
+        windowsWindowKey = null;
+      }
+    });
+  }
+
   serverLogChildren.set(child, log);
   child.stdout?.pipe(log, { end: false });
   child.stderr?.pipe(log, { end: false });
@@ -203,6 +219,7 @@ function startOwnServer(runtime: ServerRuntime): ChildProcess {
 
 const serverLogs = new Map<string, RotatingLog>();
 const serverLogChildren = new Map<ChildProcess, RotatingLog>();
+let windowsWindowKey: { child: ChildProcess; origin: string; key: string } | null = null;
 
 /**
  * Exit сервера приходит раньше конца stdio: сначала дожидаемся хвоста труб.
@@ -1381,6 +1398,12 @@ async function prepare(signal: AbortSignal): Promise<void> {
     localAvailable: () => runtime != null || discovered.localAvailable,
     localAddress: () => runtime?.origin || discovered.address,
     windowKey: async (profile) => {
+      if (process.platform === 'win32') {
+        const current = windowsWindowKey;
+
+        return current?.origin === profile.address && current.child.connected ? current.key : '';
+      }
+
       const file = windowKeyPath({
         env: runtime?.env || process.env,
         uid: process.getuid?.(),
@@ -1575,6 +1598,10 @@ async function waitLocalServer(signal: AbortSignal): Promise<void> {
       if (ready === true && mainWindow === window && !window.isDestroyed() && pipeOrigin === origin
         && sameOrigin(window.webContents.getURL(), origin)
         && current?.profile?.id === id && current.status === 'online') {
+        if (process.platform === 'win32' && windowsWindowKey) {
+          writeLog('grigdesk_windows_local_ready');
+        }
+
         return;
       }
     }
@@ -1773,7 +1800,11 @@ async function boot(): Promise<void> {
     return;
   }
 
-  settingsFile = path.join(app.getPath('userData'), 'settings.json');
+  const userData = app.getPath('userData');
+
+  settingsFile = process.platform === 'win32' && packageDir
+    ? await prepareWindowsSettings(userData, path.join(packageDir, 'server', 'bin', 'factory.exe'))
+    : path.join(userData, 'settings.json');
   settings = await readSettings(settingsFile);
   setDesktopLocale(settings.uiLanguage ?? 'system', app.getPreferredSystemLanguages()[0] ?? '');
 

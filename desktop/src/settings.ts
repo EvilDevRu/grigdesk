@@ -8,6 +8,9 @@ import type { FileHandle } from 'node:fs/promises';
 import { locales } from '../../shared/i18n/catalogs.ts';
 
 import { recordOrNull } from '../../shared/lib/objects.ts';
+import {
+  ensureWindowsProtectedDirectory, readWindowsProtectedFile, writeWindowsProtectedFile,
+} from '../../shared/node/windowsProtectedFiles.ts';
 
 import { isToolWindowId } from '../../shared/desktop/toolWindowContract.ts';
 
@@ -50,6 +53,22 @@ export const DEFAULT_WINDOW: Readonly<WindowState> = Object.freeze({
 });
 
 const queues = new Map<string, Promise<void>>();
+let windowsFactory: string | null = null;
+
+/**
+ * Каталог Chromium остаётся отдельным. Закрытую подпапку настроек готовит
+ * Go-фабрика из установленного комплекта до чтения первого профиля.
+ */
+export async function prepareWindowsSettings(userData: string, factory: string): Promise<string> {
+  await fs.mkdir(userData, { recursive: true });
+
+  const directory = path.join(await fs.realpath(userData), 'grigdesk-settings');
+
+  await ensureWindowsProtectedDirectory(factory, directory);
+  windowsFactory = factory;
+
+  return path.join(directory, 'settings.json');
+}
 
 function dimension(value: unknown, fallback: number): number {
   return typeof value === 'number' && Number.isFinite(value)
@@ -164,7 +183,11 @@ export function normalizeSettings(value: unknown): DesktopSettings {
  */
 export async function readSettings(file: string): Promise<DesktopSettings> {
   try {
-    return normalizeSettings(JSON.parse(await fs.readFile(file, 'utf8')));
+    const text = windowsFactory
+      ? (await readWindowsProtectedFile(windowsFactory, file, 'file', 1024 * 1024)).toString('utf8')
+      : await fs.readFile(file, 'utf8');
+
+    return normalizeSettings(JSON.parse(text));
   } catch {
     return normalizeSettings(null);
   }
@@ -207,6 +230,13 @@ async function checkDestination(file: string): Promise<void> {
  * Очистка касается только temporary, который эта операция действительно создала.
  */
 async function atomicWrite(file: string, content: string): Promise<void> {
+  if (windowsFactory) {
+    await ensureWindowsProtectedDirectory(windowsFactory, path.dirname(file));
+    await writeWindowsProtectedFile(windowsFactory, file, content);
+
+    return;
+  }
+
   await checkDestination(file);
 
   const temporary = path.join(path.dirname(file), `${path.basename(file)}.tmp-${randomUUID()}`);

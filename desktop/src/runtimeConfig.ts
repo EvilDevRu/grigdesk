@@ -39,6 +39,7 @@ import type { RuntimeDescriptor } from '../../shared/desktop/desktopRuntime.ts';
 import { isNodeVersionSupported, MIN_NODE_VERSION } from '../../server/src/lib/nodeVersion.ts';
 import { localOrigin } from './connection.ts';
 import { cleanDesktopChildEnvironment } from './childEnvironment.ts';
+import { DESKTOP_CHILD_ENV } from '../../server/src/lib/desktopParent.ts';
 
 export type RuntimeProblem = 'not_installed' | 'invalid' | 'root' | 'web' | 'node' | 'package';
 
@@ -53,6 +54,7 @@ export interface ServerRuntime {
   graceMs: number;
   logPath: string;
   uiReleasesDir: string;
+  windowsInstalled?: true;
   preparation?: PreparationHandle;
 }
 
@@ -92,6 +94,78 @@ export interface RuntimeDependencies {
 
 const executeFile = promisify(execFile);
 
+/**
+ * Установщик кладёт Node и сервер рядом с каталогом окна. Маркер появляется
+ * только после установки обоих компонентов и не содержит исполняемых путей.
+ */
+async function loadWindowsRuntime(input: RuntimeLoadInput): Promise<RuntimeLoadResult | null> {
+  if (process.platform !== 'win32' || !input.appDir) {
+    return null;
+  }
+
+  const root = path.join(input.appDir, 'server');
+  const marker = await input.deps.readText(path.join(root, 'grigdesk-windows.json'));
+
+  if (marker === null) {
+    return null;
+  }
+  if (marker.trim() !== '{"format":1}') {
+    return { problem: 'invalid', message: desktopText('desktop.serverNotPrepared') };
+  }
+
+  const node = path.join(root, 'runtime', 'node.exe');
+  const entry = path.join(root, 'server', 'src', 'app.ts');
+  const factory = path.join(root, 'bin', 'factory.exe');
+
+  if (!await input.deps.exists(node, 'exec') || !await input.deps.exists(entry, 'file')
+    || !await input.deps.exists(factory, 'exec')) {
+    return { problem: 'invalid', message: desktopText('desktop.serverNotPrepared') };
+  }
+
+  const selectedHome = dataHome(input);
+  const dataRelative = path.relative(input.appDir, selectedHome);
+
+  if (!path.isAbsolute(dataRelative) && dataRelative !== '..' && !dataRelative.startsWith('..\\')) {
+    return { problem: 'invalid', message: desktopText('desktop.serverNotPrepared') };
+  }
+
+  const file = await input.deps.readText(envFilePath(input));
+  const dotenv = file === null ? {} : Object.fromEntries(Object.entries(parseEnv(file))
+    .filter((entry): entry is [string, string] => entry[1] !== undefined));
+  const port = effectivePort(input.env, dotenv);
+  const origin = localOrigin(`http://127.0.0.1:${port}`);
+
+  if (!origin || ['GRIGDESK_HOME', 'GRIGDESK_ENV_FILE'].some((name) => Object.hasOwn(dotenv, name))) {
+    return { problem: 'invalid', message: desktopText('desktop.serverNotPrepared') };
+  }
+
+  const env = cleanDesktopChildEnvironment({ ...dotenv, ...input.env });
+
+  env.GRIGDESK_HOME = selectedHome;
+  env.GRIGDESK_FACTORY_BIN = factory;
+  env.GRIGDESK_PORT = String(port);
+  env[DESKTOP_CHILD_ENV] = '1';
+
+  if (input.purpose === 'inspect') {
+    return { inspection: { origin, port, env } };
+  }
+
+  return {
+    runtime: {
+      root,
+      node,
+      serverCommand: node,
+      serverArgs: [entry],
+      windowsInstalled: true,
+      origin,
+      port,
+      env,
+      graceMs: stopGraceMs(input.env, dotenv),
+      logPath: dataPath(selectedHome, 'log'),
+      uiReleasesDir: dataPath(selectedHome, 'uiReleases'),
+    },
+  };
+}
 
 
 export const runtimeDependencies: RuntimeDependencies = {
@@ -440,6 +514,16 @@ export function loadServerRuntime(input: RuntimeLoadInput & { purpose?: 'start' 
  * Inspect не выдаёт spawn-ready runtime, start передаёт владение preparation handle.
  */
 export async function loadServerRuntime(input: RuntimeLoadInput): Promise<RuntimeLoadResult> {
+  try {
+    const windows = await loadWindowsRuntime(input);
+
+    if (windows) {
+      return windows;
+    }
+  } catch {
+    return { problem: 'invalid', message: desktopText('desktop.serverNotPrepared') };
+  }
+
   const descriptorPath = desktopRuntimePath(input);
   let text: string | null;
 
