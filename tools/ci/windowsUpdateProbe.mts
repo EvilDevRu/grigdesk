@@ -1,9 +1,11 @@
 import { execFile } from 'node:child_process';
+import { createPublicKey } from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
 
 import { sha256File } from '../../shared/node/hash.ts';
+import { RELEASE_SIGNING_PUBLIC_KEY } from '../../shared/runtime/releaseChannelContracts.ts';
 import {
   buildWindowsNative, productionWindowsKey, verifyFirstLaunch, verifyUninstall,
   verifyWindowsPackage, windowsStableInputs,
@@ -54,6 +56,7 @@ async function main(): Promise<void> {
 
   const input = await windowsStableInputs(target, planFile);
   const key = productionWindowsKey();
+  const publicKey = createPublicKey(RELEASE_SIGNING_PUBLIC_KEY);
   const local = process.env.LOCALAPPDATA;
 
   if (!local) {
@@ -74,8 +77,8 @@ async function main(): Promise<void> {
 
     await buildWindowsNative(input.target, previousPlan, previousSource, key);
     await buildWindowsNative(input.target, input.plan, currentSource, key);
-    await verifyWindowsPackage(previousSource, input.target, previousPlan, key);
-    await verifyWindowsPackage(currentSource, input.target, input.plan, key);
+    await verifyWindowsPackage(previousSource, input.target, previousPlan, publicKey);
+    await verifyWindowsPackage(currentSource, input.target, input.plan, publicKey);
 
     const helper = path.join(currentSource, 'grigdesk-maintenance.exe');
     const dataHome = path.join(work, 'Server Data');
