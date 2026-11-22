@@ -458,8 +458,9 @@ export async function verifyFirstLaunch(
   }
 
   // На загруженном CI-раннере первый запуск окна и сервера может занимать
-  // несколько минут (антивирус проверяет свежие exe), поэтому запас больше обычного.
-  const deadline = Date.now() + 600_000;
+  // до двадцати минут: антивирус проверяет свежие exe, а серверный Node стартует
+  // только после сканирования. Прежние 10 минут обрывали ожидание на старте Fastify.
+  const deadline = Date.now() + 1_200_000;
   let nextReport = Date.now() + 30_000;
 
   try {
@@ -527,11 +528,14 @@ export async function verifyFirstLaunch(
 
     // Пустой журнал сервера не объясняет отказ: дерево данных и процессы с номерами
     // сессий показывают, стартовал ли сервер и в какой сессии живёт видимое окно.
-    const quotedWork = work.replaceAll("'", "''");
+    // Сканируем только каталоги данных: рекурсия по всей установке с node_modules
+    // не укладывается в таймаут команды и даёт no-tree.
+    const dataDirs = [path.join(work, 'Server Data'), path.join(work, 'Window Data')]
+      .map((dir) => `'${dir.replaceAll("'", "''")}'`).join(',');
     const tree = await execute('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command',
-      `Get-ChildItem -Recurse -Force '${quotedWork}' | Select-Object FullName,Length`
+      `Get-ChildItem -Recurse -Force ${dataDirs} | Select-Object FullName,Length`
       + ' | Format-Table -AutoSize | Out-String -Width 300'],
-    { timeout: 15000, windowsHide: true }).then((r) => r.stdout).catch(() => 'no-tree');
+    { timeout: 20000, windowsHide: true }).then((r) => r.stdout).catch(() => 'no-tree');
     const processes = await execute('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command',
       "Get-Process | Where-Object {$_.ProcessName -match 'grigdesk|electron|node|factory'}"
       + ' | Select-Object Id,ProcessName,SessionId,Path | Format-Table -AutoSize | Out-String -Width 300'],
