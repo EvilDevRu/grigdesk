@@ -168,7 +168,11 @@ async function providersModule(
   const { config, claudeAuth, prefs } = opts;
   const usageAbort = new AbortController();
   const usageRequests = new Set<Promise<unknown>>();
-  const deps = { claudeAuth, signal: usageAbort.signal };
+  const deps = {
+    claudeAuth,
+    signal: usageAbort.signal,
+    fetchImpl: opts.accessProfiles?.fetchImpl,
+  };
   const serviceEnv = opts.env || process.env;
   const rawAdaptersOf = opts.getProviderAdapters || getProviderAdapters;
   const accessProfiles = new AccessProfileService(config as AccessConfig, serviceEnv,

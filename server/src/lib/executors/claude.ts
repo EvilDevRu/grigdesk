@@ -1965,7 +1965,7 @@ export default {
    * «Неделя» и пр. Ручка OAuth-подписки — работает только с токеном хостового CLI
    * (~/.claude/.credentials.json); пользователь явно попросил эту статистику.
    */
-  async usage(config: ClaudeConfig) {
+  async usage(config: ClaudeConfig, deps?: { fetchImpl?: typeof fetch }) {
     const env = accessEnvironment();
 
     if (env !== process.env && env.ANTHROPIC_API_KEY) {
@@ -1976,10 +1976,13 @@ export default {
       };
     }
 
+    // Транспорт чтения лимитов принадлежит снимку доступа: тестовый vendor и
+    // production-изоляция DNS приходят через fetchImpl, а не глобальный fetch.
     return classifyClaudeUsageResponse(await fetchClaudeUsage({
       claudeBin: config.claudeBin,
       oauthClientId: config.claudeOauthClientId,
       oauthTokenUrl: config.claudeOauthTokenUrl,
+      fetchImpl: deps?.fetchImpl,
     }));
   },
 
