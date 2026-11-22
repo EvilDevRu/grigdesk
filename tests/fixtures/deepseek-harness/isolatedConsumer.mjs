@@ -133,21 +133,17 @@ const glmSecond = await stage('GLM resume', () => runGlm({
   sessionId: glmFirst.sessionId,
   message: 'boundary-glm-second',
 }));
-const probe = await execute('/bin/bash', ['-c', [
-  'source "$FACTORY_HOME/lib/runners/deepseek.sh"',
-  'runner_deepseek_probe',
-].join('\n')], {
+// После Go-перехода пробу версии раннера делает сам DeepSeek-бинарник
+// (shell-адаптер runner_deepseek_probe удалён вместе с engine/lib).
+const probe = await execute(config.deepseekBin, ['--runtime-info', '--json'], {
   cwd: root,
   env: {
     PATH: process.env.PATH,
     HOME: process.env.HOME,
     GRIGDESK_HOME: path.join(root, 'data'),
-    FACTORY_HOME: path.join(root, 'engine'),
-    FACTORY_FORBID_LIVE: '0',
-    GRIGDESK_DEEPSEEK_NODE_BIN: process.execPath,
-    GRIGDESK_DEEPSEEK_BIN: config.deepseekBin,
-    GRIGDESK_DEEPSEEK_CACHE_DIR: config.deepseekCacheDir,
   },
+  timeout: 30000,
+  maxBuffer: 65536,
 });
 
 assert.equal(first.sessionId, second.sessionId);
