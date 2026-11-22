@@ -11,6 +11,7 @@ const built = new Map<string, string>();
 const components = new Map([
   ['tracker', 'tracker'], ['pipeline', 'pipeline'], ['routes', 'routes'], ['voice', 'voice'],
   ['grigdesk-ctl', 'ctl'], ['grigdesk-maintenance', 'maintenance'], ['grigdesk-relay', 'relay'],
+  ['factory', 'factory'],
 ]);
 
 /**

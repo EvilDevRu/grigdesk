@@ -54,6 +54,18 @@ async function fixture(t, { stubNpm = false } = {}) {
     '',
   ].join('\n'), { mode: 0o755 });
   await writeFile(path.join(directory, 'tools/ss'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+  // Go-переход: ctl run собирает движок через tools/build-factory.sh. Фикстура не
+  // несёт исходники фабрики, поэтому скрипт публикует заранее собранный бинарник.
+  const factoryBinary = fixtureGo('factory');
+  await writeFile(path.join(directory, 'tools/build-factory.sh'), [
+    '#!/usr/bin/env bash',
+    'set -euo pipefail',
+    'mkdir -p -- "$1"',
+    `cp ${shellQuote(factoryBinary)} "$1/factory"`,
+    'chmod 0755 -- "$1/factory"',
+    "printf '%s\\n' \"$1/factory\"",
+    '',
+  ].join('\n'), { mode: 0o755 });
   if (stubNpm) {
     await writeFile(path.join(directory, 'tools/npm'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
   }
