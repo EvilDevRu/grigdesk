@@ -132,10 +132,13 @@ test('DIST-BUILD-FAIL-GATE: настоящий source dist выполняет т
   await execute('git', ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid',
     'commit', '-qm', 'fixture'], { cwd: box.root });
 
+  // Go-ctl наследует PATH сборки; dist-сборке нужен Go 1.27.4 для resolveReleaseGoDirectory.
+  const goRoot = (await execute('go', ['env', 'GOROOT'])).stdout.trim();
   const result = await box.run(['dist', 'build'], {
     GRIGDESK_ARTIFACTS_DIR: artifacts,
     GRIGDESK_DIST_RUN_DIR: path.join(box.home, 'runs'),
     GRIGDESK_DIST_NODE_CACHE: cache,
+    PATH: `${path.join(goRoot, 'bin')}:${box.environment.PATH}`,
   });
 
   assert.equal(result.code, 1, result.stderr);
@@ -181,6 +184,7 @@ test('DIST-BUILD-FAIL-GATE: настоящий source dist выполняет т
     columns: 100,
     env: {
       ...box.environment,
+      PATH: `${path.join(goRoot, 'bin')}:${box.environment.PATH}`,
       LC_ALL: 'ru_RU.UTF-8',
       TERM: 'xterm-256color',
       GRIGDESK_ARTIFACTS_DIR: terminalArtifacts,
@@ -189,7 +193,7 @@ test('DIST-BUILD-FAIL-GATE: настоящий source dist выполняет т
   });
 
   await session.wait(/░+ 0%  Снимок исходников/u);
-  await session.wait(/\d+%  Сервер · tests-a  › Проверочная ошибка стадии/u, 12_000);
+  await session.wait(/\d+%  Сервер · tests-a(?: · \d+s)?  › Проверочная ошибка стадии/u, 12_000);
 
   const terminalResult = await session.done;
   const terminalFolders = await fs.readdir(terminalArtifacts);

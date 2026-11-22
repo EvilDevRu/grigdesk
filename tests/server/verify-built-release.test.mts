@@ -106,6 +106,20 @@ test('VERIFY-BUILT-INSTALLATION: официальный verifier доказыв�
   } : {};
   const { verifyBuiltRelease } = await loadInstalledModule(t, 'tools/verifyRelease.mts',
     built.signer.publicKeyPem, baseline);
+
+  // Fixture собран в канале release; verifier сверяет канал с env CI, поэтому
+  // тест фиксирует канал под свой fixture и восстанавливает окружение после.
+  const channelBefore = process.env.GRIGDESK_RELEASE_CHANNEL;
+
+  process.env.GRIGDESK_RELEASE_CHANNEL = 'release';
+  t.after(() => {
+    if (channelBefore === undefined) {
+      delete process.env.GRIGDESK_RELEASE_CHANNEL;
+    } else {
+      process.env.GRIGDESK_RELEASE_CHANNEL = channelBefore;
+    }
+  });
+
   const proof = await verifyBuiltRelease(built.directory, built.index.latest.payload.commit);
 
   assert.equal(proof.runtime.installation.length, 3);
