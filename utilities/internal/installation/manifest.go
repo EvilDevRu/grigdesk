@@ -371,7 +371,8 @@ func validPublishedFields(value []byte, platform Platform) bool {
 	}
 	switch platform.OS {
 	case "linux":
-		if !exactFields(fields.Platform, "os", "arch", "glibc") || platform.Arch != "x64" ||
+		if !exactFields(fields.Platform, "os", "arch", "glibc") ||
+			(platform.Arch != "x64" && platform.Arch != "arm64") ||
 			!glibcVersion.MatchString(platform.Glibc) {
 			return false
 		}
