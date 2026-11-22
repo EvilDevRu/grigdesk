@@ -92,6 +92,16 @@
       "timeoutMs": 1800000
     },
     {
+      "id": "go-binaries",
+      "group": "prepare-build",
+      "argv": [
+        "bash",
+        "-c",
+        "bash tools/build-go-utilities.sh \"$PWD/bin/utilities\" && bash tools/build-factory.sh \"$PWD/engine/bin\""
+      ],
+      "timeoutMs": 1800000
+    },
+    {
       "id": "server-environment",
       "group": "prepare-server",
       "needs": [

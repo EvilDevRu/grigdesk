@@ -507,6 +507,15 @@ function serverInstaller(t, {
     'done',
     '',
   ].join('\n'));
+  // Install собирает фабрику отдельным Go-скриптом в bin; заглушка создаёт бинарник.
+  writeFileSync(path.join(root, 'tools/build-factory.sh'), [
+    '#!/bin/bash',
+    'set -e',
+    'mkdir -p "$1"',
+    'printf \'#!/bin/sh\\nexit 0\\n\' > "$1/factory"',
+    'chmod 755 "$1/factory"',
+    '',
+  ].join('\n'), { mode: 0o755 });
   writeFileSync(path.join(fakeBin, 'npm'), '#!/bin/bash\nexit 0\n', { mode: 0o755 });
 
   if (previousLink) {

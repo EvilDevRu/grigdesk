@@ -391,7 +391,7 @@ for (const provider of PROVIDERS) {
     assert.match(descriptor.description, /Для вопросов и действий в GrigDesk/u);
     assert.match(run.message, /\[Справка GrigDesk\]/u);
     assert.match(run.message, /штатными инструментами и CLI/u);
-    assert.match(run.message, /bin\/grigdesk-ctl tracker/u);
+    assert.match(run.message, /bin\/utilities\/ctl tracker/u);
     assert.match(run.message, /Не запускай Vite, сборку или второй GrigDesk/u);
     assert.match(run.message, /Dev-стенд нужен для проверки изменений интерфейса/u);
     assert.deepEqual(await run.workTools.invoke('grigdesk_help', {

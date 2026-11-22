@@ -33,8 +33,9 @@ test('пакет DeepSeek закрепляет свои build deps и тот ж�
     new URL('../../deepseek/package-lock.json', import.meta.url), 'utf8',
   ));
   const pin = await readFile(new URL('../../deepseek/build/node-runtime.json', import.meta.url), 'utf8');
-  const trackerPin = await readFile(
-    new URL('../../tracker/build/node-runtime.json', import.meta.url), 'utf8',
+  // После Go-перехода tracker не имеет Node SEA-манифеста; общий pin сверяется с server.
+  const serverPin = await readFile(
+    new URL('../../server/build/node-runtime.json', import.meta.url), 'utf8',
   );
 
   assert.equal(manifest.name, 'grigdesk-deepseek');
@@ -49,7 +50,7 @@ test('пакет DeepSeek закрепляет свои build deps и тот ж�
     typescript: '5.9.3',
   });
   assert.equal(lock.packages[''].name, 'grigdesk-deepseek');
-  assert.equal(pin, trackerPin);
+  assert.equal(pin, serverPin);
   assert.equal(manifest.scripts.build, 'node scripts/buildBinary.mts');
   assert.equal(manifest.scripts.test, 'node scripts/test.mts');
   assert.equal(manifest.scripts['test:sea'], 'node scripts/test.mts --sea');
