@@ -188,6 +188,7 @@ export async function factoryDecisionFixture(t, { after = null, before = {}, cor
 
   await writeFile(factoryBin, '#!/usr/bin/env bash\n'
     + `printf 'factory %s\\n' "$*" >> '${callsLog}'\n`
+    + 'case "$1" in\n  runners) printf \'claude\\ndeepseek\\n\'; exit 0 ;;\nesac\n'
     + `${replace}exec sleep 5\n`, { mode: 0o755 });
   await writeFile(path.join(binDir, 'systemd-run'), '#!/usr/bin/env bash\n'
     + `printf 'systemd-run %s\\n' "$*" >> '${callsLog}'\nexit 0\n`, { mode: 0o755 });

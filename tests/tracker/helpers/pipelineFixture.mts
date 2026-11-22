@@ -1,6 +1,6 @@
 import type { TestContext } from 'node:test';
 
-import { goCandidate } from '../../helpers/goCandidate.mts';
+import { fixtureGo } from '../../helpers/goBuildFixture.mts';
 import { startHttpFixture } from './httpFixture.mts';
 import type { FixtureHandler } from './httpFixture.mts';
 import { runProcess, syntheticHome } from './processFixture.mts';
@@ -19,7 +19,7 @@ export async function pipelineFixture(t: TestContext, handler: FixtureHandler) {
             env?: Record<string, string>;
             signal?: AbortSignal;
         } = {}) {
-            const result = await runProcess(t, goCandidate('pipeline'), argv, {
+            const result = await runProcess(t, fixtureGo('pipeline'), argv, {
                 env: {
                     PATH: '',
                     HOME: home,

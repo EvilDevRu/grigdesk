@@ -3,7 +3,7 @@ import path from 'node:path';
 
 const names = new Set([
   'tracker', 'routes', 'pipeline', 'voice',
-  'grigdesk-relay', 'grigdesk-ctl', 'grigdesk-maintenance',
+  'grigdesk-relay', 'grigdesk-ctl', 'grigdesk-maintenance', 'factory',
 ]);
 
 /**
