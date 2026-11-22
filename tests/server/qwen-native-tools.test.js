@@ -24,6 +24,16 @@ import {
 
 const executeFile = promisify(execFileCallback);
 
+// Attached-guard проверки foreground-субагента требуют внешнего CLI с передачей
+// guard-контекста родителя (патченная сборка v0.28.0). Штатный 0.27.3 её не несёт:
+// AgentCore сбрасывает invocation context, и инструменты субагента недоступны до
+// обращения к серверному guard. Патч внешнего CLI согласуется отдельно, поэтому
+// приёмка патченной сборки включает GRIGDESK_QWEN_SUBAGENT_GUARD=1; на штатном CLI
+// проверки пропускаются с видимой причиной (docs/grigdesk/chat/qwen-native-tools.md).
+const subagentGuardSkip = process.env.GRIGDESK_QWEN_SUBAGENT_GUARD
+  ? false
+  : 'нужен патченный CLI с передачей guard-контекста родителя (GRIGDESK_QWEN_SUBAGENT_GUARD=1)';
+
 /**
  * Используется настоящий штатный discovery/lease, но окружение теста закреплено явно.
  * Синтетический PATH не зависит от .profile владельца и не меняет process.env глобально.
@@ -423,6 +433,7 @@ test('Qwen native: вход в план закрывает запись до у�
 
 test('Qwen native: foreground-субагент исполняет разрешённые инструменты через guard', {
   timeout: 90000,
+  skip: subagentGuardSkip,
 }, async (t) => {
   const fixture = await qwenNativeFixture(t);
   const adapter = await qwenAdapter({ runnable: true });
@@ -527,7 +538,9 @@ function sshBrokerFixture(fixture, canary) {
   };
 }
 
-test('Qwen native: субагент вызывает supervised_ssh list через брокер', { timeout: 90000 }, async (t) => {
+test('Qwen native: субагент вызывает supervised_ssh list через брокер', {
+  timeout: 90000, skip: subagentGuardSkip,
+}, async (t) => {
   const fixture = await qwenNativeFixture(t);
   const adapter = await qwenAdapter({ runnable: true });
   const model = await selectedModel(adapter, fixture);
@@ -563,7 +576,9 @@ test('Qwen native: субагент вызывает supervised_ssh list чер�
   await assert.rejects(access(canary), { code: 'ENOENT' });
 });
 
-test('Qwen native: exec субагента подтверждается в родительском чате', { timeout: 120000 }, async (t) => {
+test('Qwen native: exec субагента подтверждается в родительском чате', {
+  timeout: 120000, skip: subagentGuardSkip,
+}, async (t) => {
   const fixture = await qwenNativeFixture(t);
   const adapter = await qwenAdapter({ runnable: true });
   const model = await selectedModel(adapter, fixture);
