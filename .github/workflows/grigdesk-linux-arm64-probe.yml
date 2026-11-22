@@ -34,14 +34,18 @@ jobs:
         with:
           go-version: '1.27.4'
       - name: Зависимости комплекта
+        env:
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
         run: |
           sudo rm -rf -- /usr/share/dotnet /usr/local/.ghcup /opt/ghc /opt/hostedtoolcache/CodeQL
           bash tools/ci/provision-ubuntu.sh --disposable-environment
-          npm --prefix server ci --no-audit --no-fund
-          npm --prefix web ci --no-audit --no-fund
-          npm --prefix mobile ci --no-audit --no-fund
-          npm --prefix deepseek ci --no-audit --no-fund
+          npm --prefix server ci --ignore-scripts --no-audit --no-fund
+          npm --prefix web ci --ignore-scripts --no-audit --no-fund
+          npm --prefix mobile ci --ignore-scripts --no-audit --no-fund
+          npm --prefix deepseek ci --ignore-scripts --no-audit --no-fund
           npm --prefix desktop ci --ignore-scripts --no-audit --no-fund
+          node server/node_modules/esbuild/install.js
+          node web/node_modules/esbuild/install.js
           node desktop/node_modules/esbuild/install.js
           target="$RUNNER_TEMP/appimage-tools"
           bash tools/ci/prepare-release-desktop.sh "$target"

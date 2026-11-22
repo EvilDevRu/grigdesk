@@ -72,17 +72,21 @@ jobs:
       - name: Зависимости Unix-комплекта
         if: ${{ inputs.target == 'linux-arm64' || inputs.target == 'darwin-arm64' }}
         shell: bash
+        env:
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
         run: |
           if [ "$STABLE_NATIVE_TARGET" = linux-arm64 ]; then
             bash tools/ci/provision-ubuntu.sh --disposable-environment
           else
             /opt/homebrew/bin/brew bundle --file=tools/ci/Brewfile.macos
           fi
-          npm --prefix server ci --no-audit --no-fund
-          npm --prefix web ci --no-audit --no-fund
-          npm --prefix mobile ci --no-audit --no-fund
-          npm --prefix deepseek ci --no-audit --no-fund
+          npm --prefix server ci --ignore-scripts --no-audit --no-fund
+          npm --prefix web ci --ignore-scripts --no-audit --no-fund
+          npm --prefix mobile ci --ignore-scripts --no-audit --no-fund
+          npm --prefix deepseek ci --ignore-scripts --no-audit --no-fund
           npm --prefix desktop ci --ignore-scripts --no-audit --no-fund
+          node server/node_modules/esbuild/install.js
+          node web/node_modules/esbuild/install.js
           node desktop/node_modules/esbuild/install.js
           target="$RUNNER_TEMP/appimage-tools"
           bash tools/ci/prepare-release-desktop.sh "$target"
