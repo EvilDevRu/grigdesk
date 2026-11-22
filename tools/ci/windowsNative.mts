@@ -481,6 +481,7 @@ export async function verifyFirstLaunch(
 
         console.error(`window launch wait: exit=${child.exitCode} api=${api} `
           + `titles=${titles} log=${log.slice(-300)}`);
+
         const screen = path.join(process.env.LOCALAPPDATA ?? work, 'grigdesk-launch-screen.png')
           .replaceAll("'", "''");
 

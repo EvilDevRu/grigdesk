@@ -82,12 +82,12 @@ async function main(): Promise<void> {
       engineSha256: sha256(canonicalJson(payload.entries.filter((entry) =>
         entry.path.startsWith('engine/') || entry.path.startsWith('schemas/analytics/')))),
       buildInputs,
-      runtime: target === 'darwin-arm64' ? {
-        platform: 'darwin',
-        arch: 'arm64',
+      runtime: {
+        platform: target === 'darwin-arm64' ? 'darwin' : 'linux',
+        arch: target === 'linux-x64' ? 'x64' : 'arm64',
         node: '24.21.0',
         abi: '137',
-      } : undefined,
+      },
     });
 
     await writeFile(path.join(input.work, 'prepared-manifest.json'), JSON.stringify(manifest));
