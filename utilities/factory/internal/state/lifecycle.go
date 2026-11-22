@@ -13,7 +13,8 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"syscall"
+
+	"grigdesk.local/tools/utilities/factory/internal/host"
 )
 
 const lifecycleSegmentLimit = 256 * 1024 * 1024
@@ -96,7 +97,7 @@ func (t *taskState) openLifecycleFor(attempt Attempt, write, create bool) (*life
 		return nil, err
 	}
 	if create {
-		if err := syncDirectory(t.root, filepath.Dir(name)); err != nil {
+		if err := host.SyncDirectory(t.root, filepath.Dir(name)); err != nil {
 			return nil, err
 		}
 	}
@@ -104,14 +105,14 @@ func (t *taskState) openLifecycleFor(attempt Attempt, write, create bool) (*life
 	if err != nil {
 		return nil, err
 	}
-	lock, err := root.OpenFile(".", os.O_RDONLY|syscall.O_DIRECTORY|syscall.O_NOFOLLOW, 0)
+	lock, err := openDirectoryLock(root, ".", write)
 	if err != nil {
 		root.Close()
 		return nil, err
 	}
-	operation := syscall.LOCK_SH
+	operation := lockShared
 	if write {
-		operation = syscall.LOCK_EX
+		operation = lockExclusive
 	}
 	if err := flock(lock, operation); err != nil {
 		lock.Close()

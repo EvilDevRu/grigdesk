@@ -87,7 +87,7 @@ func ProviderKey(s string) string {
 // UpdateProfile под той же блокировкой сравнивает строку ревизии и сохраняет
 // комментарии и порядок ключей. Версии старого CLI понимают получившиеся байты.
 func UpdateProfile(path, revision string, updates map[string]string, create bool) error {
-	file, err := os.OpenFile(path+".lock", os.O_CREATE|os.O_RDWR|syscall.O_NOFOLLOW, 0600)
+	file, err := host.OpenPath(path+".lock", os.O_CREATE|os.O_RDWR, 0600, 0)
 	if err != nil {
 		return err
 	}

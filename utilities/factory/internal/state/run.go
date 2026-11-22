@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"grigdesk.local/tools/utilities/factory/internal/host"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -108,7 +109,7 @@ func rootsOverlap(first, second string) bool {
 		filepath.Clean(first) != first || filepath.Clean(second) != second {
 		return true
 	}
-	return first == second || strings.HasPrefix(first, second+"/") || strings.HasPrefix(second, first+"/")
+	return host.PathsOverlap(first, second)
 }
 
 // BeginRun создаёт новое случайное право в точной эпохе.

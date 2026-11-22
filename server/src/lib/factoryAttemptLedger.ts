@@ -1,3 +1,4 @@
+import { readFactoryWindowsFile } from './factoryWindowsFiles.ts';
 import { createHash } from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -120,6 +121,9 @@ function exactTimestamp(value: unknown, label: string): void {
 }
 
 async function regularBytes(file: string, label: string, { singleLink = false } = {}) {
+  if (process.platform === 'win32') {
+    return readFactoryWindowsFile(file, 'file').catch(() => fail(`${label}: protected file required`));
+  }
   let stat: Stats;
   try { stat = await fs.lstat(file); } catch { fail(`${label}: missing`); }
   if (!stat.isFile() || stat.isSymbolicLink() || (stat.mode & 0o022) !== 0
@@ -139,6 +143,11 @@ async function regularJson<Value = unknown>(
 }
 
 async function trustedDirectory(dir: string, label: string): Promise<void> {
+  if (process.platform === 'win32') {
+    await readFactoryWindowsFile(dir, 'directory').catch(() => fail(`${label}: protected directory required`));
+    return;
+  }
+
   let stat: Stats;
   try { stat = await fs.lstat(dir); } catch { fail(`${label}: missing`); }
   if (!stat.isDirectory() || stat.isSymbolicLink() || (stat.mode & 0o022) !== 0) {
@@ -535,7 +544,8 @@ export async function readFactoryAttemptLedger({ controlDir, stateDir, task, reg
   if (stateDir) {
     const canonicalState = await fs.realpath(stateDir).catch(() => fail('state root: missing'));
     const nested = (parent: string, child: string) => (
-      child === parent || child.startsWith(`${parent}${path.sep}`)
+      !path.isAbsolute(path.relative(parent, child))
+      && path.relative(parent, child) !== '..' && !path.relative(parent, child).startsWith(`..${path.sep}`)
     );
     if (nested(canonicalControl, canonicalState) || nested(canonicalState, canonicalControl)) {
       fail('trusted control and provider-writable state overlap');

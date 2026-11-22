@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"grigdesk.local/tools/utilities/factory/internal/host"
 	"grigdesk.local/tools/utilities/factory/internal/state"
 )
 
@@ -371,7 +372,7 @@ func existingExecutable(path string) (string, error) {
 		return "", err
 	}
 	file, err := os.Stat(physical)
-	if err != nil || !file.Mode().IsRegular() || file.Mode().Perm()&0111 == 0 {
+	if err != nil || !host.Executable(physical, file) {
 		return "", fmt.Errorf("CLI descriptor не исполняется")
 	}
 	return physical, nil

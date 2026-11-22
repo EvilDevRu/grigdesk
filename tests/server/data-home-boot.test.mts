@@ -282,6 +282,26 @@ test('DB-06 блокировка: ожидание, перехват, гонка
   assert.equal(fs.readFileSync(file, 'utf8'), newer);
 });
 
+test('DB-ANDROID блокировка без жёстких ссылок, конкурент и перезапуск', (t) => {
+  const f = fixture(t);
+  const file = path.join(f.root, 'server.lock');
+  const record = path.join(file, 'owner.json');
+  const first = owner(11);
+  const second = owner(22);
+  const deps = lockDeps({ platform: 'android', alive: () => true });
+
+  acquireDataHomeLock(file, first, deps);
+  assert.deepEqual(JSON.parse(fs.readFileSync(record, 'utf8')), first);
+  assert.throws(() => acquireDataHomeLock(file, second, deps), /уже пользуется сервер/);
+  releaseDataHomeLock(file, second, fs, 'android');
+  assert.deepEqual(JSON.parse(fs.readFileSync(record, 'utf8')), first);
+
+  acquireDataHomeLock(file, second, lockDeps({ platform: 'android', alive: () => false }));
+  assert.deepEqual(JSON.parse(fs.readFileSync(record, 'utf8')), second);
+  releaseDataHomeLock(file, second, fs, 'android');
+  assert.deepEqual(fs.readdirSync(f.root).filter((name) => name.startsWith('server.lock')), []);
+});
+
 test('DB-07 ранний импорт синхронен и не зависит от config', () => {
   const app = fs.readFileSync(path.join(ROOT, 'server/src/app.ts'), 'utf8');
 

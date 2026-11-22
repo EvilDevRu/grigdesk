@@ -9,7 +9,6 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	"grigdesk.local/tools/utilities/factory/internal/host"
@@ -227,7 +226,7 @@ func readRunLog(dir, name string, limit int64) []byte {
 		return nil
 	}
 	defer root.Close()
-	file, err := root.OpenFile(name, os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
+	file, err := host.OpenAt(root, name, os.O_RDONLY, 0, host.Nonblocking)
 	if err != nil {
 		return nil
 	}

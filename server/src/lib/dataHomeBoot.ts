@@ -31,6 +31,7 @@ export interface LockDeps {
   now: () => number;
   sleep: (ms: number) => void;
   waitMs: number;
+  platform?: NodeJS.Platform;
 }
 export interface PrepareDeps extends LockDeps { owner: LockOwner }
 
@@ -212,11 +213,35 @@ export function loadDataHomeEnv(file: string, env: NodeJS.ProcessEnv, fs: BootFs
 
 // Мусор или недоступный файл рассматривается как запись для осторожного перехвата.
 // Перехват потом сверяет переименованный файл, поэтому ошибочное чтение не отдаёт чужой lock.
-function readLock(file: string, fs: BootFs): string | null {
+function readLock(file: string, fs: BootFs, directory = false): string | null {
   try {
-    return fs.readFileSync(file, 'utf8');
+    return fs.readFileSync(lockRecordPath(file, directory), 'utf8');
   } catch {
     return null;
+  }
+}
+
+function lockRecordPath(lock: string, directory: boolean): string {
+  return directory ? path.join(lock, 'owner.json') : lock;
+}
+
+// На Android непустой каталог публикуется rename: ядро не заменяет чужой непустой каталог.
+// Так запись владельца целиком видна до того, как другое приложение сможет проверить блокировку.
+function publishLock(temp: string, file: string, fs: BootFs, directory: boolean): void {
+  if (directory) {
+    fs.renameSync(temp, file);
+  } else {
+    fs.linkSync(temp, file);
+  }
+}
+
+// Удаляет только собственный управляющий файл, сохраняя неожиданные записи.
+// Android-каталог непуст, пока в нём опубликован владелец.
+function removeLock(file: string, fs: BootFs, directory: boolean): void {
+  fs.unlinkSync(lockRecordPath(file, directory));
+
+  if (directory) {
+    fs.rmdirSync(file);
   }
 }
 
@@ -247,9 +272,9 @@ function liveOwner(record: LockOwner | null, owner: LockOwner, deps: LockDeps): 
   return current === null || current === record.starttime;
 }
 
-// После rename сверяем снимок: свежую чужую блокировку возвращаем только create-only link.
+// После rename сверяем снимок и возвращаем свежую чужую блокировку без перезаписи владельца.
 // Несовпадение останавливает старт, сохраняя чужую запись для её владельца.
-function retireLock(file: string, bytes: string | null, owner: LockOwner, fs: BootFs): void {
+function retireLock(file: string, bytes: string | null, owner: LockOwner, fs: BootFs, directory: boolean): void {
   const stale = `${file}.stale-${owner.pid}-${randomBytes(8).toString('hex')}`;
 
   try {
@@ -262,10 +287,12 @@ function retireLock(file: string, bytes: string | null, owner: LockOwner, fs: Bo
     throw error;
   }
 
-  if (readLock(stale, fs) !== bytes) {
+  if (readLock(stale, fs, directory) !== bytes) {
     try {
-      fs.linkSync(stale, file);
-      fs.unlinkSync(stale);
+      publishLock(stale, file, fs, directory);
+      if (!directory) {
+        removeLock(stale, fs, directory);
+      }
     } catch {
       // При занятом имени сохраняем чужую запись под stale, не заменяем новый lock.
     }
@@ -273,16 +300,22 @@ function retireLock(file: string, bytes: string | null, owner: LockOwner, fs: Bo
     throw new DataHomeError('Блокировка изменилась во время захвата; повторите запуск.');
   }
 
-  fs.unlinkSync(stale);
+  removeLock(stale, fs, directory);
 }
 
-// Содержимое публикуется целиком атомарным link; проигравший ожидает именно владельца PID.
+// Содержимое блокировки публикуется атомарно, проигравший ожидает владельца PID.
 // При живом владельце опрашивается процесс до срока; срок и сон подменяются тестом.
 export function acquireDataHomeLock(file: string, owner: LockOwner, deps: LockDeps): void {
   const { fs } = deps;
+  const directory = (deps.platform ?? process.platform) === 'android';
   const temp = `${file}.tmp-${owner.pid}-${randomBytes(8).toString('hex')}`;
   const deadline = deps.now() + deps.waitMs;
-  const fd = fs.openSync(temp, 'wx', 0o600);
+
+  if (directory) {
+    fs.mkdirSync(temp, { mode: 0o700 });
+  }
+
+  const fd = fs.openSync(lockRecordPath(temp, directory), 'wx', 0o600);
 
   try {
     fs.writeFileSync(fd, JSON.stringify(owner) + '\n');
@@ -294,20 +327,22 @@ export function acquireDataHomeLock(file: string, owner: LockOwner, deps: LockDe
   try {
     for (;;) {
       try {
-        fs.linkSync(temp, file);
+        publishLock(temp, file, fs, directory);
 
-        if (!sameOwner(parseLock(readLock(file, fs)), owner)) {
+        if (!sameOwner(parseLock(readLock(file, fs, directory)), owner)) {
           throw new DataHomeError('Блокировка перехвачена.');
         }
 
         return;
       } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'EEXIST') {
+        const code = (error as NodeJS.ErrnoException).code;
+
+        if (code !== 'EEXIST' && !(directory && code === 'ENOTEMPTY')) {
           throw error;
         }
       }
 
-      const bytes = readLock(file, fs);
+      const bytes = readLock(file, fs, directory);
       const record = parseLock(bytes);
 
       if (liveOwner(record, owner, deps)) {
@@ -319,20 +354,26 @@ export function acquireDataHomeLock(file: string, owner: LockOwner, deps: LockDe
 
         deps.sleep(Math.min(200, deadline - deps.now()));
       } else {
-        retireLock(file, bytes, owner, fs);
+        retireLock(file, bytes, owner, fs, directory);
       }
     }
   } finally {
-    fs.unlinkSync(temp);
+    if (!directory || stat(temp, fs)) {
+      removeLock(temp, fs, directory);
+    }
   }
 }
 
 // Сравниваются PID и время старта, поэтому повторно выданный PID не получает чужой lock.
 // Чужая или уже заменённая запись остаётся на месте: снимается только своя.
-export function releaseDataHomeLock(file: string, owner: LockOwner, fs: BootFs): void {
-  if (sameOwner(parseLock(readLock(file, fs)), owner)) {
+export function releaseDataHomeLock(
+  file: string, owner: LockOwner, fs: BootFs, platform: NodeJS.Platform = process.platform,
+): void {
+  const directory = platform === 'android';
+
+  if (sameOwner(parseLock(readLock(file, fs, directory)), owner)) {
     try {
-      fs.unlinkSync(file);
+      removeLock(file, fs, directory);
     } catch (error) {
       if (!missing(error)) {
         throw error;

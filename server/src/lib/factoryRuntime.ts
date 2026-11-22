@@ -4,7 +4,7 @@ import path from 'node:path';
 import { dataPath } from '../../../shared/runtime/dataHome.ts';
 import { profilesDirFor } from './runtimeLayout.ts';
 import type { RuntimeKind } from './runtimePaths.ts';
-import { FACTORY_GO_BINARY, readFactoryGoDescriptor } from './factoryGoDescriptor.ts';
+import { readFactoryGoDescriptor } from './factoryGoDescriptor.ts';
 
 export type FactoryEngineMode = 'source' | 'bundled' | 'external';
 
@@ -99,8 +99,10 @@ export function factoryRuntimePaths(input: {
   kind: RuntimeKind;
   root: string;
   env: Env;
+  platform?: string;
 }): FactoryRuntime {
   const mode = input.env.GRIGDESK_ENGINE_MODE ?? '';
+  const executable = (input.platform ?? process.platform) === 'win32' ? 'factory.exe' : 'factory';
 
   if (!ENGINE_MODES.has(mode)) {
     throw factoryConfigError('GRIGDESK_ENGINE_MODE: допустимо bundled или external',
@@ -109,7 +111,7 @@ export function factoryRuntimePaths(input: {
 
   if (mode === 'external') {
     const home = input.env.FACTORY_HOME ?? '';
-    const bin = input.env.GRIGDESK_FACTORY_BIN || path.join(home, 'bin', 'factory');
+    const bin = input.env.GRIGDESK_FACTORY_BIN || path.join(home, 'bin', executable);
 
     if (!path.isAbsolute(home) || !path.isAbsolute(bin)) {
       throw factoryConfigError('Внешний движок требует абсолютные FACTORY_HOME и GRIGDESK_FACTORY_BIN',
@@ -129,7 +131,7 @@ export function factoryRuntimePaths(input: {
     return {
       mode: 'source',
       home: input.env.FACTORY_HOME || path.join(input.root, 'engine'),
-      bin: input.env.GRIGDESK_FACTORY_BIN || path.join(input.root, 'bin/factory'),
+      bin: input.env.GRIGDESK_FACTORY_BIN || path.join(input.root, 'bin', executable),
       protocol: 'go-v1',
       ignored: [],
     };
@@ -137,14 +139,16 @@ export function factoryRuntimePaths(input: {
 
   const home = path.join(input.root, 'engine');
 
-  if (!readFactoryGoDescriptor(input.root)) {
+  const descriptor = readFactoryGoDescriptor(input.root);
+
+  if (!descriptor) {
     throw factoryConfigError('В комплекте отсутствует Go-фабрика', 'factory_runtime_engine_invalid');
   }
 
   return {
     mode: 'bundled',
     home,
-    bin: path.join(input.root, FACTORY_GO_BINARY),
+    bin: path.join(input.root, descriptor.path),
     protocol: 'go-v1',
     ignored: ENGINE_OVERRIDES.filter((key) => Boolean(input.env[key])),
   };

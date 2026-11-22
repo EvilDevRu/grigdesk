@@ -1,3 +1,5 @@
+//go:build unix && !android
+
 package host
 
 import (

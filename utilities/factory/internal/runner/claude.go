@@ -12,7 +12,6 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"syscall"
 
 	"grigdesk.local/tools/utilities/factory/internal/host"
 )
@@ -90,8 +89,10 @@ func runClaudeAdapter(run Run, binary, settings, prompt string, policy routePoli
 
 func trustedClaudeSettings(control, path string) error {
 	base, err := filepath.EvalSymlinks(control)
-	if err != nil || base != control || control == "/" || !filepath.IsAbs(control) ||
-		!strings.HasPrefix(path, control+"/") || filepath.Clean(path) != path {
+	relative, relativeErr := filepath.Rel(control, path)
+	if err != nil || base != control || filepath.Dir(control) == control || !filepath.IsAbs(control) ||
+		!filepath.IsAbs(path) || filepath.Clean(path) != path || relativeErr != nil ||
+		relative == "." || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
 		return fmt.Errorf("Claude settings вне физического control root")
 	}
 	real, err := filepath.EvalSymlinks(path)
@@ -103,19 +104,17 @@ func trustedClaudeSettings(control, path string) error {
 		return err
 	}
 	defer root.Close()
-	info, err := root.Stat(".")
-	if err != nil || !info.IsDir() || !privateOwned(info, 0700, false) {
+	if !privateDirectory(control) {
 		return fmt.Errorf("Claude settings: недоверенный control root")
 	}
-	name := strings.TrimPrefix(path, control+"/")
-	file, err := root.OpenFile(name, os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
+	file, err := host.OpenAt(root, relative, os.O_RDONLY, 0, host.Nonblocking)
 	if err != nil {
 		return err
 	}
 	defer file.Close()
-	info, err = file.Stat()
+	info, err := file.Stat()
 	const limit = 2 * 1024 * 1024
-	if err != nil || !info.Mode().IsRegular() || !privateOwned(info, 0400, true) || info.Size() > limit {
+	if err != nil || !info.Mode().IsRegular() || (!host.PrivateMode(file, info, 0400) || !host.SingleLink(file, info)) || info.Size() > limit {
 		return fmt.Errorf("Claude settings: недоверенный файл")
 	}
 	raw, err := io.ReadAll(io.LimitReader(file, limit+1))
@@ -125,9 +124,16 @@ func trustedClaudeSettings(control, path string) error {
 	return validateClaudeSettings(raw, control)
 }
 
-func privateOwned(info os.FileInfo, mode os.FileMode, single bool) bool {
-	st, ok := info.Sys().(*syscall.Stat_t)
-	return ok && st.Uid == uint32(os.Geteuid()) && info.Mode().Perm() == mode && (!single || st.Nlink == 1)
+// privateDirectory удерживает открытый каталог на протяжении проверки прав.
+// Смена пути после открытия не подменяет подтверждённого владельца.
+func privateDirectory(path string) bool {
+	file, err := host.OpenPath(path, os.O_RDONLY, 0, host.Directory)
+	if err != nil {
+		return false
+	}
+	defer file.Close()
+	info, err := file.Stat()
+	return err == nil && info.IsDir() && host.PrivateMode(file, info, 0700) && host.FileOwner(file, info)
 }
 
 func validateClaudeSettings(raw []byte, control string) error {

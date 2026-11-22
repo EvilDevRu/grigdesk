@@ -2,6 +2,7 @@ import { randomBytes } from 'node:crypto';
 import { constants } from 'node:fs';
 import fs from 'node:fs/promises';
 import type { FileHandle } from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 
 import type { FastifyInstance } from 'fastify';
@@ -13,6 +14,26 @@ export interface WindowAuthState {
 
 function missingFile(error: unknown): boolean {
   return typeof error === 'object' && error !== null && 'code' in error && error.code === 'ENOENT';
+}
+
+/**
+ * Bionic Node читает UID процесса через системный userInfo без process.getuid.
+ * Невозможность определить владельца запрещает публикацию ключа.
+ */
+export function windowKeyOwnerUid(): number | undefined {
+  const uid = process.getuid?.();
+
+  if (uid !== undefined || process.platform !== 'android') {
+    return uid;
+  }
+
+  try {
+    const androidUid = os.userInfo().uid;
+
+    return Number.isSafeInteger(androidUid) && androidUid >= 0 ? androidUid : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /**
@@ -58,7 +79,7 @@ async function replaceableKey(file: string, uid: number): Promise<void> {
  * Серверный lifecycle отдельно решает, когда разрешено начинать эту запись.
  */
 export async function writeWindowKey(file: string): Promise<string> {
-  const uid = process.getuid?.();
+  const uid = windowKeyOwnerUid();
 
   if (uid === undefined) {
     throw new Error('Не удалось определить владельца ключа окна.');

@@ -3,7 +3,7 @@ import { constants } from 'node:fs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
-import { FACTORY_GO_BINARY, readFactoryGoDescriptor } from './factoryGoDescriptor.ts';
+import { factoryGoBinaryPath, readFactoryGoDescriptor } from './factoryGoDescriptor.ts';
 import type { FactoryEngineProtocol } from './factoryRuntime.ts';
 
 import { canonicalJson } from '../../../shared/lib/canonicalJson.ts';
@@ -271,7 +271,7 @@ export async function validateFactoryRuntime(
   await assertPhysicalRuntimePath(input.node, false);
 
   if (input.packageId && readFactoryGoDescriptor(input.runtimeRoot)
-    && input.engineBin !== path.join(input.runtimeRoot, FACTORY_GO_BINARY)) {
+    && input.engineBin !== path.join(input.runtimeRoot, factoryGoBinaryPath())) {
     throw runtimeError('factory_runtime_engine_invalid');
   }
 }

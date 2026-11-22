@@ -14,6 +14,8 @@ import { sha256 } from '../../../../shared/node/hash.ts';
 import { isRecord } from '../../../../shared/lib/objects.ts';
 
 import { acquireKernelFileLock } from '../../lib/kernelLock.ts';
+import { acquireWindowsCatalogLock } from './windowsLock.ts';
+import { syncRoutesDirectory } from './routeDurability.ts';
 import {
   assertProfileId,
   assertRevisionHash,
@@ -204,15 +206,11 @@ async function writeDurable(file: string, bytes: Buffer): Promise<void> {
 }
 
 async function syncDirectory(directory: string): Promise<void> {
-  let handle: FileHandle | undefined;
   try {
-    handle = await fs.open(directory, 'r');
-    await handle.sync();
+    await syncRoutesDirectory(directory);
   } catch {
     // На некоторых FS fsync каталога недоступен. Atomic rename от этого не перестаёт
     // быть атомарным; теряется лишь дополнительная гарантия пережить power loss.
-  } finally {
-    await handle?.close();
   }
 }
 
@@ -264,6 +262,13 @@ export class RoutesStore {
       throw storeError('ROUTES_V2_INVALID_SCHEMA', 'Корень filesystem нельзя использовать как baseDir');
     }
     this.lockTimeoutMs = lockTimeoutMs;
+  }
+
+  /** Проверяет весь путь до передачи движку, затем разворачивает имя тома и алиасы 8.3 на Windows. */
+  async engineDirectory(): Promise<string> {
+    const directory = await this._baseDirectory({ create: false });
+
+    return process.platform === 'win32' ? fs.realpath(directory) : directory;
   }
 
   async _baseDirectory({ create }: { create: boolean }): Promise<string> {
@@ -931,15 +936,17 @@ export class RoutesStore {
     } catch (error) {
       if (errorCode(error) !== 'ENOENT') throw error;
     }
-    const held = await acquireKernelFileLock({
-      lockPath,
-      timeoutMs: this.lockTimeoutMs,
-      timeoutCode: 'ROUTES_V2_LOCKED',
-      unavailableCode: 'ROUTES_V2_LOCK_UNAVAILABLE',
-      lostCode: 'ROUTES_V2_LOCK_LOST',
-      label: 'routes current',
-      errorFactory: (code, message) => storeError(code, message),
-    });
+    const held = process.platform === 'win32'
+      ? await acquireWindowsCatalogLock(catalogDir, this.lockTimeoutMs)
+      : await acquireKernelFileLock({
+        lockPath,
+        timeoutMs: this.lockTimeoutMs,
+        timeoutCode: 'ROUTES_V2_LOCKED',
+        unavailableCode: 'ROUTES_V2_LOCK_UNAVAILABLE',
+        lostCode: 'ROUTES_V2_LOCK_LOST',
+        label: 'routes current',
+        errorFactory: (code, message) => storeError(code, message),
+      });
     try {
       held.assertHeld();
       const keys = new Set(active ?? []);

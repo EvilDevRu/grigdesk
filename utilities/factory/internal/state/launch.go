@@ -45,16 +45,14 @@ func (s Store) LockOrchestrator(task string) (*os.File, int, error) {
 }
 
 func openNamedLock(root *os.Root, name string) (*os.File, error) {
-	flags := os.O_RDWR | os.O_CREATE | syscall.O_NOFOLLOW | syscall.O_NONBLOCK
-	lock, err := root.OpenFile(name, flags, 0600)
+	flags := os.O_RDWR | os.O_CREATE
+	lock, err := host.OpenAt(root, name, flags, 0600, host.Nonblocking)
 	if err != nil {
 		return nil, err
 	}
 	info, err := lock.Stat()
-	if err == nil && info.Mode().IsRegular() && ownedByInvoker(info) {
-		if st, ok := info.Sys().(*syscall.Stat_t); ok && st.Nlink == 1 {
-			return lock, nil
-		}
+	if err == nil && info.Mode().IsRegular() && host.FileOwner(lock, info) && host.SingleLink(lock, info) {
+		return lock, nil
 	}
 	lock.Close()
 	return nil, fmt.Errorf("недопустимый файл lock")
@@ -124,7 +122,7 @@ func (s Store) SharedLease(attempt Attempt, resources []string, operation string
 		return err
 	}
 	defer lock.Close()
-	if err := flock(lock, syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+	if err := flock(lock, lockExclusive|lockNonblocking); err != nil {
 		return fmt.Errorf("%w: shared lease занят", ErrConflict)
 	}
 	expected := attempt.ID
@@ -157,7 +155,7 @@ func (s Store) SharedLease(attempt Attempt, resources []string, operation string
 			return err
 		}
 	}
-	return syncDirectory(root, dir)
+	return host.SyncDirectory(root, dir)
 }
 
 func leaseRecord(owner Attempt, resource, id string) []byte {
@@ -210,5 +208,5 @@ func (s Store) FinishAttempt(attempt Attempt, terminal, reason string) error {
 	if err := task.root.Remove("active-attempt.json"); err != nil {
 		return err
 	}
-	return syncDirectory(task.root, ".")
+	return host.SyncDirectory(task.root, ".")
 }

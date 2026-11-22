@@ -10,7 +10,8 @@ import (
 	"path/filepath"
 	"reflect"
 	"sync"
-	"syscall"
+
+	"grigdesk.local/tools/utilities/factory/internal/host"
 )
 
 const lineageBytesLimit = 64 * 1024
@@ -90,7 +91,7 @@ func (s Store) ChangeLineage(operation string, raw []byte) (map[string]any, erro
 		return nil, err
 	}
 	if reflect.DeepEqual(current, next) {
-		return current, syncDirectory(dir.root, ".")
+		return current, host.SyncDirectory(dir.root, ".")
 	}
 	if err := dir.publish(next, before); err != nil {
 		return nil, err
@@ -137,14 +138,14 @@ func (s Store) openLineage(provider, thread string, write bool) (lineageDir, err
 		root.Close()
 		return dir, err
 	}
-	lock, err := root.OpenFile(lockName, os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_DIRECTORY, 0)
+	lock, err := openDirectoryLock(root, lockName, write)
 	if err != nil {
 		root.Close()
 		return dir, err
 	}
-	operation := syscall.LOCK_SH
+	operation := lockShared
 	if write {
-		operation = syscall.LOCK_EX
+		operation = lockExclusive
 	}
 	if err := flock(lock, operation); err != nil {
 		lock.Close()

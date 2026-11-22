@@ -31,7 +31,7 @@ func runACPWrapper(
 	info, err := os.Stat(run.Binary)
 	physical, pathErr := filepath.EvalSymlinks(run.Binary)
 	if err != nil || pathErr != nil || physical != run.Binary ||
-		!info.Mode().IsRegular() || info.Mode().Perm()&0111 == 0 {
+		!host.Executable(run.Binary, info) {
 		return host.ProcessResult{}, adapterError(4, "бинарник descriptor недоступен")
 	}
 	if run.Wrapper != "" {

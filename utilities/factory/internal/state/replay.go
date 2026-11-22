@@ -10,6 +10,8 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+
+	"grigdesk.local/tools/utilities/factory/internal/host"
 )
 
 // ReplayPending достраивает запись под task lock, не выполняя повторный effect.
@@ -93,7 +95,7 @@ func (t *taskState) driveReceipt(
 	if err := t.root.Rename(name, archive); err != nil {
 		return current, "", 74, err
 	}
-	if err := syncDirectory(t.root, filepath.Dir(name)); err != nil {
+	if err := host.SyncDirectory(t.root, filepath.Dir(name)); err != nil {
 		return current, "", 74, err
 	}
 	return current, "stale", 3, nil
@@ -214,7 +216,7 @@ func (s Store) AckPending(task, attempt, eventHash string) error {
 	if err := t.root.Remove(name); err != nil {
 		return err
 	}
-	return syncDirectory(t.root, filepath.Dir(name))
+	return host.SyncDirectory(t.root, filepath.Dir(name))
 }
 
 func (receipt PendingReceipt) baseCursor() (pendingCursor, [32]byte, error) {

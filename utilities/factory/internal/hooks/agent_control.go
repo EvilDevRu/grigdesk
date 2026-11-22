@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	"grigdesk.local/tools/utilities/factory/internal/host"
@@ -180,10 +179,11 @@ func isAgentControlDirectory(path string) bool {
 	if err != nil || physical != path {
 		return false
 	}
-	info, err := os.Lstat(path)
-	if err != nil || !info.IsDir() || info.Mode().Perm() != 0700 {
+	file, err := host.OpenPath(path, os.O_RDONLY, 0, host.Directory)
+	if err != nil {
 		return false
 	}
-	stat, ok := info.Sys().(*syscall.Stat_t)
-	return ok && stat.Uid == uint32(os.Geteuid())
+	defer file.Close()
+	info, err := file.Stat()
+	return err == nil && info.IsDir() && host.FileOwner(file, info) && host.PrivateMode(file, info, 0700)
 }

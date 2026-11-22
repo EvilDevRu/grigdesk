@@ -8,7 +8,6 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"syscall"
 )
 
 type DebugSetting struct {
@@ -58,7 +57,7 @@ func WriteDebugFile(config, profile string, setting DebugSetting) error {
 		return err
 	}
 	defer lock.Close()
-	if err := flock(lock, syscall.LOCK_EX); err != nil {
+	if err := flock(lock, lockExclusive); err != nil {
 		return err
 	}
 	current, err := readDebugFile(dir, name)

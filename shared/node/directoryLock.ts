@@ -7,6 +7,7 @@ import { setTimeout as pause } from 'node:timers/promises';
 import {
   darwinProcessOwnerState, moveDarwinLockDirectory, readDarwinProcessIdentity, tryDarwinInstallLease,
 } from './processIdentity.ts';
+import { readWindowsProcessStart } from './windowsProcessIdentity.ts';
 
 export const DIRECTORY_LOCK_SUFFIXES = ['.lock', '.install-lock', '.select-lock', '.cutover-lock'] as const;
 
@@ -62,6 +63,11 @@ export async function processOwnerState(
 ): Promise<'alive' | 'dead' | 'unknown'> {
   if (process.platform === 'darwin' && probe === actualProbe) {
     return darwinProcessOwnerState(owner);
+  }
+  if (process.platform === 'win32' && probe === actualProbe) {
+    const { starttime, dead } = await readWindowsProcessStart(owner.pid);
+
+    return dead || starttime && starttime !== owner.starttime ? 'dead' : starttime ? 'alive' : 'unknown';
   }
 
   let permitted = true;
@@ -495,6 +501,9 @@ async function ownStarttime(): Promise<string | undefined> {
     const owner = await readDarwinProcessIdentity(process.pid);
 
     return owner.state === 'alive' ? owner.identity.starttime : undefined;
+  }
+  if (process.platform === 'win32') {
+    return (await readWindowsProcessStart(process.pid)).starttime;
   }
 
   return procFields(await actualProbe.readStat(process.pid))[19];

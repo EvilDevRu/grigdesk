@@ -93,10 +93,14 @@ func bridgeProcess(invocation Invocation, operation string, args ...string) (hos
 	if err := checkWorkingDirectory(invocation.Directory); err != nil {
 		return host.Process{}, err
 	}
+	shell, err := profileShell()
+	if err != nil {
+		return host.Process{}, err
+	}
 	argv := append([]string{"--noprofile", "--norc", "-c", bash.Bridge, "factory-profile",
 		invocation.Profile, operation}, args...)
 	return host.Process{
-		Path: "bash", Args: argv, Dir: invocation.Directory, Env: hookEnvironment(invocation.Env),
+		Path: shell, Args: argv, Dir: invocation.Directory, Env: hookEnvironment(invocation.Env),
 		Files: invocation.Files, Timeout: invocation.Timeout, Limit: hookOutputLimit, Owned: invocation.Owned,
 	}, nil
 }

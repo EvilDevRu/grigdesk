@@ -32,10 +32,12 @@ export async function createBrowserService(options: {
   });
   const file = browserRelaySocket(options.dataHome);
 
-  await prepareBrowserSocket(file);
+  if (file) {
+    await prepareBrowserSocket(file);
+  }
 
   const evidence = createBrowserEvidence(options.artifactsDir);
-  const socket = await startBrowserSocket({
+  const socket = file ? await startBrowserSocket({
     file,
     owner: async (proof) => {
       const owner = await factoryBrowserOwner(options.authority, proof);
@@ -49,7 +51,7 @@ export async function createBrowserService(options: {
     }),
     invoke: (owner, input, signal, authorize) => access.invoke(owner, input, { signal, authorize }),
     evidence,
-  });
+  }) : null;
 
   return {
     owners,
@@ -59,7 +61,7 @@ export async function createBrowserService(options: {
     async close() {
       access.clear();
       broker.close();
-      await socket.close();
+      await socket?.close();
     },
   };
 }

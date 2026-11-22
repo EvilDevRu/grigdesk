@@ -1,3 +1,5 @@
+//go:build unix
+
 package host
 
 import (
@@ -11,18 +13,6 @@ import (
 	"time"
 )
 
-type ProcessIdentity struct {
-	PID, PPID, Group, Session, UID int
-	Start, Boot                    string
-	State                          string
-}
-
-type TreeOwner struct {
-	Leader  ProcessIdentity
-	Members []ProcessIdentity
-}
-
-var ErrUnconfirmedTree = errors.New("владение процессами не подтверждено")
 var errNoProcess = errors.New("процесс отсутствует")
 
 // CaptureTree подтверждает новую сессию и снимает независимые identity её участников.

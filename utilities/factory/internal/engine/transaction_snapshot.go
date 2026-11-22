@@ -13,7 +13,8 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"syscall"
+
+	"grigdesk.local/tools/utilities/factory/internal/host"
 )
 
 type transactionRepo struct {
@@ -55,7 +56,7 @@ func readTransactionObject(path string) (transactionObject, error) {
 // readTransactionAt читает ограниченный снимок через открытый каталог.
 // Имя проверяется до и после чтения, включая режим, число ссылок и inode.
 func readTransactionAt(root *os.Root, name string) (transactionObject, error) {
-	file, err := root.OpenFile(name, os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
+	file, err := host.OpenAt(root, name, os.O_RDONLY, 0, host.Nonblocking)
 	if errors.Is(err, os.ErrNotExist) {
 		return transactionObject{}, nil
 	}
@@ -82,8 +83,7 @@ func regularTransactionFile(info os.FileInfo) bool {
 	if info == nil || !info.Mode().IsRegular() || info.Mode()&^os.ModePerm != 0 {
 		return false
 	}
-	st, ok := info.Sys().(*syscall.Stat_t)
-	return ok && st.Nlink == 1 && info.Size() <= transactionObjectLimit
+	return host.NativeSingleLink(info) && info.Size() <= transactionObjectLimit
 }
 
 func sameTransactionFile(before, after os.FileInfo) bool {

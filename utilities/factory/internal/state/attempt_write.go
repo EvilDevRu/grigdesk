@@ -13,6 +13,8 @@ import (
 	"time"
 
 	"grigdesk.local/tools/utilities/factory/internal/route"
+
+	"grigdesk.local/tools/utilities/factory/internal/host"
 )
 
 type BindRuntime struct {
@@ -184,7 +186,7 @@ func (t *taskState) publishAttempt(input BeginInput, catalog string) (Attempt, e
 	if err := t.root.Rename(temporary, final); err != nil {
 		return Attempt{}, err
 	}
-	if err := syncDirectory(t.root, "attempts"); err != nil {
+	if err := host.SyncDirectory(t.root, "attempts"); err != nil {
 		return Attempt{}, err
 	}
 	return attempt, nil

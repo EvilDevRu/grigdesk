@@ -16,7 +16,7 @@ import { nodeArchive } from './seaBuild.ts';
 
 export interface NodeRuntime {
   version: string;
-  platform: 'linux-x64' | 'darwin-arm64';
+  platform: 'linux-x64' | 'linux-arm64' | 'darwin-arm64';
   sha256: string;
 }
 
@@ -27,7 +27,7 @@ export interface NodeRuntime {
 export function seaHostTarget(
   platform: string = process.platform,
   arch: string = process.arch,
-): NodeRuntime['platform'] {
+): Exclude<NodeRuntime['platform'], 'linux-arm64'> {
   if (platform === 'linux' && arch === 'x64') {
     return 'linux-x64';
   }
@@ -39,14 +39,27 @@ export function seaHostTarget(
   throw new Error(`Сборка SEA не поддерживается на ${platform}-${arch}`);
 }
 
+// Собственный сервер допускает Linux ARM64 с отдельной описью и проверкой ELF.
+// Общий установочный дистрибутив имеет независимый список допущенных платформ.
+export function serverSeaHostTarget(
+  platform: string = process.platform,
+  arch: string = process.arch,
+): NodeRuntime['platform'] {
+  if (platform === 'linux' && arch === 'arm64') {
+    return 'linux-arm64';
+  }
+
+  return seaHostTarget(platform, arch);
+}
+
 /**
  * Серверная сборка выбирает опись по уже проверенной нативной цели.
  * Linux и Apple Silicon имеют отдельные контрольные суммы.
  */
 export function serverNodeRuntimeManifest(target: NodeRuntime['platform']): string {
-  return target === 'darwin-arm64'
-    ? 'server/build/node-runtime-darwin-arm64.json'
-    : 'server/build/node-runtime.json';
+  return target === 'linux-x64'
+    ? 'server/build/node-runtime.json'
+    : `server/build/node-runtime-${target}.json`;
 }
 
 /**
@@ -92,7 +105,8 @@ export function readNodeRuntime(value: unknown, manifest: string): NodeRuntime {
 
   if (!record || typeof record !== 'object'
     || typeof record.version !== 'string' || !/^24\.[0-9]+\.[0-9]+$/.test(record.version)
-    || (record.platform !== 'linux-x64' && record.platform !== 'darwin-arm64')
+    || (record.platform !== 'linux-x64' && record.platform !== 'linux-arm64'
+      && record.platform !== 'darwin-arm64')
     || typeof record.sha256 !== 'string' || !/^[a-f0-9]{64}$/.test(record.sha256)) {
     throw new Error(`Некорректный ${manifest}`);
   }

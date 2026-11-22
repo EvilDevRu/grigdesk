@@ -6,6 +6,7 @@ import { parseRoutePublication } from '../../../../shared/pipeline/routesEditorC
 import type { RoutePublication } from '../../../../shared/pipeline/routesEditorContracts.ts';
 
 import { RoutesEditorStoreError } from './draftStore.ts';
+import { syncRoutesDirectory } from './routeDurability.ts';
 import { assertProfileId } from './schema.ts';
 import type { RouteProfileMutation } from './store.ts';
 import { RoutesStore, serializeRoutesJson } from './store.ts';
@@ -30,15 +31,6 @@ export interface PublicationIntent {
 function corrupt(): RoutesEditorStoreError {
   return new RoutesEditorStoreError('routes_authoring_corrupted',
     'Журнал публикации повреждён');
-}
-
-async function syncDirectory(directory: string): Promise<void> {
-  const handle = await fs.open(directory, 'r');
-  try {
-    await handle.sync();
-  } finally {
-    await handle.close();
-  }
 }
 
 async function readSmallJson(file: string): Promise<unknown | null> {
@@ -68,7 +60,7 @@ async function atomicJson(directory: string, file: string, value: unknown): Prom
     await handle.sync();
     await handle.close();
     await fs.rename(temporary, file);
-    await syncDirectory(directory);
+    await syncRoutesDirectory(directory);
   } finally {
     await handle.close().catch(() => {});
     await fs.rm(temporary, { force: true });
@@ -197,7 +189,7 @@ export class PublicationJournal {
 
   async clearIntent(mutation: RouteProfileMutation): Promise<void> {
     await fs.rm(path.join(mutation.catalogDir, PENDING_FILE), { force: true });
-    await syncDirectory(mutation.catalogDir);
+    await syncRoutesDirectory(mutation.catalogDir);
   }
 
   /** Восстанавливает единственный intent до действия следующего писателя под общим lock. */

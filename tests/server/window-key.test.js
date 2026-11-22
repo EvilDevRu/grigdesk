@@ -8,7 +8,9 @@ import path from 'node:path';
 import test from 'node:test';
 
 import { windowKeyPath } from '../../shared/desktop/windowKeyPath.ts';
-import { registerWindowKeyLifecycle, writeWindowKey } from '../../server/src/lib/windowKey.ts';
+import {
+  registerWindowKeyLifecycle, windowKeyOwnerUid, writeWindowKey,
+} from '../../server/src/lib/windowKey.ts';
 import { isolatedEnv, pluginBootFixture } from './helpers/pluginBootFixture.js';
 
 const Fastify = createRequire(new URL('../../server/package.json', import.meta.url))('fastify');
@@ -180,6 +182,33 @@ test('DW-K2: ключ имеет формат и приватные права',
   assert.equal((await lstat(file)).mode & 0o7777, 0o600);
   assert.equal((await lstat(directory)).mode & 0o7777, 0o700);
   assert.deepEqual(await readdir(directory), ['key']);
+});
+
+/**
+ * Android Node не экспортирует process.getuid, но libuv знает владельца процесса.
+ * Тот же системный UID нужен для вычисления пути и записи приватного ключа.
+ */
+test('DW-K2: Android использует системный UID для публикации ключа', {
+  skip: typeof process.getuid !== 'function',
+}, async (t) => {
+  const root = await keyRoot(t);
+  const platform = Object.getOwnPropertyDescriptor(process, 'platform');
+  const uid = process.getuid();
+
+  t.mock.method(process, 'getuid', () => undefined);
+  Object.defineProperty(process, 'platform', { ...platform, value: 'android' });
+  t.after(() => Object.defineProperty(process, 'platform', platform));
+
+  const file = path.join(root, 'private', 'window-key');
+
+  assert.equal(windowKeyOwnerUid(), uid);
+  assert.equal(windowKeyPath({
+    env: { GRIGDESK_WINDOW_KEY_PATH: file },
+    uid: windowKeyOwnerUid(),
+    port: 8140,
+  }), file);
+  await writeWindowKey(file);
+  assert.equal((await lstat(file)).uid, uid);
 });
 
 test('DW-K3: ротация атомарно заменяет только свой файл', async (t) => {

@@ -14,7 +14,8 @@ import (
 	"regexp"
 	"slices"
 	"strings"
-	"syscall"
+
+	"grigdesk.local/tools/utilities/factory/internal/host"
 )
 
 const pendingFile = "pending-transition.json"
@@ -287,7 +288,7 @@ func workspaceFingerprint(path string) (string, error) {
 	if !filepath.IsAbs(path) || filepath.Clean(path) != path {
 		return "", fmt.Errorf("intent: нужен абсолютный путь снимка")
 	}
-	file, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
+	file, err := host.OpenPath(path, os.O_RDONLY, 0, host.Nonblocking)
 	if err != nil {
 		return "", err
 	}

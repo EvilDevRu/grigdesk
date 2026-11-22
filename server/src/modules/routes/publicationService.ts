@@ -57,7 +57,7 @@ export async function prepareDraftCatalog(
   // Читатель runtime перепроверяет именно возвращённый hash и его реальные байты.
   try {
     const helper = editorRouteCommand(runtime, [
-      '--routes-dir', store.baseDir,
+      '--routes-dir', await store.engineDirectory(),
       '--profile', snapshot.profile,
       'catalog', '--catalog-hash', prepared.catalogHash,
     ]);

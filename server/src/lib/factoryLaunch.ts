@@ -4,7 +4,7 @@ import path from 'node:path';
 import { dataPath } from '../../../shared/runtime/dataHome.ts';
 import { PACKAGE_ID, runtimeError } from '../binary/leases.ts';
 import { prepareDarwinFactoryEnvironment } from './factoryDarwinRuntime.ts';
-import { FACTORY_GO_BINARY, readFactoryGoDescriptor } from './factoryGoDescriptor.ts';
+import { factoryGoBinaryPath, readFactoryGoDescriptor } from './factoryGoDescriptor.ts';
 import type { FactoryEngineProtocol } from './factoryRuntime.ts';
 import { legacyRuntimeContext } from './factoryLegacyRuntimeContext.ts';
 import {
@@ -88,7 +88,7 @@ export function selectedFactoryRuntimeConfig<T extends FactoryRouteLaunchPaths>(
   if (selected.packageId ? !descriptor : selected.engineBin !== config.factoryBin) {
     throw runtimeError('factory_runtime_engine_retired');
   }
-  if (descriptor && selected.engineBin !== path.join(selected.runtimeRoot, FACTORY_GO_BINARY)) {
+  if (descriptor && selected.engineBin !== path.join(selected.runtimeRoot, factoryGoBinaryPath())) {
     throw runtimeError('factory_runtime_engine_invalid');
   }
 

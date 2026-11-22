@@ -8,7 +8,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"syscall"
+
+	"grigdesk.local/tools/utilities/factory/internal/host"
 )
 
 type InstrumentationJournal struct {
@@ -55,7 +56,7 @@ func (s Store) LockInstrumentation(a Attempt, create bool) (*InstrumentationJour
 		subdir.Close()
 		return nil, err
 	}
-	if err := flock(lock, syscall.LOCK_EX); err != nil {
+	if err := flock(lock, lockExclusive); err != nil {
 		lock.Close()
 		subdir.Close()
 		return nil, err
@@ -175,7 +176,7 @@ func (j *InstrumentationJournal) Begin(
 	if err := j.root.Rename(tmp, id); err != nil {
 		return err
 	}
-	if err := syncDirectory(j.root, "."); err != nil {
+	if err := host.SyncDirectory(j.root, "."); err != nil {
 		return err
 	}
 	return publishFile(j.root, "active.env", []byte(instrumentationPointer(id)), ownerMode, false)
@@ -262,5 +263,5 @@ func (j *InstrumentationJournal) Clear(id string) error {
 	if err := j.root.Remove("active.env"); err != nil {
 		return err
 	}
-	return syncDirectory(j.root, ".")
+	return host.SyncDirectory(j.root, ".")
 }

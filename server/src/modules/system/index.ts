@@ -13,6 +13,7 @@ import { factoryUpdateDrainOwnerDead, readFactoryUpdateDrainOwner, type UpdateDr
 import fp from 'fastify-plugin';
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import { execFile, spawn } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { API_VERSION } from '../../../../shared/client/apiVersion.ts';
 
@@ -136,7 +137,10 @@ async function systemModule(
     : process.env.INVOCATION_ID ? 'systemd' : 'manual');
   const restartScript = opts.restartViaScript ?? restartViaScript;
 
-  const packaged = (opts.runtimeKind ?? runtimeKind)() === 'packaged';
+  const windowsPackage = process.platform === 'win32'
+    && path.relative(path.join(config.rootDir, 'runtime'), process.execPath).toLowerCase() === 'node.exe'
+    && existsSync(path.join(config.rootDir, 'grigdesk-windows.json'));
+  const packaged = (opts.runtimeKind ?? runtimeKind)() === 'packaged' || windowsPackage;
   // Packaged-сервисы собираются здесь и передаются фабрике через opts: инъекции
   // тестов (opts.releases/opts.updates) имеют приоритет, как у source-ветки.
   // Канал сайта больше не читается packaged-веткой: переносная поставка не публикуется,

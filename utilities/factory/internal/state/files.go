@@ -8,7 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"syscall"
+
+	"grigdesk.local/tools/utilities/factory/internal/host"
 )
 
 type taskState struct {
@@ -42,14 +43,14 @@ func (s Store) openTask(task string, write bool) (*taskState, error) {
 	if err != nil {
 		return nil, err
 	}
-	lock, err := dir.OpenFile(".", os.O_RDONLY|syscall.O_DIRECTORY|syscall.O_NOFOLLOW, 0)
+	lock, err := openDirectoryLock(dir, ".", write)
 	if err != nil {
 		dir.Close()
 		return nil, err
 	}
-	operation := syscall.LOCK_SH
+	operation := lockShared
 	if write {
-		operation = syscall.LOCK_EX
+		operation = lockExclusive
 	}
 	if err := flock(lock, operation); err != nil {
 		lock.Close()
@@ -64,21 +65,10 @@ func (t *taskState) close() {
 	t.root.Close()
 }
 
-// flock повторяет только прерванный системный вызов на том же дескрипторе.
-// Захваченная блокировка освобождается закрытием fd.
-func flock(file *os.File, operation int) error {
-	for {
-		err := syscall.Flock(int(file.Fd()), operation)
-		if !errors.Is(err, syscall.EINTR) {
-			return err
-		}
-	}
-}
-
 // openControl проверяет цепочку имени до открытия приватного корня.
 // Создание происходит только на пути мутации с уже разрешённым физическим родителем.
 func openControl(path string, create bool) (*os.Root, error) {
-	if !filepath.IsAbs(path) || filepath.Clean(path) != path || path == string(filepath.Separator) ||
+	if !filepath.IsAbs(path) || filepath.Clean(path) != path || filepath.Dir(path) == path ||
 		strings.ContainsAny(path, "\n\t") {
 		return nil, fmt.Errorf("control-dir: нужен абсолютный канонический путь")
 	}
@@ -118,7 +108,11 @@ func ensurePrivateDirectory(root *os.Root, name string, create bool) error {
 			return err
 		}
 	}
-	file, err := root.OpenFile(name, os.O_RDONLY|syscall.O_DIRECTORY|syscall.O_NOFOLLOW, 0)
+	options := host.Directory
+	if create {
+		options |= host.ChangeMode
+	}
+	file, err := host.OpenAt(root, name, os.O_RDONLY, 0, options)
 	if err != nil {
 		return err
 	}
@@ -127,27 +121,22 @@ func ensurePrivateDirectory(root *os.Root, name string, create bool) error {
 	if err != nil {
 		return err
 	}
-	if !info.IsDir() || !ownedByInvoker(info) {
+	if !info.IsDir() || !host.FileOwner(file, info) {
 		return fmt.Errorf("%s: чужой каталог control", name)
 	}
-	if info.Mode().Perm() != 0700 {
+	if !host.PrivateMode(file, info, 0700) {
 		if !create {
 			return fmt.Errorf("%s: каталог control не приватный", name)
 		}
-		return file.Chmod(0700)
+		return host.SetPrivateMode(file, 0700)
 	}
 	return nil
-}
-
-func ownedByInvoker(info os.FileInfo) bool {
-	stat, ok := info.Sys().(*syscall.Stat_t)
-	return ok && stat.Uid == uint32(os.Geteuid())
 }
 
 // readTrusted читает закрытый файл по проверенному открытому дескриптору.
 // Размер, обычный тип, uid, mode и единственная ссылка обязательны.
 func readTrusted(root *os.Root, name string, limit int64, mode fsMode) ([]byte, error) {
-	file, err := root.OpenFile(name, os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
+	file, err := host.OpenAt(root, name, os.O_RDONLY, 0, host.Nonblocking)
 	if err != nil {
 		return nil, err
 	}
@@ -156,9 +145,8 @@ func readTrusted(root *os.Root, name string, limit int64, mode fsMode) ([]byte, 
 	if err != nil {
 		return nil, err
 	}
-	stat, ok := info.Sys().(*syscall.Stat_t)
-	if !info.Mode().IsRegular() || !ownedByInvoker(info) || !ok || stat.Nlink != 1 ||
-		info.Size() > limit || !mode.accepts(info.Mode()) {
+	if !info.Mode().IsRegular() || !host.FileOwner(file, info) || !host.SingleLink(file, info) ||
+		info.Size() > limit || !mode.accepts(file, info) {
 		return nil, fmt.Errorf("%s: недоверенный режим, владелец, тип или размер", name)
 	}
 	data, err := io.ReadAll(io.LimitReader(file, limit+1))
@@ -176,7 +164,7 @@ func readTrusted(root *os.Root, name string, limit int64, mode fsMode) ([]byte, 
 	if err != nil {
 		return nil, err
 	}
-	if !sameTrustedFile(info, after, mode) || !sameTrustedFile(after, selected, mode) {
+	if !sameTrustedFile(file, info, after, mode) || !sameTrustedFile(file, after, selected, mode) {
 		return nil, fmt.Errorf("%s: физический файл изменился при чтении", name)
 	}
 	return data, nil
@@ -184,10 +172,9 @@ func readTrusted(root *os.Root, name string, limit int64, mode fsMode) ([]byte, 
 
 // sameTrustedFile сверяет inode и форму после чтения дескриптора.
 // Подмена имени или добавление ссылки нарушает identity.
-func sameTrustedFile(initial, actual os.FileInfo, mode fsMode) bool {
-	stat, ok := actual.Sys().(*syscall.Stat_t)
-	return ok && actual.Mode().IsRegular() && ownedByInvoker(actual) && stat.Nlink == 1 &&
-		mode.accepts(actual.Mode()) && os.SameFile(initial, actual) &&
+func sameTrustedFile(file *os.File, initial, actual os.FileInfo, mode fsMode) bool {
+	return actual.Mode().IsRegular() && host.FileOwner(file, actual) && host.SingleLink(file, actual) &&
+		mode.accepts(file, actual) && os.SameFile(initial, actual) &&
 		initial.Size() == actual.Size() && initial.ModTime() == actual.ModTime()
 }
 
@@ -199,30 +186,19 @@ const (
 	legacyProjection fsMode = 0664
 )
 
-func (mode fsMode) accepts(actual os.FileMode) bool {
+func (mode fsMode) accepts(file *os.File, actual os.FileInfo) bool {
 	if mode == legacyProjection {
 		// Старый Bash пишет витрину с umask оболочки внутри проверенного приватного state.
-		return actual.Perm()&0600 == 0600 && actual.Perm()&^0664 == 0
+		return host.HasWritablePrivateMode(file, actual)
 	}
-	return actual.Perm() == os.FileMode(mode)
-}
-
-// syncDirectory фиксирует публикацию имени после sync файла.
-// Дескриптор каталога уже ограничен открытым os.Root.
-func syncDirectory(root *os.Root, name string) error {
-	dir, err := root.OpenFile(name, os.O_RDONLY|syscall.O_DIRECTORY|syscall.O_NOFOLLOW, 0)
-	if err != nil {
-		return err
-	}
-	defer dir.Close()
-	return dir.Sync()
+	return host.PrivateMode(file, actual, os.FileMode(mode))
 }
 
 // publishFile пишет временный файл в том же каталоге и фиксирует rename.
 // Разрешение на replace выдаётся только проверившему своё состояние writer под lock.
 func publishFile(root *os.Root, name string, data []byte, mode fsMode, replace bool) error {
 	temporary := filepath.Join(filepath.Dir(name), ".factory-"+rand.Text())
-	file, err := root.OpenFile(temporary, os.O_WRONLY|os.O_CREATE|os.O_EXCL|syscall.O_NOFOLLOW, 0600)
+	file, err := host.OpenAt(root, temporary, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600, host.ChangeMode)
 	if err != nil {
 		return err
 	}
@@ -231,7 +207,7 @@ func publishFile(root *os.Root, name string, data []byte, mode fsMode, replace b
 		file.Close()
 		return err
 	}
-	if err := errors.Join(file.Chmod(os.FileMode(mode)), file.Sync(), file.Close()); err != nil {
+	if err := errors.Join(host.SetPrivateMode(file, os.FileMode(mode)), file.Sync(), file.Close()); err != nil {
 		return err
 	}
 	if !replace {
@@ -242,5 +218,5 @@ func publishFile(root *os.Root, name string, data []byte, mode fsMode, replace b
 	if err := root.Rename(temporary, name); err != nil {
 		return err
 	}
-	return syncDirectory(root, filepath.Dir(name))
+	return host.SyncDirectory(root, filepath.Dir(name))
 }

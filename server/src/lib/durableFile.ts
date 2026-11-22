@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
+import { writeFactoryWindowsFile } from './factoryWindowsFiles.ts';
 
 /**
  * Публикует приватный файл атомарно после fsync содержимого и каталога.
@@ -13,6 +14,15 @@ export async function writeDurableFile(file: string, text: string | Buffer): Pro
     recursive: true,
     mode: 0o700,
   });
+
+  if (process.platform === 'win32') {
+    const physical = await fs.realpath(directory);
+
+    await writeFactoryWindowsFile(path.join(physical, path.basename(file)), text);
+
+    return;
+  }
+
   await fs.chmod(directory, 0o700);
 
   const temporary = path.join(

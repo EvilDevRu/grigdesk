@@ -102,7 +102,8 @@ func (e *execution) prepareCheckout(ctx context.Context, fields map[string]strin
 			return 78, fmt.Errorf("checkout %s отсутствует или содержит ссылку", repo.Name)
 		}
 		top, err := e.git(ctx, repo.Worktree, "rev-parse", "--show-toplevel")
-		if err != nil || strings.TrimSpace(string(top)) != repo.Worktree {
+		// Git for Windows выдаёт путь со слешами, а профиль хранит нативный путь.
+		if err != nil || filepath.FromSlash(strings.TrimSpace(string(top))) != repo.Worktree {
 			return 78, fmt.Errorf("checkout %s не принадлежит закреплённому репозиторию", repo.Name)
 		}
 		branch, err := e.git(ctx, repo.Worktree, "symbolic-ref", "--quiet", "--short", "HEAD")

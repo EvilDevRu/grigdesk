@@ -1,5 +1,6 @@
 export const DESKTOP_CHILD_ENV = 'GRIGDESK_DESKTOP_CHILD';
 export const DESKTOP_RESTART_EXIT_CODE = 75;
+export const DESKTOP_WINDOW_KEY_MESSAGE = 'grigdesk:window-key';
 
 export interface ParentChannel {
   readonly connected: boolean;

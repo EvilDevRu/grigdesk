@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -380,6 +381,11 @@ func (o contextOptions) workspace() (object, []string, error) {
 			return nil, nil, err
 		}
 		parts := strings.Split(raw, ":")
+		if runtime.GOOS == "windows" && (len(parts) == 5 || len(parts) == 6) &&
+			len(parts[1]) == 1 && len(parts[3]) == 1 {
+			// Две буквы дисков принадлежат путям, а не разделителям полей.
+			parts = append([]string{parts[0], parts[1] + ":" + parts[2], parts[3] + ":" + parts[4]}, parts[5:]...)
+		}
 		if len(parts) != 3 && len(parts) != 4 {
 			return nil, nil, fmt.Errorf("%s: ожидался формат имя:worktree:source:branch", label)
 		}

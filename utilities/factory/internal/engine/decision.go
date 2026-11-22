@@ -9,12 +9,13 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	"grigdesk.local/tools/utilities/factory/internal/hooks"
 	"grigdesk.local/tools/utilities/factory/internal/route"
 	"grigdesk.local/tools/utilities/factory/internal/state"
+
+	"grigdesk.local/tools/utilities/factory/internal/host"
 )
 
 type DecisionRequest struct {
@@ -246,8 +247,8 @@ func writeRouteLog(input LaunchRequest, message string) {
 		return
 	}
 	log := filepath.Join(dir, "t"+input.Task+".stages.log")
-	flags := os.O_WRONLY | os.O_CREATE | os.O_APPEND | syscall.O_NOFOLLOW | syscall.O_NONBLOCK
-	file, err := os.OpenFile(log, flags, 0600)
+	flags := os.O_WRONLY | os.O_CREATE | os.O_APPEND
+	file, err := host.OpenPath(log, flags, 0600, host.Nonblocking)
 	if err != nil {
 		return
 	}

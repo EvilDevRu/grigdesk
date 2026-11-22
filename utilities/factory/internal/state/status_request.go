@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"grigdesk.local/tools/utilities/factory/internal/host"
 )
 
 type StatusSubmission struct {
@@ -124,7 +126,7 @@ func (s Store) ConsumeStatusRequests(id RunIdentity, token string) (int, error) 
 			return 74, err
 		}
 	}
-	if err := syncDirectory(root, "."); err != nil {
+	if err := host.SyncDirectory(root, "."); err != nil {
 		return 74, err
 	}
 	return 0, nil
