@@ -57,9 +57,8 @@ jobs:
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
           node-version: ${{ steps.node_runtime.outputs.version }}
-          architecture: ${{ inputs.target == 'windows-x64' && 'x64' || inputs.target == 'windows-arm64' && 'arm64' || '' }}
-      - name: Go для Windows
-        if: ${{ startsWith(inputs.target, 'windows-') }}
+          architecture: ${{ (inputs.target == 'windows-x64' || inputs.target == 'android') && 'x64' || 'arm64' }}
+      - name: Go для утилит GrigDesk
         uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16
         with:
           go-version: '1.27.4'
@@ -70,6 +69,30 @@ jobs:
           npm --prefix server ci --include=dev --ignore-scripts --no-audit --no-fund
           npm --prefix web ci --include=dev --ignore-scripts --no-audit --no-fund
           npm --prefix desktop ci --include=dev --ignore-scripts --no-audit --no-fund
+      - name: Зависимости Unix-комплекта
+        if: ${{ inputs.target == 'linux-arm64' || inputs.target == 'darwin-arm64' }}
+        shell: bash
+        run: |
+          if [ "$STABLE_NATIVE_TARGET" = linux-arm64 ]; then
+            bash tools/ci/provision-ubuntu.sh --disposable-environment
+          else
+            /opt/homebrew/bin/brew bundle --file=tools/ci/Brewfile.macos
+          fi
+          npm --prefix server ci --no-audit --no-fund
+          npm --prefix web ci --no-audit --no-fund
+          npm --prefix mobile ci --no-audit --no-fund
+          npm --prefix deepseek ci --no-audit --no-fund
+          npm --prefix desktop ci --ignore-scripts --no-audit --no-fund
+          node desktop/node_modules/esbuild/install.js
+          target="$RUNNER_TEMP/appimage-tools"
+          bash tools/ci/prepare-release-desktop.sh "$target"
+          printf '%s\n' "GRIGDESK_APPIMAGE_TOOLS_PATH=$target" \
+            "GRIGDESK_DEEPSEEK_NODE_CACHE=$RUNNER_TEMP/deepseek-node-cache" >> "$GITHUB_ENV"
+          npm --prefix deepseek run prepare:runtime -- --node-cache-dir "$RUNNER_TEMP/deepseek-node-cache"
+          node --input-type=module <<'NODE'
+          import { materializeDeepSeekSnapshot } from './deepseek/scripts/deepseekVendorManifest.ts';
+          await materializeDeepSeekSnapshot('./deepseek/vendor/deepseek-harness');
+          NODE
       - name: План выпуска по ID
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
         with:
@@ -116,7 +139,13 @@ jobs:
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
           node-version: ${{ steps.node_runtime.outputs.version }}
-          architecture: ${{ inputs.target == 'windows-x64' && 'x64' || inputs.target == 'windows-arm64' && 'arm64' || '' }}
+          architecture: ${{ (inputs.target == 'windows-x64' || inputs.target == 'android') && 'x64' || 'arm64' }}
+      - name: Системные зависимости Unix-приёмки
+        if: ${{ inputs.target == 'linux-arm64' }}
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends xvfb xauth libfuse2t64 strace
       - name: Допуск ID артефактов
         shell: bash
         env:
