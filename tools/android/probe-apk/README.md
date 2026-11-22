@@ -11,12 +11,18 @@
   (`applicationIdSuffix ".probe"`, `useLegacyPackaging=true` для извлечения PIE
   в nativeLibraryDir), probe sourceSet (java/manifest/jniLibs/assets этого каталога).
 - `src/LocalServerService.java` — прототип foreground-сервиса: запускает
-  `libnode.so` с серверным bundle из assets, `GRIGDESK_HOME` во внутреннем
-  приватном каталоге, перезапуск после kill по политике FGS.
+  `libnode.so` с сервером из `assets/runtime.zip`, задаёт приватный
+  `GRIGDESK_HOME` и передаёт серверу путь к `libfactory.so`.
+  Поставляемые Bash, Git, flock, nohup и timeout доступны по обычным именам
+  через приватный `native-tools` в PATH. При наличии архива stdlib сервис
+  раскрывает Python для ABI устройства и передаёт его каталог через `PYTHONHOME`.
+- `src/ProbeLauncherActivity.java` — открывает общий WebView и при появлении окна
+  запускает локальный сервис. На первом открытии выбирается «Это устройство».
+  Нативная труба дожидается ключа окна и автоматически получает локальную сессию.
 - `AndroidManifest.xml` — probe-overlay: объявление сервиса с
   `foregroundServiceType="dataSync"`, разрешение FOREGROUND_SERVICE.
-- `build-server-bundle.sh` — esbuild-bundle сервера (`server/src/app.ts`) в
-  `assets/server-bundle.js` пробной сборки (JS bundle по Q2; SEA — отдельная проба).
+- `build-server-bundle.sh` и `build-server-bundle.mts` — собирают
+  `server-bundle.cjs` и его зависимости в `assets/runtime.zip`. SEA проверяется отдельно.
 - `device-fixture.mjs` — автономная loopback-фикстура OpenAI-compatible API
   (образец `tests/helpers/qwenNativeFixture.mjs`, без импортов репозитория):
   синтетический ключ, уникальная метка `probe-3a-<runId>`, журнал запросов.
@@ -27,18 +33,38 @@
 
 ~~~bash
 P=~/.grigdesk/artifacts/additional-platforms
-mkdir -p tools/android/probe-apk/jniLibs/arm64-v8a
-cp "$P/probe2-bionic/out/arm64-v8a/libnode.so" tools/android/probe-apk/jniLibs/arm64-v8a/
-for u in bash flock timeout nohup git python3; do
-  cp "$P/probe3-userland/out/arm64-v8a/lib$u.so" tools/android/probe-apk/jniLibs/arm64-v8a/
+# ANDROID_NDK_HOME указывает на NDK, хост сборки — Linux x64.
+ndk="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64"
+for abi in arm64-v8a x86_64; do
+  if [ "$abi" = arm64-v8a ]; then
+    target=aarch64-linux-android
+    arch=arm64
+  else
+    target=x86_64-linux-android
+    arch=amd64
+  fi
+  libs="tools/android/probe-apk/jniLibs/$abi"
+  mkdir -p "$libs"
+  cp "$P/probe2-bionic/out/$abi/libnode.so" "$libs/"
+  cp "$ndk/sysroot/usr/lib/$target/libc++_shared.so" "$libs/"
+  for tool in bash flock timeout nohup git python3; do
+    cp "$P/probe3-userland/out/$abi/lib$tool.so" "$libs/"
+  done
+  GOOS=android GOARCH="$arch" CGO_ENABLED=1 CC="$ndk/bin/${target}30-clang" \
+    go build -buildmode=pie -trimpath -buildvcs=false \
+    -ldflags=-extldflags=-Wl,-z,max-page-size=16384 -o "$libs/libfactory.so" ./utilities/factory/cmd/factory
 done
-bash tools/android/probe-apk/build-server-bundle.sh
+GRIGDESK_ANDROID_USERLAND_BUILD="$P/probe3-userland/build" \
+  bash tools/android/probe-apk/build-server-bundle.sh
 ~~~
 
-Python3 требует stdlib `lib/python3.12` рядом с бинарём (упаковать в assets
-и распаковать во внутренний каталог при первом старте; прототип сервиса это делает).
+На физическом ARM64 уже проверены старт сервера из меню и прохождение
+командного маршрута Go-фабрики до ворот с продолжением
+той же попытки в sandbox приложения. Git из нового APK также создаёт связанный
+worktree на устройстве. Bionic Python с полной stdlib прошёл `forkpty` в процессе
+приложения. Профиль Qwen и весь комплект на x86_64 требуют отдельного прогона.
 
-## Сборка probe APK (машина с Android SDK; владелец)
+## Сборка probe APK на машине с Android SDK
 
 ~~~bash
 cd mobile/android
@@ -49,11 +75,11 @@ apkanalyzer manifest print client/build/outputs/apk/probe/client-probe.apk | gre
 aapt2 dump badging client/build/outputs/apk/probe/client-probe.apk | head -3
 ~~~
 
-## DEVICE-сценарий (владелец, физическое ARM64; DEVICE PENDING)
+## DEVICE-сценарий Qwen на физическом ARM64
 
 1. `adb install -r client-probe.apk`; проверить ID/ABI до установки (aapt2 выше).
 2. Запустить сервис и фикстуру:
-   `adb shell am start-foreground-service -n local.grigdesk.mobile.probe/local.grigdesk.client.LocalServerService`
+   `adb shell am start -n local.grigdesk.mobile.probe/local.grigdesk.client.ProbeLauncherActivity`
    `adb push device-fixture.mjs /data/local/tmp/` (запуск через libnode.so в runbook ниже).
 3. Открыть общий интерфейс, создать/открыть локальный проект во внутреннем
    каталоге проектов (`getFilesDir()/projects`, FS подтверждена пробой 3).
@@ -80,5 +106,4 @@ adb shell run-as local.grigdesk.mobile.probe sh -c '
 # синтетический ключ из device-fixture.mjs; бинарь CLI — настоящий, из поставки.
 ~~~
 
-Статус: **DEVICE PENDING** — физического ARM64 устройства у исполнителя нет;
-APK собирается после готовности libnode.so/userland (пробы 2–3) на машине с SDK.
+Статус Qwen-сценария: приёмка ожидается.

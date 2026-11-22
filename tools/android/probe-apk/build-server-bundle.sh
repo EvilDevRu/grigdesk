@@ -1,25 +1,31 @@
 #!/usr/bin/env bash
 # Пробный серверный bundle для 3a (JS bundle по Q2; SEA — отдельная проба 2).
-# Опции зеркалируют продуктовый buildStage.mts: bundle/platform=node/format=cjs/
-# target=node24. Нативные .node не пакуются в JS-bundle: опциональные нативные
-# зависимости (ssh2) деградируют до JS-фallback; для пробы это фиксируется в отчёте.
+# Собственные URL и таблицы модулей готовит тот же сборщик, что в поставке сервера.
+# Production npm разворачивается рядом с bundle без install-скриптов хостовой ОС.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
-ROOT="$(cd "$HERE/../../.." && pwd)"
-OUT="$HERE/assets"
-ESBUILD="$ROOT/server/node_modules/.bin/esbuild"
+STAGE="$(mktemp -d "$HERE/.runtime.XXXXXXXX")"
+trap 'rm -rf -- "$STAGE"' EXIT
 
-[[ -x "$ESBUILD" ]] || { echo "esbuild не установлен: npm --prefix server ci" >&2; exit 1; }
+node "$HERE/build-server-bundle.mts" "$STAGE/runtime"
+npm --prefix "$STAGE/runtime" ci --omit=dev --ignore-scripts --no-audit --no-fund
 
-mkdir -p "$OUT"
-"$ESBUILD" "$ROOT/server/src/app.ts" \
-  --bundle \
-  --platform=node \
-  --target=node24 \
-  --format=cjs \
-  --external:'*.node' \
-  --outfile="$OUT/server-bundle.js" \
-  --log-level=warning
+# Android AssetMerger считает foo и foo.gz одним именем. Архив сохраняет оба
+# файла зависимостей без вмешательства в их репозиторий или runtime-граф.
+(cd "$STAGE/runtime" && zip -q -r "$STAGE/runtime.zip" .)
+mkdir -p "$HERE/assets"
+mv -f -- "$STAGE/runtime.zip" "$HERE/assets/runtime.zip"
+sha256sum "$HERE/assets/runtime.zip"
 
-sha256sum "$OUT/server-bundle.js"
+if [[ -n ${GRIGDESK_ANDROID_USERLAND_BUILD:-} ]]; then
+  for abi in arm64-v8a x86_64; do
+    python="$GRIGDESK_ANDROID_USERLAND_BUILD/$abi/python3-install"
+    archive="python-$abi.zip"
+
+    test -f "$python/lib/python3.12/encodings/__init__.py"
+    (cd "$python" && zip -q -r "$STAGE/$archive" lib/python3.12 -x '*/__pycache__/*')
+    mv -f -- "$STAGE/$archive" "$HERE/assets/$archive"
+    sha256sum "$HERE/assets/$archive"
+  done
+fi

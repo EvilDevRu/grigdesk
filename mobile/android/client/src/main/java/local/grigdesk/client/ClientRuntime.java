@@ -29,6 +29,9 @@ import local.grigdesk.client.shell.ShellApi;
 import org.json.JSONObject;
 
 public final class ClientRuntime implements AutoCloseable {
+  public record LocalServer(int port, Upstream.WindowKey windowKey) {
+  }
+
   public final ShellApi shell;
   private final Context context;
   private final String secret;
@@ -46,7 +49,8 @@ public final class ClientRuntime implements AutoCloseable {
    * Встроенные assets проверяются до открытия WebView, сервер не отдаёт интерфейс.
    */
   public ClientRuntime(Context context, String secret, Set<String> origins, ShellApi.Native nativeActions,
-    BiConsumer<String, Boolean> navigate, AppLock appLock, BackgroundLink backgroundLink) throws Exception {
+    BiConsumer<String, Boolean> navigate, AppLock appLock, BackgroundLink backgroundLink,
+    LocalServer localServer) throws Exception {
     this.context = context.getApplicationContext();
     this.secret = secret;
     this.origins = origins;
@@ -69,7 +73,7 @@ public final class ClientRuntime implements AutoCloseable {
     int minor = api.getInt("minor");
 
     profiles = new ProfileStore(new File(context.getFilesDir(), "client-profiles.json"),
-      ClientRuntime::available, ClientLocale.initialize(context));
+      ClientRuntime::available, ClientLocale.initialize(context), localServer != null);
 
     for (JSONObject profile : profiles.profiles) {
       originalPorts.put(profile.getString("id"), profile.getInt("port"));
@@ -95,8 +99,9 @@ public final class ClientRuntime implements AutoCloseable {
     Pairing pairing = new Pairing(profiles, identities, major, minor, ClientLocale.initialize(context));
 
     shell = new ShellApi(profiles, pairing, (profile, gate, report) -> {
-      RoutedUpstream transport = new RoutedUpstream(profile,
-        identities.get(profile.optInt("clientKey", 1)), gate, report::accept);
+      PipeTransport transport = ProfileStore.LOCAL_ID.equals(profile.getString("id"))
+        ? new Upstream(localServer.port(), localServer.windowKey(), gate, report::accept)
+        : new RoutedUpstream(profile, identities.get(profile.optInt("clientKey", 1)), gate, report::accept);
 
       return new ShellApi.Transport() {
         public void probe() throws Exception {

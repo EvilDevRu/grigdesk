@@ -195,14 +195,15 @@ build_git() {
   local CF="--sysroot=$SYSROOT -fPIC -O2 -I$P/include"
   local LF="--sysroot=$SYSROOT -L$P/lib"
 
-  [[ -f "$OUT/$abi/libgit.so" ]] && return 0
-
-  unpack git-2.47.1.tar.xz "$B/git"
+  # Повторная сборка должна пересчитать GIT-CFLAGS: старый ELF мог читать пустой pw_gecos.
+  if [[ ! -f "$B/git/Makefile" ]]; then
+    unpack git-2.47.1.tar.xz "$B/git" || { fail "$abi-git"; return 0; }
+  fi
   (
     cd "$B/git" \
       && make -j"$JOBS" CC="$CC" AR="$AR" CFLAGS="$CF" LDFLAGS="$LF" \
         NO_CURL=1 NO_EXPAT=1 NO_GETTEXT=1 NO_TCLTK=1 NO_PERL=1 NO_PYTHON=1 NO_OPENSSL=1 \
-        NO_PTHREADS=1 NEEDS_LIBRT= \
+        NO_PTHREADS=1 NO_GECOS_IN_PWENT=1 NEEDS_LIBRT= \
         prefix="$B/git-install" install
   ) > "$LOG/$abi-git.log" 2>&1 || { fail "$abi-git"; return 0; }
 

@@ -30,6 +30,10 @@ import okio.BufferedSink;
 import org.json.JSONObject;
 
 public final class Upstream implements PipeTransport {
+  public interface WindowKey {
+    String read() throws IOException;
+  }
+
   private static final java.util.regex.Pattern TIMING =
     java.util.regex.Pattern.compile("(?:^|,)\\s*grigdesk;dur=[0-9]");
   private static final Set<String> FORBIDDEN = Set.of("cookie", "host", "origin", "connection",
@@ -42,6 +46,7 @@ public final class Upstream implements PipeTransport {
   private static final int PROBE_READ_SECONDS = 10;
   private final int probeTimeoutSeconds;
   private final PinnedSocketFactory sockets;
+  private final LocalWindowSession localSession;
   private final BiConsumer<String, String> listener;
   private final Set<Call> calls = ConcurrentHashMap.newKeySet();
   private final Set<Socket> tunnels = ConcurrentHashMap.newKeySet();
@@ -71,6 +76,7 @@ public final class Upstream implements PipeTransport {
     this.keys = keys;
     this.version = version;
     this.listener = listener;
+    localSession = null;
 
     if (!this.address.getScheme().equals("https") || this.address.getHost() == null
       || this.address.getUserInfo() != null || this.address.getRawQuery() != null
@@ -81,19 +87,42 @@ public final class Upstream implements PipeTransport {
     PinnedTrustManager trust = new PinnedTrustManager(pin);
 
     sockets = new PinnedSocketFactory(keys, trust, probeTimeoutSeconds * 1000);
-    client = new OkHttpClient.Builder().sslSocketFactory(sockets, trust)
-      .hostnameVerifier((host, session) -> true).protocols(List.of(Protocol.HTTP_1_1))
+    client = httpClient(probeTimeoutSeconds).sslSocketFactory(sockets, trust)
+      .hostnameVerifier((host, session) -> true).build();
+  }
+
+  /**
+   * Встроенный сервер слушает только loopback, а сессию выдаёт по ключу приложения.
+   * Адрес задаёт нативная сборка и его нельзя поменять данными профиля или WebView.
+   */
+  public Upstream(int port, WindowKey key, VersionGate version, BiConsumer<String, String> listener) {
+    address = URI.create("http://127.0.0.1:" + port);
+    this.version = version;
+    this.listener = listener;
+    probeTimeoutSeconds = 3;
+    keys = null;
+    sockets = null;
+    localSession = new LocalWindowSession(address, key);
+    client = httpClient(probeTimeoutSeconds).build();
+  }
+
+  /**
+   * Обе трубы передают HTTP/1.1 потоково и исключают перенаправления и системный proxy.
+   * Бюджет чтения добавляется отдельно только для проверки готовности и обмена ключа.
+   */
+  private static OkHttpClient.Builder httpClient(int connectSeconds) {
+    return new OkHttpClient.Builder().protocols(List.of(Protocol.HTTP_1_1))
       .proxy(Proxy.NO_PROXY).followRedirects(false).followSslRedirects(false)
       .retryOnConnectionFailure(false).connectionPool(new okhttp3.ConnectionPool(5, 60, TimeUnit.SECONDS))
-      .connectTimeout(probeTimeoutSeconds, TimeUnit.SECONDS)
-      .readTimeout(0, TimeUnit.MILLISECONDS).writeTimeout(0, TimeUnit.MILLISECONDS).build();
+      .connectTimeout(connectSeconds, TimeUnit.SECONDS)
+      .readTimeout(0, TimeUnit.MILLISECONDS).writeTimeout(0, TimeUnit.MILLISECONDS);
   }
 
   /**
    * Заголовки renderer не могут перенести cookie, полномочия или чужой Host наверх.
    * Явный Accept-Encoding отключает автоматическую распаковку OkHttp, сохраняя тело.
    */
-  private Map<String, String> headers(HttpHead head, boolean upgrade) {
+  private Map<String, String> headers(HttpHead head, boolean upgrade, String session) {
     Map<String, String> result = new LinkedHashMap<>();
     Set<String> hop = new java.util.HashSet<>(java.util.Arrays.asList(
       head.headers.getOrDefault("connection", "").toLowerCase(java.util.Locale.ROOT)
@@ -109,6 +138,10 @@ public final class Upstream implements PipeTransport {
 
     result.put("host", address.getRawAuthority());
     result.putIfAbsent("accept-encoding", "identity");
+
+    if (session != null) {
+      result.put("cookie", session);
+    }
 
     if (head.headers.containsKey("origin")) {
       result.put("origin", address.getScheme() + "://" + address.getRawAuthority());
@@ -140,10 +173,10 @@ public final class Upstream implements PipeTransport {
    * Тело запроса читается однократно и напрямую передаётся в сокет OkHttp.
    * Длина неизвестного chunked тела остаётся неизвестной без буферизации файла.
    */
-  private Request request(HttpHead head, InputStream body) throws IOException {
+  private Request request(HttpHead head, InputStream body, String session) throws IOException {
     Request.Builder builder = new Request.Builder().url(target(head).toString());
 
-    headers(head, false).forEach(builder::header);
+    headers(head, false, session).forEach(builder::header);
 
     RequestBody data = null;
 
@@ -279,10 +312,17 @@ public final class Upstream implements PipeTransport {
       ? client.newBuilder().callTimeout(probeTimeoutSeconds, TimeUnit.SECONDS)
         .readTimeout(Math.min(probeTimeoutSeconds, PROBE_READ_SECONDS), TimeUnit.SECONDS).build()
       : client;
-    Call call = selectedClient.newCall(request(head, body));
+    String session;
+
+    try {
+      session = localSession == null ? null : localSession.cookie(client);
+    } catch (IOException exception) {
+      return PipeResponse.error(503, "offline");
+    }
+
+    Call call = selectedClient.newCall(request(head, body, session));
 
     calls.add(call);
-
     if (closed || terminal != null) {
       calls.remove(call);
       call.cancel();
@@ -292,11 +332,25 @@ public final class Upstream implements PipeTransport {
     try {
       Response response = call.execute();
 
+      if (localSession != null && response.code() == 401) {
+        localSession.reject(session);
+      }
+
       if (!inspect(response, probe)) {
         response.close();
         calls.remove(call);
 
         return PipeResponse.error(rejection, terminal);
+      }
+
+      if (probe && localSession != null && response.code() == 200
+        && !new JSONObject(response.peekBody(65536).string()).optBoolean("authenticated")) {
+        response.close();
+        calls.remove(call);
+        localSession.reject(session);
+        finishRetirement();
+
+        return PipeResponse.error(503, "offline");
       }
 
       Map<String, String> headers = new LinkedHashMap<>();
@@ -329,6 +383,7 @@ public final class Upstream implements PipeTransport {
           finishRetirement();
         });
     } catch (Exception exception) {
+      call.cancel();
       calls.remove(call);
       finishRetirement();
       failed(exception, false);
@@ -337,11 +392,21 @@ public final class Upstream implements PipeTransport {
     }
   }
 
+  /**
+   * Локальная готовность означает действующую сессию владельца.
+   * Удалённый режим по-прежнему проверяет ключ устройства и hello сервера.
+   */
   public void probe() throws Exception {
     try {
-      local.grigdesk.client.key.KeyFailure.check(keys);
+      String path = "/api/client/hello";
 
-      try (PipeResponse response = forward(new HttpHead("GET /api/client/hello HTTP/1.1", Map.of()),
+      if (localSession == null) {
+        local.grigdesk.client.key.KeyFailure.check(keys);
+      } else {
+        path = "/api/auth/state";
+      }
+
+      try (PipeResponse response = forward(new HttpHead("GET " + path + " HTTP/1.1", Map.of()),
         new java.io.ByteArrayInputStream(new byte[0]), true)) {
         StaticAssets.readText(response.body, 65536);
         state(response.status == 200 ? "online" : "offline", null, 503);
@@ -352,7 +417,7 @@ public final class Upstream implements PipeTransport {
   }
 
   /**
-   * Upgrade проходит новый TLS-handshake той же фабрики до единого байта HTTP.
+   * Upgrade начинает новый сокет и проверяет TLS для удалённой машины до HTTP.
    * Бинарный поток не интерпретируется и принадлежит транспорту до закрытия пары сокетов.
    */
   public void upgrade(HttpHead head, Socket downstream, InputStream input, ExecutorService pool)
@@ -363,10 +428,12 @@ public final class Upstream implements PipeTransport {
       return;
     }
 
-    SSLSocket socket = null;
+    Socket socket = null;
 
     try {
-      socket = (SSLSocket) sockets.createSocket();
+      String session = localSession == null ? null : localSession.cookie(client);
+
+      socket = sockets == null ? new Socket(Proxy.NO_PROXY) : sockets.createSocket();
       tunnels.add(socket);
 
       if (closed || terminal != null) {
@@ -377,15 +444,23 @@ public final class Upstream implements PipeTransport {
 
       socket.connect(new InetSocketAddress(address.getHost(), port), probeTimeoutSeconds * 1000);
       socket.setSoTimeout(probeTimeoutSeconds * 1000);
-      socket.startHandshake();
-      socket.setSoTimeout(0);
+
+      if (socket instanceof SSLSocket tls) {
+        tls.startHandshake();
+        tls.setSoTimeout(0);
+      }
+
       target(head);
-      socket.getOutputStream().write(new HttpHead(head.first, headers(head, true)).encode());
+      socket.getOutputStream().write(new HttpHead(head.first, headers(head, true, session)).encode());
       socket.getOutputStream().flush();
 
       InputStream upstream = new java.io.BufferedInputStream(socket.getInputStream());
       HttpHead response = HttpHead.read(upstream);
       String failure = version.check(response.headers.get("x-grigdesk-api"), response.status());
+
+      if (localSession != null && response.status() == 401) {
+        localSession.reject(session);
+      }
 
       if (failure != null) {
         state("incompatible", failure, 426);

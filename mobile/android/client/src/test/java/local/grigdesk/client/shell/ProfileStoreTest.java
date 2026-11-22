@@ -8,6 +8,45 @@ import org.junit.Test;
 
 public class ProfileStoreTest {
   /**
+   * Probe автоматически выбирает локальный профиль и запоминает его порт.
+   * Обычная сборка по-прежнему начинает работу без машины; удаление сохраняется.
+   */
+  @Test
+  public void localProfileIsSeededOnlyOnceInBundledServerVariant() throws Exception {
+    Path root = Files.createTempDirectory("phone-local-profile-");
+    Path file = root.resolve("profiles.json");
+
+    try {
+      assertNull(new ProfileStore(file.toFile(), port -> true).selected);
+      assertFalse(Files.exists(file));
+
+      ProfileStore store = new ProfileStore(file.toFile(), port -> true, null, true);
+      int port = store.get(ProfileStore.LOCAL_ID).getInt("port");
+
+      assertEquals(ProfileStore.LOCAL_ID, store.selected);
+      assertTrue(new ShellState(store, 0, 1).snapshot().getBoolean("localAvailable"));
+      store.renameLocal("Локальные проекты");
+      assertNull(new ProfileStore(file.toFile(), candidate -> true).selected);
+
+      ProfileStore restored = new ProfileStore(file.toFile(), candidate -> true, null, true);
+      JSONObject local = restored.get(ProfileStore.LOCAL_ID);
+
+      assertEquals("Локальные проекты", local.getString("name"));
+      assertEquals(port, local.getInt("port"));
+      restored.remove(ProfileStore.LOCAL_ID);
+
+      ProfileStore removed = new ProfileStore(file.toFile(), candidate -> true, null, true);
+
+      assertNull(removed.selected);
+      assertTrue(removed.profiles.isEmpty());
+      assertEquals(ProfileStore.LOCAL_ID, removed.addLocal().getString("id"));
+    } finally {
+      Files.deleteIfExists(file);
+      Files.deleteIfExists(root);
+    }
+  }
+
+  /**
    * Старый single-address профиль читается без записи и соседствует с relay-only.
    * Пустой address разрешён лишь при сохранённом relay; id и порт не перенумеровываются.
    */

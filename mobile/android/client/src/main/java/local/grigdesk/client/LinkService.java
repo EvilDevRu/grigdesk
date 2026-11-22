@@ -51,7 +51,7 @@ public final class LinkService extends Service {
   }
 
   private Notification buildNotification() {
-    Intent intent = new Intent(this, MainActivity.class);
+    Intent intent = MainActivity.launchIntent(this);
 
     intent.setAction(Intent.ACTION_MAIN);
     intent.addCategory(Intent.CATEGORY_LAUNCHER);

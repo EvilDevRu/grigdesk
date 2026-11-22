@@ -38,7 +38,7 @@ v1 сохранено отдельно. Основной HTTP и прежний 
 - [Нативное развёртывание, выбор задания, перенос посредника и возобновление установки](relay-deploy.md)
 - [Go-посредник одним файлом: сборка, выпуск и TLS-пробы Go-кандидата](relay-binary.md)
 - [Сборка Android, версии и ключ подписи](android-build.md)
-- [Локальное окружение Android: FEX, Docker, Termux и Linux-VM](android-runtime.md)
+- [Пробный APK: запуск сервера из окна, автоматический вход и командный маршрут на ARM64](android-runtime.md)
 - [Упаковка Linux в APK: rootfs, PRoot и target SDK в DroidDeck](android-linux-packaging.md)
 - [Gradle Wrapper в git: зачем хранится, сверка jar и `cap migrate`](gradle-wrapper.md)
 - [Проверка release-варианта без создания ключа](release-check.md)

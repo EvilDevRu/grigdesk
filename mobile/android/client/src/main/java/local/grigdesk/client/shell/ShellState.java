@@ -122,6 +122,11 @@ public final class ShellState {
       result.put(key, source.get(key));
     }
 
+    if (ProfileStore.LOCAL_ID.equals(source.getString("id"))
+      && ProfileStore.LOCAL_NAME.equals(source.getString("name"))) {
+      result.put("name", ShellLocale.text(locale, "settings.thisDevice2", ProfileStore.LOCAL_NAME));
+    }
+
     result.put("status", status(source.getString("id")));
 
     return result;
@@ -154,7 +159,7 @@ public final class ShellState {
     result.put("detail", connection == null ? JSONObject.NULL : connection.get("detail"));
     result.put("serverApi", connection == null ? JSONObject.NULL : connection.get("serverApi"));
     result.put("appApi", new JSONObject().put("major", major).put("minor", minor));
-    result.put("localAvailable", false);
+    result.put("localAvailable", store.localAvailable);
 
     // Виджет конвейера собирается вместе с трубой: отдельный признак не нужен,
     // прежние оболочки без этого кода capability не объявляют.

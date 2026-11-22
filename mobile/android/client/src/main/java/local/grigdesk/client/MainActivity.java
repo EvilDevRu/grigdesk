@@ -1,6 +1,7 @@
 package local.grigdesk.client;
 
 import android.Manifest;
+import android.content.Context;
 import android.content.Intent;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
@@ -169,7 +170,7 @@ public class MainActivity extends AppCompatActivity {
                 visible.showOrigin(entry);
               }
             }, ((ClientApplication) getApplication()).appLock,
-            ((ClientApplication) getApplication()).backgroundLink);
+            ((ClientApplication) getApplication()).backgroundLink, localServer());
         }
 
         runtime.start(!((ClientApplication) getApplication()).lifecycle.isBackground());
@@ -185,6 +186,24 @@ public class MainActivity extends AppCompatActivity {
         starting = false;
       }
     }, "grigdesk-client-start").start();
+  }
+
+  protected ClientRuntime.LocalServer localServer() {
+    return null;
+  }
+
+  /**
+   * Системное оповещение открывает то же окно, что и иконка текущего варианта APK.
+   * В пробе это запускает локальный сервер даже при холодном входе через оповещение.
+   */
+  static Intent launchIntent(Context context) {
+    Intent intent = context.getPackageManager().getLaunchIntentForPackage(context.getPackageName());
+
+    if (intent != null && intent.getComponent() != null) {
+      return new Intent().setComponent(intent.getComponent());
+    }
+
+    return new Intent(context, MainActivity.class);
   }
 
   /**

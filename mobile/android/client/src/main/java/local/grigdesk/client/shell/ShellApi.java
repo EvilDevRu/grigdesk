@@ -591,8 +591,14 @@ public final class ShellApi implements ClientPipe.Shell, AutoCloseable {
       } else if (head.method().equals("POST") && path.equals("/__shell/unlock")) {
         return PipeResponse.json(200, unlock());
       } else if (head.method().equals("POST") && path.equals("/__shell/profiles")) {
-        nativeActions.unlock();
-        JSONObject added = pairing.add(data.getString("pairing"));
+        JSONObject added;
+
+        if (store.localAvailable && Boolean.TRUE.equals(data.opt("local")) && data.length() == 1) {
+          added = store.addLocal();
+        } else {
+          nativeActions.unlock();
+          added = pairing.add(data.getString("pairing"));
+        }
 
         select(added.getString("id"));
         navigation = store.selected;
@@ -617,6 +623,18 @@ public final class ShellApi implements ClientPipe.Shell, AutoCloseable {
         move = current;
       } else if (path.startsWith("/__shell/profiles/") && head.method().equals("PATCH")) {
         JSONObject profile = store.get(path.substring("/__shell/profiles/".length()));
+
+        if (ProfileStore.LOCAL_ID.equals(profile.getString("id"))) {
+          if (data.length() != 1 || !(data.opt("name") instanceof String)) {
+            throw new IllegalArgumentException(
+              ShellLocale.text(locale, "native.invalidMachineFields", "Неверные поля машины."));
+          }
+
+          store.renameLocal(data.getString("name"));
+          state.changed();
+
+          return PipeResponse.json(200, new JSONObject().put("ok", true));
+        }
 
         if (data.has("routePairing")) {
           if (data.length() != 1 || !(data.opt("routePairing") instanceof String)) {

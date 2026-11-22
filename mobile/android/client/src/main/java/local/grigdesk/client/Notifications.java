@@ -119,7 +119,7 @@ public final class Notifications {
    * Адрес цели передаётся отдельно и применяется только после загрузки документа.
    */
   private static PendingIntent openApp(Context context, String tag, String url) {
-    Intent intent = new Intent(context, MainActivity.class);
+    Intent intent = MainActivity.launchIntent(context);
 
     intent.setAction(Intent.ACTION_MAIN);
     intent.addCategory(Intent.CATEGORY_LAUNCHER);

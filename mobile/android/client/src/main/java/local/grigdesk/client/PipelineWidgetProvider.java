@@ -141,7 +141,7 @@ public final class PipelineWidgetProvider extends AppWidgetProvider {
    * сравнивает intent без extras, и общий компонент не должен перезаписывать чужой адрес.
    */
   private static PendingIntent openApp(Context context) {
-    Intent intent = new Intent(context, MainActivity.class);
+    Intent intent = MainActivity.launchIntent(context);
 
     intent.setAction(Intent.ACTION_MAIN);
     intent.addCategory(Intent.CATEGORY_LAUNCHER);
