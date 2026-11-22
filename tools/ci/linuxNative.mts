@@ -165,8 +165,16 @@ export async function verifyUnixNative(
       home: path.join(work, 'home'),
     };
 
-    for (const directory of Object.values(paths)) {
-      await fs.mkdir(directory, { recursive: true });
+    // Корень установки создаёт сам инсталлятор: уже существующий пустой каталог
+    // распознаётся как прежняя установка и отвергается installation_root_conflict.
+    for (const [name, directory] of Object.entries(paths)) {
+      if (name !== 'root') {
+        await fs.mkdir(directory, { recursive: true });
+      }
+    }
+
+    for (const sub of ['.cache', '.config', path.join('.local', 'share')]) {
+      await fs.mkdir(path.join(paths.home, sub), { recursive: true });
     }
 
     await execute(helper, [
@@ -178,7 +186,9 @@ export async function verifyUnixNative(
       env: {
         ...process.env,
         HOME: paths.home,
+        XDG_CONFIG_HOME: path.join(paths.home, '.config'),
         XDG_DATA_HOME: path.join(paths.home, '.local', 'share'),
+        XDG_CACHE_HOME: path.join(paths.home, '.cache'),
       },
       timeout: 300_000,
       maxBuffer: 16 * 1024 * 1024,
