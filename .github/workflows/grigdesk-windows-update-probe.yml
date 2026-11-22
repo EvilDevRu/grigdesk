@@ -1,5 +1,7 @@
 name: Проба обновления Windows (временная)
 on:
+  push:
+    branches: [ci/native-platforms-20261122]
   workflow_dispatch:
 permissions:
   contents: read
