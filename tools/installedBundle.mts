@@ -477,7 +477,11 @@ export async function executeInstalledBundle(options: BundleOptions): Promise<vo
 
     await sealInstalledBundle(work, path.join(root, 'release-artifacts'), digest, options.sign);
   } finally {
-    await fs.rm(work, { recursive: true, force: true });
+    // Go module cache и staged-файлы хранятся read-only, поэтому rmdir каталогов
+    // падает с EACCES. Возвращаем право записи и не даём очистке замаскировать
+    // результат сборки: одноразовый каталог остаётся допустимым остатком.
+    await execute('chmod', ['-R', 'u+w', work]).catch(() => {});
+    await fs.rm(work, { recursive: true, force: true }).catch(() => {});
     await lock.release();
   }
 }
