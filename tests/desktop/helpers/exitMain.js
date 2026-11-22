@@ -411,6 +411,8 @@ export async function exitMain(t, options = {}) {
       export const loadServerRuntime = async () => ({ inspection: null });
     `,
     './settings.ts': `
+      export const prepareWindowsSettings = async (userData) =>
+        userData + '/grigdesk-settings/settings.json';
       export const readSettings = async () => globalThis.__exitMain.stored;
       export const writeSettings = async () => {
         const f = globalThis.__exitMain;
