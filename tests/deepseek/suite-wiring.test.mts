@@ -301,6 +301,13 @@ test('чистый run-all передаёт один ELF всем наборам
     '}',
   ].join('\n'), { mode: 0o755 });
 
+  // Go-наборы run-all не потребляют DeepSeek ELF и не входят в счётчик проводки.
+  // Стабим их, как остальные дорогие наборы: чистая копия без utilities не должна
+  // валить прогон из-за go test ./utilities/... и отсутствующего run-go-utilities.sh.
+  await fs.writeFile(path.join(root, 'bin', 'go'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+  await fs.writeFile(path.join(root, 'tests', 'run-go-utilities.sh'), '#!/bin/sh\nexit 0\n',
+    { mode: 0o755 });
+
   const nodeCache = path.dirname(path.dirname(path.dirname(candidate.payloadFile)));
   const env: NodeJS.ProcessEnv = {
     ...process.env,

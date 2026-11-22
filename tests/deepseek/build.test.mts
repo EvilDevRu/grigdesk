@@ -167,7 +167,7 @@ for (const failure of ['platform', 'archive-hash', 'license', 'compiler', 'postj
 
     if (failure === 'platform') {
       steps.platform = 'darwin';
-      expected = /Linux x64/u;
+      expected = /darwin-x64/u;
     } else if (failure === 'archive-hash') {
       steps.download = async (_url, file) => {
         await fs.writeFile(file, 'wrong-archive');
