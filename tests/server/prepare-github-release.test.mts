@@ -79,7 +79,7 @@ test('GH-STABLE-ASSETS: оператор получает девять конк�
     expected), /github_asset_proof_invalid/u);
   await assert.rejects(prepareGithubRelease(directory, {
     ...proof,
-    assets: [...assets, { ...assets[0], name: 'server.tar.gz' }],
+    assets: [...assets, { ...assets[0]!, name: 'server.tar.gz' }],
   }, expected), /github_asset_proof_invalid/u);
 
   await assert.rejects(prepareGithubRelease(directory, { ...proof, runId: '101' },

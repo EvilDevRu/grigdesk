@@ -33,6 +33,12 @@ test('DIST-BUILD-FAIL-GATE: настоящий source dist выполняет т
     filter: (source) => !source.split(path.sep).includes('node_modules'),
   });
 
+  // Отпечаток рецепта читает Go-окружение и скрипты утилит из снимка источника.
+  for (const name of ['go.mod', 'go.sum', 'tests/run-go-utilities.sh']) {
+    await fs.mkdir(path.dirname(path.join(box.root, name)), { recursive: true });
+    await fs.copyFile(path.join(repository, name), path.join(box.root, name));
+  }
+
   // Major 1 заставляет штатный сторож проверить отпечаток в копии с временным ключом.
   await execute(process.execPath, ['tools/api-version.mjs', '--bump', 'major'], { cwd: box.root });
 
