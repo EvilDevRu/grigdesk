@@ -201,6 +201,9 @@ export async function runGlmLiveSmoke(options: GlmSmokeOptions) {
           modelRef: { provider: 'glm', model },
           messages: [],
           revision: 0,
+          // Чат без проекта резолвится в home; marker.txt лежит в project,
+          // поэтому cwd песочницы явно фиксируем на project.
+          workdir: { kind: 'path', path: project },
         },
       },
     });
