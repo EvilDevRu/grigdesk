@@ -86,7 +86,7 @@ mock.module(source('server/src/lib/providerInstall/factoryExternalCli.ts'), {
      */
     async buildFactoryExternalCliDescriptor(input) {
       const observed = [...active.values()].find((entry) =>
-        input.descriptorPath.startsWith(`${entry.stateDir}/`));
+        input.descriptorPath.startsWith(`${entry.root}/`));
 
       observed.descriptorCalls += 1;
       observed.building = true;
@@ -204,7 +204,11 @@ exit 0
         at: Date.now(),
       }));
     } else if (artifact === 'control-error') {
-      await writeFile(config.factoryControlDir, 'не каталог');
+      // Дескриптор подготовки теперь живёт под factoryControlDir/access-launches,
+      // поэтому сам control-dir обязан остаться каталогом; ошибку чтения даёт
+      // protocol-v2 как файл — попытка/реестр под ним не читаются.
+      await mkdir(config.factoryControlDir, { recursive: true });
+      await writeFile(path.join(config.factoryControlDir, 'protocol-v2'), 'не каталог');
     }
   };
 

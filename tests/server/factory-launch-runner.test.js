@@ -104,7 +104,7 @@ test('launch с неустановленным runnerPrimary отказан до
   });
   assert.equal(response.statusCode, 400, response.body);
   assert.equal(response.json().error, 'bad_runner');
-  assert.equal(await missing(factoryCalls), true, 'движок не вызывался');
+  assert.equal(await readFile(factoryCalls, 'utf8'), 'runners\n', 'только каталог исполнителей');
   assert.equal(await missing(systemdCalls), true, 'прогон не запускался');
 });
 
@@ -117,7 +117,7 @@ test('launch с битым форматом runnerPrimary отказан до в
   });
   assert.equal(response.statusCode, 400, response.body);
   assert.equal(response.json().error, 'bad_runner');
-  assert.equal(await missing(factoryCalls), true, 'движок не вызывался');
+  assert.equal(await readFile(factoryCalls, 'utf8'), 'runners\n', 'только каталог исполнителей');
   assert.equal(await missing(systemdCalls), true, 'прогон не запускался');
 });
 

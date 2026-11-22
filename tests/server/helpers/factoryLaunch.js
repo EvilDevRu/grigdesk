@@ -74,6 +74,7 @@ case "$1" in
       "delivery=disabled instrumentation=disabled"
     exit 0 ;;
   slots) echo '{"supported":false,"reason":"тест без слотов"}'; exit 0 ;;
+  runners) printf 'claude\\ncodex\\n'; exit 0 ;;
 esac
 exit 0
 `, { mode: 0o755 });
