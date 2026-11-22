@@ -365,7 +365,7 @@ test('настоящая замена A→B после security/CAS до run с�
         deepseekCacheDir: a.cacheDir,
         deepseekRuntimeHome: path.join(f.root, 'runtime-home'),
       });
-      await saveChat(f.app, 'runtime-chat');
+      await saveChat(f.app, 'runtime-chat', { workdir: { kind: 'path', path: f.root } });
 
       const bindings = new ChatSessionBindingStore({ dir: f.config.chatBindingsDir });
       const before = await bindings.compareAndSwap({

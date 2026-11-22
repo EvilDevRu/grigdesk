@@ -266,6 +266,7 @@ export async function saveChat(app, id, extra = {}) {
         createdAt: Date.UTC(2026, 8, 1),
         updatedAt: Date.UTC(2026, 8, 1),
         revision: 0,
+        ...(extra.workdir ? { workdir: extra.workdir } : {}),
       },
     },
   });
