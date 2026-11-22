@@ -414,7 +414,7 @@ async function closeWindow(pid: number): Promise<void> {
  * Приёмка запускает установленный exe штатным путём. Маркер от Electron
  * появляется только после авторизованной рабочей области, а не при HTTP 200 в API.
  */
-async function verifyFirstLaunch(
+export async function verifyFirstLaunch(
   destination: string, work: string, target: WindowsTarget,
 ): Promise<void> {
   const desktop = path.join(destination, 'grigdesk.exe');
@@ -508,7 +508,7 @@ async function verifyFirstLaunch(
  * Штатный NSIS-деинсталлятор удаляет весь каталог программы.
  * Проверочная запись остаётся в отдельной папке данных сервера.
  */
-async function verifyUninstall(destination: string, work: string): Promise<void> {
+export async function verifyUninstall(destination: string, work: string): Promise<void> {
   const data = path.join(work, 'Server Data', 'keep-on-uninstall.txt');
 
   await fs.writeFile(data, 'grigdesk-install-check\n', { flag: 'wx' });

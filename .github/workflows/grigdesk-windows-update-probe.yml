@@ -1,0 +1,90 @@
+name: Проба обновления Windows (временная)
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  probe:
+    name: Обновление и откат ${{ matrix.target }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: windows-x64
+            runner: windows-2025
+            arch: x64
+          - target: windows-arm64
+            runner: windows-11-arm
+            arch: arm64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 120
+    environment: platform-candidate
+    env:
+      STABLE_NATIVE_TARGET: ${{ matrix.target }}
+    steps:
+      - name: Исходники
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+      - name: Версия Node из manifest
+        id: node_runtime
+        shell: bash
+        run: node -p '"version="+require("./server/build/node-runtime.json").version' >> "$GITHUB_OUTPUT"
+      - name: Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: ${{ steps.node_runtime.outputs.version }}
+          architecture: ${{ matrix.arch }}
+      - name: Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16
+        with:
+          go-version: '1.27.4'
+      - name: Зависимости комплекта
+        shell: bash
+        run: |
+          npm --prefix server ci --include=dev --ignore-scripts --no-audit --no-fund
+          npm --prefix web ci --include=dev --ignore-scripts --no-audit --no-fund
+          npm --prefix desktop ci --include=dev --ignore-scripts --no-audit --no-fund
+      - name: План пробы
+        shell: bash
+        run: |
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs/promises';
+          import { resolveStablePlatformRelease, stablePlatforms } from './tools/stablePlatformRelease.mts';
+          import { canonicalJson } from './shared/lib/canonicalJson.ts';
+          import { sha256 } from './shared/node/hash.ts';
+          const plan = {
+            format: 1,
+            runId: process.env.GITHUB_RUN_ID,
+            runNumber: process.env.GITHUB_RUN_NUMBER,
+            ...resolveStablePlatformRelease({
+              platforms: [...stablePlatforms],
+              publish: false,
+              testMode: 'full',
+              reason: '',
+              validationRun: '',
+              attempt: '1',
+              runNumber: process.env.GITHUB_RUN_NUMBER,
+              version: '0.3.1',
+              commit: process.env.GITHUB_SHA,
+            }),
+          };
+          const bytes = canonicalJson(plan) + '\n';
+          await fs.writeFile('probe-plan.json', bytes);
+          await fs.appendFile(process.env.GITHUB_ENV, `STABLE_PLAN_SHA256=${sha256(bytes)}\n`);
+          NODE
+      - name: Проба обновления и отката
+        shell: bash
+        env:
+          RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
+        run: |
+          test -n "$RELEASE_SIGNING_KEY"
+          node tools/ci/windowsUpdateProbe.mts "$STABLE_NATIVE_TARGET" probe-plan.json windows-update-report
+      - name: Отчёт пробы
+        if: ${{ always() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: windows-update-probe-${{ matrix.target }}-${{ github.run_id }}
+          path: windows-update-report/
+          if-no-files-found: warn

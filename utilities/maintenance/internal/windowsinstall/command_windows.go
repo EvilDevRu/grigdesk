@@ -54,6 +54,26 @@ func reserveInstallation() (func(), error) {
 	return release, nil
 }
 
+// reserveUpdateLock сериализует обновление и откат с установкой тем же mutex,
+// но допускает существующую регистрацию: обновление меняет собственную установку.
+func reserveUpdateLock() (func(), error) {
+	name, err := windows.UTF16PtrFromString(`Local\GrigDesk-native-install`)
+	if err != nil {
+		return nil, err
+	}
+	lock, err := windows.CreateMutex(nil, false, name)
+	release := func() {
+		if lock != 0 {
+			windows.CloseHandle(lock)
+		}
+	}
+	if err != nil {
+		release()
+		return nil, errors.Join(errors.New("windows_install_already_running"), err)
+	}
+	return release, nil
+}
+
 // undoDesktopInstall снимает регистрацию, появившуюся у этой установки.
 // NSIS с _?= завершается в исходном процессе, после чего каталог можно удалить.
 func undoDesktopInstall(destination string) error {

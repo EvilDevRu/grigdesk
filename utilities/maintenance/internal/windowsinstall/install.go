@@ -38,40 +38,83 @@ type manifest struct {
 
 var payloadNames = []string{"grigdesk-maintenance.exe", "desktop.exe", "server.zip"}
 
-// Run поддерживает установку из распакованного локального комплекта Windows.
+// Run поддерживает установку, обновление и откат из локального комплекта Windows.
 // Доверенный ключ закреплён при сборке и не приходит из аргументов или окружения.
 func Run(ctx context.Context, args []string, trust string) error {
-	if len(args) != 3 || args[0] != "install" || runtime.GOOS != "windows" {
-		return errors.New("Использование: grigdesk-maintenance.exe install <источник> <каталог установки>")
+	if runtime.GOOS != "windows" || len(args) == 0 {
+		return windowsUsageError()
 	}
 	arch := runtime.GOARCH
 	if arch == "amd64" {
 		arch = "x64"
 	}
+	key, err := decodeTrust(trust)
+	if err != nil {
+		return err
+	}
+	local := os.Getenv("LOCALAPPDATA")
+	platform := "windows-" + arch
+	run := func(ctx context.Context, installer, desktop string) error {
+		command := exec.CommandContext(ctx, installer, "/S", "/D="+desktop)
+		// NSIS разбирает /D самостоятельно: значение с пробелами должно идти последним без кавычек.
+		setInstallerCommandLine(command, installer, desktop)
+		command.Stdout, command.Stderr = os.Stdout, os.Stderr
+		return command.Run()
+	}
+
+	switch args[0] {
+	case "install":
+		if len(args) != 3 {
+			return windowsUsageError()
+		}
+		release, err := reserveInstallation()
+		if err != nil {
+			return err
+		}
+		defer release()
+		return install(ctx, args[1], args[2], local, platform, key, run)
+	case "update":
+		if len(args) != 3 {
+			return windowsUsageError()
+		}
+		release, err := reserveUpdateLock()
+		if err != nil {
+			return err
+		}
+		defer release()
+		return update(ctx, args[1], args[2], local, platform, key, run)
+	case "rollback":
+		if len(args) != 2 {
+			return windowsUsageError()
+		}
+		release, err := reserveUpdateLock()
+		if err != nil {
+			return err
+		}
+		defer release()
+		return rollback(ctx, args[1], key, platform, run)
+	default:
+		return windowsUsageError()
+	}
+}
+
+func windowsUsageError() error {
+	return errors.New("Использование: grigdesk-maintenance.exe install|update <источник> <каталог> | rollback <каталог>")
+}
+
+// decodeTrust разбирает закреплённый при сборке публичный ключ выпуска.
+// Ключ приходит только из бинарника, поэтому аргументы и окружение его не подменяют.
+func decodeTrust(trust string) (ed25519.PublicKey, error) {
 	keyBytes, err := base64.StdEncoding.DecodeString(trust)
 	if err != nil {
-		return errors.New("windows_release_key_invalid")
+		return nil, errors.New("windows_release_key_invalid")
 	}
 	decoded, err := x509.ParsePKIXPublicKey(keyBytes)
 	key, ok := decoded.(ed25519.PublicKey)
 	if err != nil || !ok {
-		return errors.New("windows_release_key_invalid")
+		return nil, errors.New("windows_release_key_invalid")
 	}
-
-	release, err := reserveInstallation()
-	if err != nil {
-		return err
-	}
-	defer release()
-
-	return install(ctx, args[1], args[2], os.Getenv("LOCALAPPDATA"), "windows-"+arch, key,
-		func(ctx context.Context, installer, desktop string) error {
-			command := exec.CommandContext(ctx, installer, "/S", "/D="+desktop)
-			// NSIS разбирает /D самостоятельно: значение с пробелами должно идти последним без кавычек.
-			setInstallerCommandLine(command, installer, desktop)
-			command.Stdout, command.Stderr = os.Stdout, os.Stderr
-			return command.Run()
-		})
+	return key, nil
 }
 
 // readManifest проверяет подпись точных байтов описи до интерпретации файлов.
@@ -232,7 +275,9 @@ func install(ctx context.Context, source, destination, local, platform string, k
 	if err := os.Rename(filepath.Join(stagePath, "server"), filepath.Join(destination, "server")); err != nil {
 		return err
 	}
-	return nil
+	// Установщик окна сохраняется рядом, чтобы обновление могло зарезервировать
+	// предыдущее поколение, а откат — вернуть прежнее окно тем же NSIS.
+	return copyRegular(filepath.Join(stagePath, "desktop.exe"), filepath.Join(destination, installerName))
 }
 
 // unpackServer извлекает только обычные ZIP-записи в новый физический корень.
