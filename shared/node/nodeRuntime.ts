@@ -44,7 +44,8 @@ export function seaHostTarget(
   throw new Error(`Сборка SEA не поддерживается на ${platform}-${arch}`);
 }
 
-// Собственный сервер использует тот же список платформ, что и общий дистрибутив.
+// Собственный сервер сохраняет отдельную точку входа ради совместимости сборщиков.
+// Список платформ совпадает с общим дистрибутивом: Linux ARM64 допущен для обоих.
 export function serverSeaHostTarget(
   platform: string = process.platform,
   arch: string = process.arch,
