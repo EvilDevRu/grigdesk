@@ -30,7 +30,7 @@
 - [Codex: отсутствие terminal status, noResult, stage-result и пояснение skipped](codex-no-result-contract.md)
 - [Codex: права общего стенда, Linux-песочница Go и допуск к сдаче](codex-delivery-permissions.md)
 - [Offline-граница DeepSeek: metadata как provider, код 126 и denylist](deepseek-offline-guard.md)
-- [Браузер этапа: pinned authority, CLI/MCP, Linux-приёмка и legacy mode](browser-transport.md)
+- [Браузер этапа: pinned authority, CLI/MCP, Linux-приёмка и доступность транспорта на Windows](browser-transport.md)
 - [Как усиливать узлы конвейера](node-hardening.md) — входы и результаты, PLAN/SKEPTIC,
   доказательства проверок, повторы, границы GLM и безопасная публикация.
 
@@ -205,7 +205,7 @@
 - [Ответы мастера о правах и проблемах этапа](stage-wizard-answers.md)
 - [Где конвейер спрашивает человека — подробный контракт](human-gates.md)
 - [Схема конвейера — подробный контракт](graph-rendering.md)
-- [Редактор маршрутов: черновики через плюс, публикация и откат](route-editor.md) — свободный холст, полный пакет роли, координаты, переходы жестом и атомарный apply до 131 операции.
+- [Редактор маршрутов: черновики, публикация, откат и замок Windows](route-editor.md) — свободный холст, полный пакет роли, координаты, переходы жестом и атомарный apply до 131 операции.
 - [Задача: постановка и триаж — подробный контракт](task-triage.md)
 
 ## История решений

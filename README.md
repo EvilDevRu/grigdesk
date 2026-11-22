@@ -128,7 +128,13 @@ Use the same installer for another setup:
 | Desktop client for a remote server | `sh ./grigdesk-install --mode remote` |
 | Headless server | `sh ./grigdesk-install --mode server` |
 
-A `.deb` package is also available in [releases](https://github.com/EvilDevRu/grigdesk/releases/latest).
+The [latest release](https://github.com/EvilDevRu/grigdesk/releases/latest) lists its available packages.
+For releases with offline assets, extract the Linux x64 ZIP and run
+`sh ./grigdesk-install --source-dir "$PWD"` from that directory.
+On Debian or Ubuntu, install `grigdesk_VERSION_amd64.deb` with
+`sudo apt install ./grigdesk_VERSION_amd64.deb`, then open GrigDesk from the application menu
+as your regular user. Have the system dependencies installed before going offline. The app
+can use its regular update channel when you reconnect.
 
 </details>
 

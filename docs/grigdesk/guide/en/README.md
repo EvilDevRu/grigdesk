@@ -67,4 +67,4 @@ An older server that only provides Russian articles displays a language notice i
 - [Troubleshooting: connection, startup settings and build errors](troubleshooting.md)
 - [Glossary](glossary.md)
 
-[Installation](installation.md) covers the terminal script, network requirements and dist candidates.
+[Installation](installation.md) covers the online script, offline ZIP, Debian package and dist candidates.

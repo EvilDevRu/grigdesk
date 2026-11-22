@@ -24,6 +24,11 @@ Publisher повторяет только `browser_run_stale`, максимум 
 GRIGDESK_BROWSER_RELAY_SOCKET. Они перечислены в HOST_ENV_SUFFIXES, который используется
 диагностикой старых имён окружения.
 
+На Windows у фабрики пока отсутствует приватный транспорт для запуска
+браузера из этапа. Сервер запускается без Unix listener и оставляет
+поля браузерного helper пустыми. Регистрация окон и доступ через HTTP
+по-прежнему используют общий broker.
+
 Claude/Codex/Kimi используют factory-browser CLI и приватный mailbox/socket.
 JSON request не передаёт секрет в argv. Codex получает ровно необходимые readonly roots,
 mailbox и evidence root; canonical shell exemption допускает только точную команду,

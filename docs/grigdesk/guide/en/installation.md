@@ -1,6 +1,6 @@
 # Installing the application
 
-A v3 package downloads `control.tar.gz` alongside the selected components.
+A v3 release includes `control.tar.gz` alongside the selected components.
 It contains the `grigdesk-ctl` command. Close the registered installation’s
 window and server before its first switch to Go. Use `--migrate-to-go` for
 separate terminal confirmation. For automation, use
@@ -19,7 +19,8 @@ Close the old portable window and server before migrating, keeping their data.
 
 ## What to do
 
-1. Download a verified release's `grigdesk-install` from the [GrigDesk website](https://grigdesk.com).
+1. Download the online `grigdesk-install` from the website or the list of assets for the verified
+   GitHub release. [GrigDesk website](https://grigdesk.com)
 2. Open a terminal in the download folder and run `sh ./grigdesk-install`.
 3. Select local for the window and local server, remote for the window alone, or server for a server alone.
 4. Choose separate program and data folders. Review the version, paths and download size, then confirm.
@@ -63,12 +64,49 @@ For server modes, run `grigdesk-ctl server start --wait` to start the service,
 For window modes, run `grigdesk-ctl open` to open the application.
 Native acceptance for the macOS candidate runs separately.
 
-## Alternative: deb package
+## Offline installation on Windows
 
-Install `grigdesk_<version>_amd64.deb` with `sudo apt install ./grigdesk_<version>_amd64.deb`.
-It contains only the script and launcher, requires internet and opens a terminal on first launch
-from the application menu. Later launches use the user installation; updates need neither apt nor sudo.
-Removing the deb keeps the application and user data.
+For a release with Windows packages, download and extract the offline ZIP for x64
+or ARM64. In the extracted folder, run
+`powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\grigdesk-install.ps1`
+and confirm the installation. Use `-Yes` for automation. The default installation
+folder is `%LOCALAPPDATA%\GrigDesk`.
+
+Open GrigDesk from the Start menu. On first launch, the window selects the local
+profile and starts the bundled server. Remove the program via Installed apps.
+Server data is stored separately under `%USERPROFILE%\.grigdesk`.
+
+## Windows factory preview from source
+
+To test the factory from source on Windows x64 or ARM64, install Go 1.27.4
+and run `npm --prefix server run build:factory` at the repository root.
+The command builds `bin/factory.exe`. Starting the source server with
+`npm start` also builds the factory.
+Profile hooks use Bash from Git for Windows. For a custom installation,
+set `FACTORY_WINDOWS_BASH` to the absolute path to `bash.exe`.
+
+Native checks without WSL2 passed on x64 and ARM64 for a pre-published
+command route. On both architectures, the server started from source and the
+editor published a draft and replayed its receipt. Browser transport for Windows
+pipeline stages is being developed separately.
+
+## Offline ZIP and .deb for Linux x64
+
+For releases with offline assets, choose your package from the release downloads. Install the
+system dependencies listed above before going offline. Both packages work without source
+code or system Node/npm.
+
+- **ZIP.** Extract `grigdesk-X.Y.Z-linux-x64-offline.zip`, open a terminal in the extracted
+  directory and run `sh ./grigdesk-install --source-dir "$PWD"`. Installation uses your
+  profile without sudo.
+- **Debian / Ubuntu.** Run `sudo apt install ./grigdesk_X.Y.Z_amd64.deb`. Open GrigDesk from
+  the application menu as your regular user. The first launch installs into your profile using
+  the files in the package. Later launches open the installed app.
+
+Removing the .deb keeps the application and user data. To prepare an update while offline,
+run the installer from a second, newer ZIP with the same profile. The regular website update
+channel is available once you reconnect, without apt or sudo. The dev .deb needs an internet
+connection on first launch.
 
 ## Result
 
@@ -128,7 +166,12 @@ Do not remove data or registration to get around a collision.
 The website keeps the two most recent lightweight releases per channel. If a long-saved script can no longer
 find its pinned files, download a new script from the official website.
 A clean VM, real window and official Actions candidate require separate owner acceptance.
-Android installs and updates separately.
+For a full release, the downloads list groups the packages by operating system and architecture.
+The Actions run bundles them after all platforms pass verification. Android installs and updates separately.
+Open the Android probe APK from its app icon. On first launch, the window starts
+the local server, selects This device, and connects automatically when the server
+is ready. The probe APK supports resuming a saved command route on Android ARM64.
+The regular Android client connects to the selected host.
 
 ## Related articles
 

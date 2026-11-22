@@ -132,6 +132,11 @@ blob, postject или smoke сохраняет прежний опубликов
 берёт `server/build/node-runtime-darwin-arm64.json` и проверенные `process-identity`
 и `setsid` из окружения сборки. При неподтверждённом завершении стадии она сохраняет
 staging для диагностики. Приёмка на Apple Silicon остаётся открытой.
+
+Сборка серверного бинарника из исходников на Linux ARM64 выбирает отдельную
+опись `server/build/node-runtime-linux-arm64.json` и проверяет архитектуру ELF
+перед публикацией файла. Эту цель допускает `build:binary`. Установочный
+дистрибутив Linux ARM64 по-прежнему требует нативного адаптера и приёмки.
 [Контракт процессов Darwin](darwin-process-identity.md).
 
 Перед сборкой проверяют свободный диск с учётом staging, ZIP, cache, двух поколений и backup.
