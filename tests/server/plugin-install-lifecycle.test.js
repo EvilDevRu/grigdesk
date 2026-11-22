@@ -135,7 +135,13 @@ async function admissionFixture(t, options = {}) {
 
   t.after(async () => {
     stream.end();
-    await app.close();
+    // В полном CI-наборе app.close() иногда не дожидается события close (висящий
+    // WS upgrade/native stream). Ограничиваем уборку, чтобы прогон падал на проверке,
+    // а не виснул на teardown; forceCloseConnections уже рвёт idle-соединения.
+    await Promise.race([
+      app.close(),
+      new Promise((resolve) => { setTimeout(resolve, 5000).unref(); }),
+    ]);
     await rm(root, { recursive: true, force: true });
   });
 
