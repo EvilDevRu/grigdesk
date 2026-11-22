@@ -459,12 +459,21 @@ export async function verifyFirstLaunch(
 
   // На загруженном CI-раннере первый запуск окна и сервера может занимать
   // несколько минут (антивирус проверяет свежие exe), поэтому запас больше обычного.
-  const deadline = Date.now() + 300_000;
+  const deadline = Date.now() + 600_000;
+  let nextReport = Date.now() + 30_000;
 
   try {
     while (!log.includes('grigdesk_windows_local_ready')) {
       if (launchError || child.exitCode !== null || Date.now() >= deadline) {
         throw launchError ?? new Error('windows_verify_window_session_not_ready');
+      }
+
+      if (Date.now() >= nextReport) {
+        const api = await fetch(origin + '/api/auth/state', { signal: AbortSignal.timeout(2000) })
+          .then((response) => String(response.status)).catch(() => 'no-response');
+
+        console.error(`window launch wait: exit=${child.exitCode} api=${api} log=${log.slice(-400)}`);
+        nextReport = Date.now() + 30_000;
       }
 
       await delay(500);
