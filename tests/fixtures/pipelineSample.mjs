@@ -198,6 +198,11 @@ export async function fixture(t) {
   await cp(path.join(SAMPLE, 'profile'), profile, { recursive: true });
   await mkdir(state, { recursive: true });
   await mkdir(control, { recursive: true });
+  // Go-переход заменил отдельный factory-check подкомандой factory profile-check;
+  // тонкая обёртка сохраняет прежний путь engine/bin/factory-check для проверок.
+  await mkdir(path.join(ENGINE, 'bin'), { recursive: true });
+  await writeFile(path.join(ENGINE, 'bin', 'factory-check'),
+    `#!/bin/sh\nexec ${JSON.stringify(testFactoryBinary())} profile-check "$@"\n`, { mode: 0o755 });
   await put(root, 'adapter.mjs', [
     'import { appendFileSync } from "node:fs";',
     `appendFileSync(${JSON.stringify(path.join(root, 'calls.jsonl'))},`,
