@@ -12,7 +12,7 @@ export type ReleaseIdentity = ReturnType<typeof buildReleaseIdentity>;
 export type ReleasePlatform =
   | {
     os: 'linux';
-    arch: 'x64';
+    arch: 'x64' | 'arm64';
     glibc: string;
   }
   | {
@@ -99,7 +99,7 @@ function decodePlatform(value: unknown): ReleasePlatform {
   const platform = object(value, ['os', 'arch', darwin ? 'minMacOS' : 'glibc']);
 
   if (darwin ? platform.arch !== 'arm64' || platform.minMacOS !== '15.0'
-    : platform.os !== 'linux' || platform.arch !== 'x64'
+    : platform.os !== 'linux' || (platform.arch !== 'x64' && platform.arch !== 'arm64')
       || typeof platform.glibc !== 'string' || !/^\d+\.\d+$/u.test(platform.glibc)) {
     throw new Error('release_manifest_invalid');
   }

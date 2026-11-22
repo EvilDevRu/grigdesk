@@ -106,10 +106,11 @@ export async function stageInstalledBundle(options: BundleOptions, work: string)
       minMacOS: '15.0',
     } : {
       os: 'linux',
-      arch: 'x64',
+      arch: process.arch === 'arm64' ? 'arm64' : 'x64',
       glibc: '2.28',
     };
-  const releasePath = platform.os === 'darwin' ? 'releases/darwin-arm64' : 'releases';
+  const releasePath = platform.os === 'darwin' ? 'releases/darwin-arm64'
+    : platform.arch === 'arm64' ? 'releases/linux-arm64' : 'releases';
 
   if (process.platform !== platform.os || process.arch !== platform.arch) {
     throw new Error('release_platform_incompatible');
