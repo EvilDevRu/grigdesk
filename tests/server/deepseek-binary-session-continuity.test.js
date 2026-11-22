@@ -92,6 +92,8 @@ test('журнал v99 ротирует настоящую сессию чере
       modelRef: { provider: 'test-provider', model },
       messages: [firstMessage],
       revision: 0,
+      // Журнал сессии ищется под workdir проекта; без workdir чат резолвится в home.
+      workdir: { kind: 'path', path: runtime.cwd },
     } },
   });
 
