@@ -308,7 +308,7 @@
       "argv": [
         "bash",
         "-c",
-        "NODE_TEST_MAX_RSS_MB=4096 exec bash tests/run-node-tests-safe.sh --test --test-concurrency=2 tests/server/install-bootstrap.test.mts tests/server/install-bootstrap-dialog.test.mts tests/server/install-online.test.mts tests/server/installation-target.test.mts tests/server/verify-installation.test.mts tests/server/release-pipeline.test.mts tests/server/release-environment.test.mts tests/server/distribution-snapshot.test.mts tests/server/distribution-trust.test.mts tests/server/release-publish-command.test.mts tests/server/distribution-build.test.mts tests/server/verify-built-release.test.mts"
+        "NODE_TEST_MAX_RSS_MB=4096 exec bash tests/run-node-tests-safe.sh --test --test-concurrency=2 tests/server/install-bootstrap.test.mts tests/server/install-bootstrap-dialog.test.mts tests/server/install-online.test.mts tests/server/installation-target.test.mts tests/server/verify-installation.test.mts tests/server/release-pipeline.test.mts tests/server/release-environment.test.mts tests/server/distribution-snapshot.test.mts tests/server/distribution-trust.test.mts tests/server/release-publish-command.test.mts tests/server/distribution-build.test.mts tests/server/verify-built-release.test.mts tests/server/linux-offline-package.test.mts tests/server/deb-package.test.js tests/server/stable-platform-release.test.mts tests/server/prepare-github-release.test.mts"
       ],
       "timeoutMs": 1800000,
       "memory": {
@@ -356,12 +356,25 @@
       "timeoutMs": 1800000
     },
     {
+      "id": "web-factory",
+      "group": "prepare-web",
+      "needs": [
+        "prepare-build"
+      ],
+      "argv": [
+        "node",
+        "server/scripts/buildFactory.mjs"
+      ],
+      "timeoutMs": 1800000
+    },
+    {
       "id": "web-tests",
       "group": "web",
       "needs": [
         "prepare-web",
         "prepare-build",
-        "web-environment"
+        "web-environment",
+        "web-factory"
       ],
       "argv": [
         "npm",

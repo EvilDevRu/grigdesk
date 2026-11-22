@@ -52,8 +52,10 @@ test('RESOURCES: единый диалог сохраняет устройств
   const dialog = browser.document.querySelector('[data-role="system-resources"]');
   const panel = dialog.querySelector('.computer-resources');
   const rows = [...panel.querySelectorAll('.pu-row')];
+  const titleId = dialog.getAttribute('aria-labelledby');
 
-  assert.equal(dialog.getAttribute('aria-label'), 'Ресурсы компьютера');
+  assert.ok(titleId);
+  assert.equal(browser.document.getElementById(titleId)?.textContent, 'Ресурсы компьютера');
   assert.equal(dialog.querySelectorAll('.ui-dialog__header').length, 1);
   assert.equal(dialog.querySelectorAll('button').length, 1);
   assert.equal(dialog.querySelectorAll('.ui-popover').length, 0);

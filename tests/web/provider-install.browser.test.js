@@ -431,7 +431,7 @@ test('close/reload и второе окно показывают тот же job
 
   const dialog = first.locator('[data-role="provider-install-dialog"]');
 
-  await dialog.getByRole('button', { name: 'Закрыть' }).click();
+  await dialog.locator('.ui-dialog__footer').getByRole('button', { name: 'Закрыть' }).click();
   assert.equal(await first.evaluate(() => document.querySelector('#app').__vue_app__
     .config.globalProperties.$pinia._s.get('settings').snapshot.dirtyCount), 1);
 
@@ -455,7 +455,7 @@ test('close/reload и второе окно показывают тот же job
   await second.waitForTimeout(100);
   assert.ok(fixture.reads.length > readsBefore, 'Hello/reconnect не перечитал снимок');
   assert.equal(fixture.posts.length, 1, 'Reconnect повторил POST');
-  await second.locator('[data-role="provider-install-dialog"]')
+  await second.locator('[data-role="provider-install-dialog"]').locator('.ui-dialog__footer')
     .getByRole('button', { name: 'Закрыть' }).click();
 
   const settingsArea = await openEntry(second, 'codex', 'settings');
@@ -529,7 +529,8 @@ test('телефон и окно сохраняют доступность де�
           await details.click();
           assert.equal(await output.isVisible(), false);
 
-          const controls = [action, dialog.getByRole('button', { name: /^(Закрыть|Close)$/iu })];
+          const controls = [action, dialog.locator('.ui-dialog__footer')
+            .getByRole('button', { name: /^(Закрыть|Close)$/iu })];
 
           if (status === 'failed') {
             controls.push(dialog.getByRole('button', { name: /^(Повторить|Retry)$/u }));

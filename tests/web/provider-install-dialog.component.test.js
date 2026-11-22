@@ -48,10 +48,11 @@ async function dialogFixture(t, activeJob, options = {}) {
 
 /**
  * Доступное имя находит продуктовую кнопку независимо от внутреннего data-role.
+ * Селектор сужает область, когда одно имя носят иконка шапки и кнопка футера.
  * В assert передаётся только число, чтобы happy-dom не сериализовал циклический узел.
  */
-function button(wrapper, name) {
-  const buttons = wrapper.findAll('button').filter((item) => name.test(
+function button(wrapper, name, selector = 'button') {
+  const buttons = wrapper.findAll(selector).filter((item) => name.test(
     item.attributes('aria-label') || item.text(),
   ));
 
@@ -143,7 +144,7 @@ test('общая фаза и свёрнутый live output без выдума�
   assert.equal(wrapper.find('img').exists(), false);
   assert.match(wrapper.text(), /живой вывод/u);
   assert.equal(wrapper.get('pre').isVisible(), true);
-  await button(wrapper, /^Закрыть$/u).trigger('click');
+  await button(wrapper, /^Закрыть$/u, '.ui-dialog__footer button').trigger('click');
   await flushPromises();
   assert.equal(store.snapshot.active.id, 'fixture-job-1');
   assert.equal(calls.posts.length, 0, 'Закрытие отправляет abort или cancel');
@@ -168,7 +169,7 @@ test('номер сетевого повтора переводится и ис�
   assert.equal(fixture.calls.posts.length, 0, 'Перевод запустил новый installer');
   fixture.store.applySnapshot(snapshot({ ...active, stage: 'version' }, 4));
   await fixture.flushPromises();
-  assert.equal(fixture.wrapper.find('[role="status"]').exists(), false);
+  assert.equal(fixture.wrapper.find('.provider-install-note[role="status"]').exists(), false);
 });
 
 test('четыре исхода и interrupted видны на RU и EN', async (t) => {
