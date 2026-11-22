@@ -198,6 +198,9 @@ async function chatFixture(t, f) {
         modelRef: { provider: 'glm', model: MODEL },
         messages: [],
         revision: 0,
+        // Чат без проекта резолвится в home; binding cwd обязан указывать на
+        // корень фикстуры, поэтому workdir задаётся явно.
+        workdir: { kind: 'path', path: f.root },
       },
     },
   });

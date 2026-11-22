@@ -55,6 +55,8 @@ async function boundGlmChat(t, pair) {
       modelRef,
       messages: [initialMessage],
       revision: 0,
+      // Без workdir чат резолвится в home, а журнал сессии ищется под f.cwd.
+      workdir: { kind: 'path', path: f.cwd },
     } },
   });
 

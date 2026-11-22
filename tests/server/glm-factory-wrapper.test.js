@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { execFile } from 'node:child_process';
+import { execFile, execFileSync } from 'node:child_process';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -7,6 +7,7 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 
+import { stageFactoryCandidate } from '../../server/scripts/binary/factoryCandidate.mts';
 import { runGlmFactory } from '../../server/scripts/glmRunner.mts';
 import { runDeepSeekFactory } from '../../server/scripts/deepseekRunner.mts';
 import { writeCompatibility } from '../../server/scripts/sea/compatibility.mts';
@@ -370,6 +371,21 @@ test('SB11-catalog: собранные GLM helpers работают из пер�
     ['server/scripts/glmRuntimeInfo.mts', 'script'],
   ]);
   await writeCompatibility(root, selected, catalog);
+
+  // Bundled-проба требует Go-фабрику с дескриптором в перенесённом R: собираем
+  // candidate и стадируем его тем же механизмом, что и установка поколения.
+  const candidate = path.join(base, 'source-factory');
+  execFileSync('go', ['build', '-trimpath', '-buildvcs=false', '-o', candidate,
+    './utilities/factory/cmd/factory'], {
+    cwd: ROOT, env: { ...process.env, CGO_ENABLED: '0' }, timeout: 60_000,
+  });
+  await stageFactoryCandidate({
+    root,
+    binary: candidate,
+    profileAbi: path.join(ROOT, 'engine/lib/delivery_contract.py'),
+    os: process.platform,
+    arch: process.arch,
+  });
 
   const node = path.join(root, 'runtime/node/bin/node');
   const env = {
