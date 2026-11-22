@@ -97,7 +97,7 @@
       "argv": [
         "bash",
         "-c",
-        "bash tools/build-go-utilities.sh \"$PWD/bin/utilities\" && bash tools/build-factory.sh \"$PWD/engine/bin\""
+        "bash tools/build-go-utilities.sh \"$PWD/bin/utilities\" && bash tools/build-factory.sh \"$PWD/engine/bin\" && mkdir -p \"$PWD/bin\" && cp \"$PWD/engine/bin/factory\" \"$PWD/bin/factory\""
       ],
       "timeoutMs": 1800000
     },
