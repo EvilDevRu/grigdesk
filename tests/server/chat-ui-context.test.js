@@ -186,7 +186,21 @@ test('COMP-SCTX-06/07/08/10: живые chat routes используют context
     context,
   };
 
-  const global = await app.inject({ method: 'POST', url: '/api/chat', payload });
+  // Свободный чат без workdir резолвится в home; сохраняем durable выбор корня
+  // фикстуры, чтобы проверить, что страница /agents не подменяет cwd.
+  const stored = await app.inject({
+    method: 'PUT',
+    url: '/api/chat/store/chat',
+    payload: { chat: {
+      id: 'free-chat', modelRef: payload.modelRef, messages: [], revision: 0,
+      workdir: { kind: 'path', path: root },
+    } },
+  });
+  assert.equal(stored.statusCode, 200, stored.body);
+
+  const global = await app.inject({
+    method: 'POST', url: '/api/chat', payload: { ...payload, chatKey: 'free-chat' },
+  });
   const task = await app.inject({ method: 'POST', url: '/api/tasks/44/chat', payload });
   assert.equal(global.statusCode, 200, global.body);
   assert.equal(task.statusCode, 200, task.body);
