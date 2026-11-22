@@ -525,6 +525,21 @@ export async function verifyFirstLaunch(
     console.error(log.slice(-8000));
     console.error(serverLog.slice(-8000));
 
+    // Пустой журнал сервера не объясняет отказ: дерево данных и процессы с номерами
+    // сессий показывают, стартовал ли сервер и в какой сессии живёт видимое окно.
+    const quotedWork = work.replaceAll("'", "''");
+    const tree = await execute('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command',
+      `Get-ChildItem -Recurse -Force '${quotedWork}' | Select-Object FullName,Length`
+      + ' | Format-Table -AutoSize | Out-String -Width 300'],
+    { timeout: 15000, windowsHide: true }).then((r) => r.stdout).catch(() => 'no-tree');
+    const processes = await execute('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command',
+      "Get-Process | Where-Object {$_.ProcessName -match 'grigdesk|electron|node|factory'}"
+      + ' | Select-Object Id,ProcessName,SessionId,Path | Format-Table -AutoSize | Out-String -Width 300'],
+    { timeout: 15000, windowsHide: true }).then((r) => r.stdout).catch(() => 'no-processes');
+
+    console.error(tree.slice(-8000));
+    console.error(processes.slice(-4000));
+
     throw error;
   } finally {
     if (child.exitCode === null) {
