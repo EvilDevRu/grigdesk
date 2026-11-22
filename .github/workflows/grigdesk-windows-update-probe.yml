@@ -81,6 +81,14 @@ jobs:
         run: |
           test -n "$RELEASE_SIGNING_KEY"
           node tools/ci/windowsUpdateProbe.mts "$STABLE_NATIVE_TARGET" probe-plan.json windows-update-report
+      - name: Скриншот запуска окна
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          mkdir -p windows-update-report
+          if [ -f "$LOCALAPPDATA/grigdesk-launch-screen.png" ]; then
+            cp "$LOCALAPPDATA/grigdesk-launch-screen.png" windows-update-report/launch-screen.png
+          fi
       - name: Отчёт пробы
         if: ${{ always() }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9

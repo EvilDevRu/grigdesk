@@ -474,8 +474,24 @@ export async function verifyFirstLaunch(
       if (Date.now() >= nextReport) {
         const api = await fetch(origin + '/api/auth/state', { signal: AbortSignal.timeout(2000) })
           .then((response) => String(response.status)).catch(() => 'no-response');
+        const titles = await execute('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command',
+          "Get-Process grigdesk,electron,node -ErrorAction SilentlyContinue | "
+          + 'Select-Object Id,ProcessName,MainWindowTitle | Format-Table -AutoSize | Out-String'],
+          { timeout: 10000, windowsHide: true }).then((r) => r.stdout.trim()).catch(() => 'no-titles');
 
-        console.error(`window launch wait: exit=${child.exitCode} api=${api} log=${log.slice(-400)}`);
+        console.error(`window launch wait: exit=${child.exitCode} api=${api} `
+          + `titles=${titles} log=${log.slice(-300)}`);
+        const screen = path.join(process.env.LOCALAPPDATA ?? work, 'grigdesk-launch-screen.png')
+          .replaceAll("'", "''");
+
+        await execute('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command',
+          'Add-Type -AssemblyName System.Windows.Forms,System.Drawing; '
+          + '$b=[System.Windows.Forms.Screen]::PrimaryScreen.Bounds; '
+          + '$img=New-Object System.Drawing.Bitmap $b.Width,$b.Height; '
+          + '$g=[System.Drawing.Graphics]::FromImage($img); '
+          + '$g.CopyFromScreen($b.Location,[System.Drawing.Point]::Empty,$b.Size); '
+          + `$img.Save('${screen}'); $g.Dispose(); $img.Dispose()`],
+          { timeout: 15000, windowsHide: true }).catch(() => undefined);
         nextReport = Date.now() + 30_000;
       }
 
