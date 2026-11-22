@@ -22,14 +22,19 @@ export interface NodeRuntime {
 
 /**
  * Связывает платформу сборки с нативным архивом до запуска инструментов.
- * Сборка под чужую архитектуру не допускается.
+ * Сборка под чужую архитектуру не допускается. Linux ARM64 допущен и для
+ * общего дистрибутива (сервер и DeepSeek), не только для собственного сервера.
  */
 export function seaHostTarget(
   platform: string = process.platform,
   arch: string = process.arch,
-): Exclude<NodeRuntime['platform'], 'linux-arm64'> {
+): NodeRuntime['platform'] {
   if (platform === 'linux' && arch === 'x64') {
     return 'linux-x64';
+  }
+
+  if (platform === 'linux' && arch === 'arm64') {
+    return 'linux-arm64';
   }
 
   if (platform === 'darwin' && arch === 'arm64') {
@@ -39,16 +44,11 @@ export function seaHostTarget(
   throw new Error(`Сборка SEA не поддерживается на ${platform}-${arch}`);
 }
 
-// Собственный сервер допускает Linux ARM64 с отдельной описью и проверкой ELF.
-// Общий установочный дистрибутив имеет независимый список допущенных платформ.
+// Собственный сервер использует тот же список платформ, что и общий дистрибутив.
 export function serverSeaHostTarget(
   platform: string = process.platform,
   arch: string = process.arch,
 ): NodeRuntime['platform'] {
-  if (platform === 'linux' && arch === 'arm64') {
-    return 'linux-arm64';
-  }
-
   return seaHostTarget(platform, arch);
 }
 
@@ -63,11 +63,12 @@ export function serverNodeRuntimeManifest(target: NodeRuntime['platform']): stri
 }
 
 /**
- * CLI-пакеты сохраняют собственные описи Linux.
- * На Apple Silicon все CLI используют ту же опись, что серверный SEA.
+ * CLI-пакеты сохраняют собственные описи Linux x64.
+ * На Apple Silicon и Linux ARM64 Node SEA-компоненты используют ту же опись,
+ * что серверный SEA своей платформы (tracker/relay после Go-перехода — Go-бинарники).
  */
 export function componentNodeRuntimeManifest(packageDir: string, target: NodeRuntime['platform']): string {
-  return target === 'darwin-arm64'
+  return target === 'darwin-arm64' || target === 'linux-arm64'
     ? path.resolve(packageDir, '..', serverNodeRuntimeManifest(target))
     : path.join(packageDir, 'build/node-runtime.json');
 }

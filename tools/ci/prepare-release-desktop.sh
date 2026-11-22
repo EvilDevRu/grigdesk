@@ -1,10 +1,15 @@
 #!/usr/bin/env bash
-# Общая подготовка закреплённых Electron и AppImage tools для Linux x64.
+# Общая подготовка закреплённых Electron и AppImage tools для Linux x64/ARM64.
 # npm ci не запускает native lifecycle: архивы проверяются до распаковки.
 set -euo pipefail
 
 tools=${1:?Укажите абсолютный путь для AppImage tools}
 [[ $# == 1 && $tools == /* ]]
+case "$(uname -m)" in
+  x86_64) arch=x64 ;;
+  aarch64 | arm64) arch=arm64 ;;
+  *) echo "Неподдерживаемая архитектура Linux: $(uname -m)" >&2; exit 1 ;;
+esac
 electron=desktop/node_modules/electron
 version=$(node -p 'require("./desktop/node_modules/electron/package.json").version')
 [[ $version =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
@@ -36,7 +41,7 @@ download_asset() {
 }
 
 if [[ ! -d $electron/dist ]]; then
-  archive=electron-v$version-linux-x64.zip
+  archive=electron-v$version-linux-$arch.zip
   checksum=$(node -p 'require("./desktop/node_modules/electron/checksums.json")[process.argv[1]]' "$archive")
   [[ $checksum =~ ^[0-9a-f]{64}$ ]]
   download_asset electron/electron "v$version" "$archive"
@@ -64,9 +69,9 @@ if [[ ! -d $tools ]]; then
   printf '%s  %s\n' d12ff7eb8f1d1ec4652ca5237a7fbdca33acc0c758045636feca62dc6ecb8ec4 \
     "$staging/$archive" | sha256sum --check --strict
   7z x -y "-o$staging/appimage" "$staging/$archive" >/dev/null
-  [[ -x $staging/appimage/linux-x64/mksquashfs &&
-    -x $staging/appimage/linux-x64/desktop-file-validate && -f $staging/appimage/runtime-x64 ]]
+  [[ -x $staging/appimage/linux-$arch/mksquashfs &&
+    -x $staging/appimage/linux-$arch/desktop-file-validate && -f $staging/appimage/runtime-$arch ]]
   mv -T -- "$staging/appimage" "$tools"
 fi
 
-[[ -x $tools/linux-x64/mksquashfs && -x $tools/linux-x64/desktop-file-validate && -f $tools/runtime-x64 ]]
+[[ -x $tools/linux-$arch/mksquashfs && -x $tools/linux-$arch/desktop-file-validate && -f $tools/runtime-$arch ]]

@@ -95,7 +95,7 @@ export async function buildDesktopRelease(input: BundleBuildInput & {
   const version = env.GRIGDESK_RELEASE_VERSION;
   const command = ['--prefix', path.join(root, 'desktop'), 'run'];
 
-  if (target === 'linux-x64') {
+  if (target === 'linux-x64' || target === 'linux-arm64') {
     const prepared = process.env.GRIGDESK_APPIMAGE_TOOLS_PATH;
     const tools = prepared ?? path.join(cacheDir, 'appimage-tools');
 
@@ -103,7 +103,9 @@ export async function buildDesktopRelease(input: BundleBuildInput & {
       await ports.run('bash', ['tools/ci/prepare-release-desktop.sh', tools], input);
     }
 
-    await ports.run('npm', [...command, 'dist', '--', `--config.directories.output=${outDir}`,
+    const distScript = target === 'linux-arm64' ? 'dist:linux-arm64' : 'dist';
+
+    await ports.run('npm', [...command, distScript, '--', `--config.directories.output=${outDir}`,
       `--config.extraMetadata.version=${version}`,
       `--config.electronDist=${path.join(root, 'desktop/node_modules/electron/dist')}`], {
       ...input, env: { ...env, APPIMAGE_TOOLS_PATH: tools },
