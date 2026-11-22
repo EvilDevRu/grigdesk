@@ -165,7 +165,10 @@ test('ярлык ведёт в приложение без браузерног�
   const source = readFileSync(script, 'utf8');
 
   assert.doesNotMatch(source, /xdg-open|open_browser|sensible-browser|gio open/u);
-  assert.match(source, /grigdesk-ctl" open/u);
+  // Go-переход: open идёт через bin/utilities/ctl (release — bin/grigdesk-ctl),
+  // вызов закреплён переменной executable, а не литералом прежнего launcher.
+  assert.match(source, /bin\/utilities\/ctl/u);
+  assert.match(source, /"\$executable" open/u);
 });
 
 const nodeDir = path.dirname(execFileSync('bash', ['-c', 'command -v node'], { encoding: 'utf8' }).trim());

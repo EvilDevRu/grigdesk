@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { readFile, readdir } from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
 import { classifyGlmModelError } from '../../server/src/lib/glm/modelErrors.ts';
@@ -19,6 +19,8 @@ import {
   runnerFailureDetail,
   RUNNER_FAILURE_READERS,
 } from '../../server/src/lib/runnerFailure.ts';
+import { listInstalledRunners } from '../../server/src/lib/runnersCatalog.ts';
+import { fixtureGo } from '../helpers/goBuildFixture.mts';
 
 const capacity = 'Selected model is at capacity. Please try a different model.';
 const failed = (message) => JSON.stringify({ type: 'turn.failed', error: { message } });
@@ -40,9 +42,9 @@ test('Qwen читает отказ wrapper-а, скрывает секрет и 
 });
 
 test('для каждого встроенного раннера объявлен источник диагностики отказов', async () => {
-  const files = await readdir(new URL('../../engine/lib/runners/', import.meta.url));
-  const runners = files.filter((file) => file.endsWith('.sh'))
-    .map((file) => file.slice(0, -3)).filter((id) => !['index', 'policy', 'catalog'].includes(id));
+  // Go-переход убрал shell-модули engine/lib/runners; каталог раннеров теперь
+  // отдаёт сама фабрика (`factory runners`), с ней и сверяем набор читателей.
+  const runners = await listInstalledRunners({ factoryBin: fixtureGo('factory') });
 
   assert.deepEqual(Object.keys(RUNNER_FAILURE_READERS).sort(), runners.sort());
 });

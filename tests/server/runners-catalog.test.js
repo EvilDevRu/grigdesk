@@ -1,35 +1,49 @@
-// Каталог установленных исполнителей — зеркало `factory runners` движка:
-// только *.sh-модули адаптеров, без служебных index/policy/catalog и без имён,
-// которые нельзя передать обратно в CLI движка.
+// Каталог установленных исполнителей — зеркало `factory runners` Go-движка:
+// идентификаторы из stdout, только пригодные для CLI-аргумента имена, без
+// повторов и отсортированные. Нет фабрики или каталога — пустой список.
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
 import { listInstalledRunners } from '../../server/src/lib/runnersCatalog.ts';
 
-test('каталог исполнителей: только валидные адаптеры, отсортированные', async (t) => {
+/**
+ * Подписывает stub-фабрику, которая отвечает на `runners` заданным списком.
+ * Каталог читается из stdout настоящего запуска, а не из shell-модулей.
+ */
+async function stubFactory(t, output) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-runners-catalog-'));
+
   t.after(() => rm(root, { recursive: true, force: true }));
-  const runnersDir = path.join(root, 'engine', 'lib', 'runners');
-  await mkdir(runnersDir, { recursive: true });
 
-  const names = ['codex.sh', 'claude.sh', 'deepseek.sh', 'glm.sh', 'index.sh', 'policy.sh', 'catalog.sh'];
+  const bin = path.join(root, 'factory');
 
-  for (const name of names) {
-    await writeFile(path.join(runnersDir, name), '# адаптер\n');
-  }
-  // Не модуль движка и имена, непригодные для CLI-аргумента.
-  await writeFile(path.join(runnersDir, 'notes.txt'), 'текст\n');
-  await writeFile(path.join(runnersDir, 'Claude.sh'), '# верхний регистр\n');
-  await writeFile(path.join(runnersDir, '0bad.sh'), '# цифра в начале\n');
+  await writeFile(bin, `#!/bin/sh\nprintf '%s\\n' ${output}\n`, { mode: 0o755 });
 
-  assert.deepEqual(await listInstalledRunners({ factoryHome: path.join(root, 'engine') }), [
+  return bin;
+}
+
+test('каталог исполнителей: только валидные адаптеры, отсортированные', async (t) => {
+  const bin = await stubFactory(t, "'codex' 'claude' 'deepseek' 'glm' 'claude'");
+
+  assert.deepEqual(await listInstalledRunners({ factoryBin: bin }), [
     'claude', 'codex', 'deepseek', 'glm',
   ]);
 });
 
-test('каталог исполнителей: несуществующая директория — пустой список', async () => {
-  assert.deepEqual(await listInstalledRunners({ factoryHome: '/нет/такого/engine' }), []);
+test('каталог исполнителей: непригодное для CLI имя отклоняет весь список', async (t) => {
+  const bin = await stubFactory(t, "'claude' '0bad' 'Claude'");
+
+  assert.deepEqual(await listInstalledRunners({ factoryBin: bin }), []);
+});
+
+test('каталог исполнителей: нет фабрики или относительный путь — пустой список', async () => {
+  assert.deepEqual(await listInstalledRunners({}), []);
+  assert.deepEqual(await listInstalledRunners({ factoryBin: 'relative/factory' }), []);
+});
+
+test('каталог исполнителей: несуществующая фабрика — пустой список', async () => {
+  assert.deepEqual(await listInstalledRunners({ factoryBin: '/нет/такого/factory' }), []);
 });

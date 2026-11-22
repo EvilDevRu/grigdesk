@@ -191,6 +191,24 @@
       "detail": "Один ELF: явные стадии сборки, launcher и ordinary Node payload."
     },
     {
+      "file": "server/scripts/buildFactory.mjs",
+      "construct": "import-meta",
+      "target": "url",
+      "count": 1,
+      "owner": "task-19",
+      "fate": "development-only",
+      "detail": "Сборка Go-фабрики из исходников checkout; в runtime payload не входит."
+    },
+    {
+      "file": "server/scripts/buildFactory.mjs",
+      "construct": "resource-ref",
+      "target": ".",
+      "count": 1,
+      "owner": "task-19",
+      "fate": "development-only",
+      "detail": "Сборка Go-фабрики из исходников checkout; в runtime payload не входит."
+    },
+    {
       "file": "server/scripts/buildSea.mts",
       "construct": "import-meta",
       "target": "dirname",
@@ -1152,6 +1170,15 @@
       "owner": "task-9",
       "fate": "asset",
       "detail": "Python-warmup копируется как ресурс."
+    },
+    {
+      "file": "server/src/modules/system/index.ts",
+      "construct": "exec-path",
+      "target": "",
+      "count": 1,
+      "owner": "task-19",
+      "fate": "server-bundle",
+      "detail": "process.execPath только отличает windowsPackage node.exe; запуск идёт через launcher."
     },
     {
       "file": "server/src/modules/routes/draftStore.ts",

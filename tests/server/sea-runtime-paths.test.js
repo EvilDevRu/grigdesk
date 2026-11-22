@@ -34,6 +34,8 @@ import {
 } from '../../server/src/lib/runtimePaths.ts';
 import { createRuntimeContextPlugin } from '../../server/scripts/sea/context.mts';
 import { createModuleUrlsPlugin } from '../../server/scripts/sea/moduleUrls.mts';
+import { stageFactoryCandidate } from '../../server/scripts/binary/factoryCandidate.mts';
+import { testFactoryBinary } from '../helpers/factoryBinary.mjs';
 
 const ROOT = path.resolve(fileURLToPath(new URL('../../', import.meta.url)));
 const require = createRequire(new URL('../../server/package.json', import.meta.url));
@@ -296,6 +298,15 @@ test('SEA-RP-08: вычисления не создают файлов и не �
  */
 test('SEA-RP-09: packaged DeepSeek выбирает внешний ELF и обычный Node без source-контракта', async (t) => {
   const R = await packagedLayout(t);
+  // routeLaunchEnv читает bundled Go-фабрику комплекта; стейджим её тем же
+  // сборщиком, что штатный пакет, иначе factoryRuntimePaths отклоняет комплект.
+  await stageFactoryCandidate({
+    root: R,
+    binary: testFactoryBinary(),
+    profileAbi: path.join(ROOT, 'engine/lib/delivery_contract.py'),
+    os: process.platform,
+    arch: process.arch,
+  });
   const dataHome = await scratch(t);
   const outfile = path.join(R, 'server/runtime/helpers/deepseek-paths.mjs');
   const urls = createModuleUrlsPlugin({

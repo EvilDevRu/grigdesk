@@ -6,7 +6,7 @@ import { GLM_ADMISSION } from '../../deepseek/src/runtime/glmCompatibility.ts';
 test('GLM_ADMISSION допускает api и coding-plan с проверенными живыми identity', () => {
   assert.deepEqual(GLM_ADMISSION.toSorted((left, right) => left.mode.localeCompare(right.mode)), [{
     mode: 'api',
-    compatibility: '6b17c77865a8a540bc396f4289bdeed8684d5a7f25425b0011aefa5a841eb9a7',
+    compatibility: 'e283e8ee57dcd06e1caaf2abb0ec186f7fc691ebee04cda0f0cf9873966fab47',
   }, {
     mode: 'coding-plan',
     compatibility: 'f9c39e6f240dcd12136ce32722da177f8b513f3d92d8bd0be91a6efee09ded28',

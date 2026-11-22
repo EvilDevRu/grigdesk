@@ -343,9 +343,10 @@ test('чистый run-all передаёт один ELF всем наборам
 
   const nestedBinary = path.join(root, 'nested/deepseek');
 
-  // Самостоятельный benchmark, routes и voice входят в полную опись потребителей.
+  // Самостоятельный benchmark входит в полную опись потребителей. Go-наборы
+  // (relay/tracker/routes/voice) после Go-перехода не потребляют DeepSeek ELF.
   // Вложенный candidate gate отдельно проверяет те же пять ступеней своего пакета.
-  assert.equal(observed.filter((binary) => binary === candidate.binary).length, 18);
+  assert.equal(observed.filter((binary) => binary === candidate.binary).length, 14);
   assert.equal(observed.filter((binary) => binary === nestedBinary).length, 5);
   assert.ok(observed.every((binary) => binary === candidate.binary || binary === nestedBinary));
 

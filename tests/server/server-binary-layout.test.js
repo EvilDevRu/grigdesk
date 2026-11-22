@@ -9,6 +9,8 @@ import { fileURLToPath } from 'node:url';
 
 import { createRuntimeContextPlugin } from '../../server/scripts/sea/context.mts';
 import { createModuleUrlsPlugin } from '../../server/scripts/sea/moduleUrls.mts';
+import { stageFactoryCandidate } from '../../server/scripts/binary/factoryCandidate.mts';
+import { testFactoryBinary } from '../helpers/factoryBinary.mjs';
 
 const ROOT = fileURLToPath(new URL('../../', import.meta.url));
 const require = createRequire(new URL('../../server/package.json', import.meta.url));
@@ -135,6 +137,14 @@ test('SB06: dataHomeCheck по умолчанию проверяет I, явны
 
 test('SB06: внешние defaults и PATH используют I/bin, явный DeepSeek override сохраняется', async (t) => {
   const input = await fixture(t);
+  // config читает bundled Go-фабрику комплекта; стейджим её штатным сборщиком.
+  await stageFactoryCandidate({
+    root: input.root,
+    binary: testFactoryBinary(),
+    profileAbi: path.join(ROOT, 'engine/lib/delivery_contract.py'),
+    os: process.platform,
+    arch: process.arch,
+  });
   const entry = await compile(input, [
     'import { config } from "./server/src/config.ts";',
     'import { grigDeskCliPath } from "./server/src/lib/cliPath.ts";',
