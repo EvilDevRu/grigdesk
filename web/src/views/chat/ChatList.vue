@@ -959,8 +959,13 @@ watch(
 function avatarTitle(row: ListRow) {
   const project = row.projectTitle || t('core.chatProjectNone');
   const modelName = row.modelName || t('core.chatModelPoUmolchaniyu');
-  const statusKey = row.compacting ? 'core.chatModelnameSzhimayuKontekst' : 'core.chatModelnameAgentRabotaet';
-  const status = row.compacting || row.sending ? t(statusKey, { modelName }) : modelName;
+  let status = modelName;
+
+  if (row.compacting) {
+    status = t('core.chatModelnameSzhimayuKontekst', { modelName });
+  } else if (row.sending) {
+    status = t('core.chatModelnameAgentRabotaet', { modelName });
+  }
 
   return `${project} · ${status}`;
 }

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
-import { createPublicKey } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
+import { createHash, createPublicKey } from 'node:crypto';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -105,6 +105,8 @@ test('RP-2: без окружения отказ с перечнем перем�
 const { installedBuild, loadInstalledModule } = await import('../helpers/installedBuildFixture.mjs');
 const { isolatedEnvironment } = await import('../helpers/installedUpdateFixture.mjs');
 const { signedIndex, signedMacIndex } = await import('../helpers/releaseV2Fixture.mjs');
+const { verifyReleaseEnvelope } = await import('../../shared/node/releaseTrust.ts');
+const { goNativeChecks } = await import('../../tools/verifyGoReleaseEvidence.mts');
 const { compileHelpSources } = await import('../../shared/node/helpSources.ts');
 const { HELP_LOCALES, helpResourceFile } = await import('../../shared/help/helpContracts.ts');
 
@@ -243,6 +245,58 @@ async function installedPublicationFixture(t, channel, siteTransaction = false) 
   };
 }
 
+/**
+ * Готовит квитанции условного CI к подписанным байтам тестового комплекта.
+ * Путь публикации сам проверяет подпись, координаты входов и список пройденных проверок.
+ */
+async function writeGoEvidence(t, built) {
+  const envelope = built.index.latest;
+  const { commit, releaseId, artifacts } = envelope.payload;
+  const publicKey = createPublicKey(built.signer.publicKeyPem).export({ format: 'der', type: 'spki' });
+  const signerFingerprint = createHash('sha256').update(publicKey).digest('hex');
+  const digest = verifyReleaseEnvelope(envelope, built.signer.publicKeyPem);
+  const sourceRunId = '41';
+  const sourceAttempt = '1';
+  const linuxArtifactId = '39';
+
+  isolatedEnvironment(t, {
+    GRIGDESK_GO_SOURCE_RUN_ID: sourceRunId,
+    GRIGDESK_GO_SOURCE_ATTEMPT: sourceAttempt,
+    GRIGDESK_GO_LINUX_ARTIFACT_ID: linuxArtifactId,
+  });
+
+  for (const platform of ['linux', 'macos']) {
+    const linux = platform === 'linux';
+    const receipt = {
+      format: 1,
+      route: 'official',
+      platform: linux ? 'linux-x64' : 'darwin-arm64',
+      sourceRunId,
+      sourceAttempt,
+      signerFingerprint,
+      origin: new URL(artifacts.server.url).origin,
+      a: {
+        format: 2, commit: '61d944420a16e0e5bedb0a91dd796deef13abd41',
+        digest: 'a'.repeat(64), releaseId: 'A', artifactId: '37',
+      },
+      b: {
+        format: 3, commit, digest: 'b'.repeat(64), releaseId: 'B', artifactId: '38',
+      },
+      c: {
+        format: 3, commit, digest: linux ? digest : 'c'.repeat(64),
+        releaseId, artifactId: linux ? linuxArtifactId : '40',
+      },
+      caseIds: [...goNativeChecks[platform]],
+      size: {
+        legacy: { raw: 20, gzip: 10, download: { local: 100, remote: 90, server: 80 } },
+        current: { raw: 10, gzip: 5, download: { local: 75, remote: 60, server: 50 } },
+      },
+    };
+
+    await fs.writeFile(path.join(built.directory, `go-native-${platform}.json`), JSON.stringify(receipt));
+  }
+}
+
 for (const channel of ['release', 'dev']) {
   test(`PUB-CHANNELS: ${channel}, partial upload/retry, immutable site и отказ зеркала`, async (t) => {
     const box = await installedPublicationFixture(t, channel, true);
@@ -264,6 +318,7 @@ for (const channel of ['release', 'dev']) {
       await fs.writeFile(path.join(site, 'api/releases/v1', `${channel}.json`), olderBytes);
     }
 
+    await writeGoEvidence(t, box.built);
     await fs.writeFile(path.join(box.built.directory, `grigdesk_${version}_amd64.deb`),
       'DEB-PAYLOAD', { mode: 0o644 });
 

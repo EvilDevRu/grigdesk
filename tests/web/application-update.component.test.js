@@ -18,6 +18,7 @@ async function mountedUpdates(t, browser) {
   const calls = [];
   const snapshot = reactive({
     channel: 'dev',
+    source: 'channel',
     running: '0.2.0',
     targetVersion: '0.3.0-dev.42',
     notes: { ru: 'Исправлена загрузка', en: 'Download fixed' },
@@ -89,39 +90,39 @@ async function mountedUpdates(t, browser) {
   };
 }
 
-test('UI-CANDIDATE: прерванное обновление предлагает повторить installer', async (t) => {
-  const view = await mountedUpdates(t, await installUiBrowser(t));
-
-  view.snapshot.source = 'candidate-file';
-  view.snapshot.job = {
-    id: 'offline-fixture',
-    version: view.snapshot.targetVersion,
-    scope: 'pair',
-    stage: 'preparing',
-    recoverable: true,
-    downloadedBytes: null,
-    totalBytes: null,
-    nextAction: null,
-  };
-
-  await view.nextTick();
-
-  const description = view.browser.document.body.textContent ?? '';
-  const buttons = Array.from(view.browser.document.querySelectorAll('button'))
-    .map((button) => button.textContent ?? '');
-
-  assert.match(description, /Повторите установку из того же скачанного кандидата/u);
-  assert.equal(buttons.some((label) => /Продолжить|Проверить обновления/u.test(label)), false);
-  assert.equal(view.calls.length, 0);
-
-  view.snapshot.job.stage = 'ready';
-  await view.nextTick();
-
-  assert.match(view.browser.document.body.textContent ?? '', /Применить и перезапустить/u);
-});
-
 test('Обновление приложения в production dialog/store', async (t) => {
   const browser = await installUiBrowser(t);
+
+  await t.test('UI-CANDIDATE: прерванное обновление предлагает повторить installer', async (t) => {
+    const view = await mountedUpdates(t, browser);
+
+    view.snapshot.source = 'candidate-file';
+    view.snapshot.job = {
+      id: 'offline-fixture',
+      version: view.snapshot.targetVersion,
+      scope: 'pair',
+      stage: 'preparing',
+      recoverable: true,
+      downloadedBytes: null,
+      totalBytes: null,
+      nextAction: null,
+    };
+
+    await view.nextTick();
+
+    const description = view.browser.document.body.textContent ?? '';
+    const buttons = Array.from(view.browser.document.querySelectorAll('button'))
+      .map((button) => button.textContent ?? '');
+
+    assert.match(description, /Повторите установку из того же скачанного кандидата/u);
+    assert.equal(buttons.some((label) => /Продолжить|Проверить обновления/u.test(label)), false);
+    assert.equal(view.calls.length, 0);
+
+    view.snapshot.job.stage = 'ready';
+    await view.nextTick();
+
+    assert.match(view.browser.document.body.textContent ?? '', /Применить и перезапустить/u);
+  });
 
   await t.test('UI-CONTENT/PROGRESS/LATER/REOPEN: store сохраняет одно задание', async (t) => {
     const view = await mountedUpdates(t, browser);

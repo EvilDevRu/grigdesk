@@ -71,10 +71,10 @@ test('остановка → поток → F5 → обсуждение → ди
     ]);
     await page.locator('[data-role="arbiter-resume"]').waitFor();
     assert.equal(fx.gotoCalls(), 1);
-    assert.equal(fx.resumeCalls(), 1);
     // Кнопка продолжения доступна уже при accepted, до окончания попытки запуска.
     // Ждём итог первого resume, чтобы не читать промежуточное сообщение.
     await page.getByText(/Указание принято, но этап пока не запущен:/).waitFor();
+    assert.equal(fx.resumeCalls(), 1);
     await page.locator('[data-role="arbiter-resume"]').click();
     await page.getByText(/Этап запущен повторно; результат ещё ожидается/).waitFor();
     assert.equal(fx.gotoCalls(), 1);
@@ -87,7 +87,7 @@ test('остановка → поток → F5 → обсуждение → ди
     assert.equal(resume.applyOperationId, apply.id);
     assert.deepEqual(resume.acceptedEvent, apply.receipt.stage);
 
-    await fx.call('attempt_stage_state_commit_v2', '7', fx.attempt, 'instrument', 'done');
+    fx.commit('instrument', 'done');
     fx.broadcast('state-change', {});
     await page.getByText(/Этап завершён, конвейер продолжает работу/).waitFor();
     await fx.stopAgain();

@@ -139,7 +139,7 @@ export async function installedBuild(t, channel, options = {}) {
         'export async function buildReleaseUtility(name, input) {',
         "  const modules = execFileSync('go', ['env', 'GOMODCACHE'], { encoding: 'utf8' }).trim();",
         "  const env = { ...input.env, GOMODCACHE: modules, GOPROXY: 'off', GOSUMDB: 'off' };",
-        '  env.GOCACHE = process.env.GOCACHE;',
+        '  if (process.env.GOCACHE) env.GOCACHE = process.env.GOCACHE;',
         `  return build(name, { ...input, root: ${JSON.stringify(repository)}, env });`,
         '}',
       ].join('\n'),

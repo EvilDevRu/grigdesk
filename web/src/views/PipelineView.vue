@@ -3737,6 +3737,7 @@ async function stopRun(task: TaskId, expectedCleanup?: string) {
     } else {
       await api.post(`/api/tasks/${task}/stop`);
     }
+
     await load();
   }
   catch (e) {

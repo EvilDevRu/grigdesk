@@ -62,11 +62,11 @@ export function parseGlibcFloor(readelfOutput: string): string | null {
       continue;
     }
 
-    const glibc = glibcName.exec(name);
+    const glibc = glibcName.exec(name)?.[1];
 
     if (glibc) {
-      if (floor === null || compareVersions(glibc[1], floor) > 0) {
-        floor = glibc[1];
+      if (floor === null || compareVersions(glibc, floor) > 0) {
+        floor = glibc;
       }
 
       continue;

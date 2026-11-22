@@ -25,12 +25,27 @@ type Gate = Awaited<ReturnType<typeof seedRuntimePinGate>>;
 const drainPath = '/api/system/factory-drain-admission';
 
 /**
+ * Позволяет прокси продолжить два ожидающих запроса в момент проверки.
+ * Создание барьера не запускает таймеров и не привязано к сетевому соединению.
+ */
+function barrier() {
+  let resolve!: () => void;
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<void>((done, fail) => {
+    resolve = done;
+    reject = fail;
+  });
+
+  return { promise, resolve, reject };
+}
+
+/**
  * Прокси слушает только loopback и передаёт запросы единственному серверу фикстуры.
  * Он удерживает запрос до acquire или ответ после фактического ACK confirm.
  */
 async function observeAdmission(box: Installed, boundary: 'acquire' | 'confirm', check: () => Promise<void>) {
-  const reached = Promise.withResolvers<void>();
-  const release = Promise.withResolvers<void>();
+  const reached = barrier();
+  const release = barrier();
   let seen = false;
   let observed: { status: number; body: unknown } | undefined;
 
@@ -331,8 +346,11 @@ export async function verifyArbiterDrainAdmission(box: Installed, fixture: Fixtu
 
     assert.equal(await fs.readFile(audit, 'utf8'), 'goto\ncheck\n');
     assert.equal(durable.operations.length, 1);
-    assert.equal(durable.operations[0].receipt?.stage.sequence, doc.identity.stageSequence + 1);
-    assert.equal(durable.operations[0].receipt?.targetNode, 'instrument');
+    const [operation] = durable.operations;
+
+    assert.ok(operation);
+    assert.equal(operation.receipt?.stage.sequence, doc.identity.stageSequence + 1);
+    assert.equal(operation.receipt?.targetNode, 'instrument');
 
     return durable;
   });

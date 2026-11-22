@@ -265,7 +265,13 @@ function remove(index: number): void {
 async function add(): Promise<void> {
   const index = draft.value.repos.length;
 
-  draft.value = { ...draft.value, repos: [...draft.value.repos, { key: '', dir: '', automaticKey: true }] };
+  const repo = {
+    key: '',
+    dir: '',
+    automaticKey: true,
+  };
+
+  draft.value = { ...draft.value, repos: [...draft.value.repos, repo] };
   await nextTick();
   dirInputs.value[index]?.focus();
 }

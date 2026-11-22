@@ -57,7 +57,8 @@ test('PAGE-COLD-MOUNT: watcher/parent/повтор делят один page1, de
       '../stores/chat.ts': 'export const useChatStore = () => globalThis.__pagingMountChat;',
       '../../actions/projects/index.ts': `
         export const useProjectsStore = () => ({
-          items: [], loaded: false, loading: false, error: '', deletedIds: new Set(),
+          activeCatalog: { items: [], loaded: false, loading: false, error: '' },
+          deletedIds: new Set(),
         });
         export const loadProjects = async () => {};
         export const watchProjects = () => {};

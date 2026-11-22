@@ -527,12 +527,14 @@ export async function readFactoryAttemptLedger({ controlDir, stateDir, task, reg
   registry?: Record<string, string | undefined> | null;
 }) {
   task = String(task);
+  const profile = registry?.PROFILE;
+
   if (!TASK_RE.test(task) || !controlDir || !path.isAbsolute(controlDir)) {
     fail('trusted ledger is not configured');
   }
   if (!registry || registry.CATALOG_PROTOCOL !== 'route-v2'
       || !ATTEMPT_RE.test(registry.ATTEMPT_ID || '')
-      || !PROFILE_RE.test(registry.PROFILE || '')
+      || !profile || !PROFILE_RE.test(profile)
       || !ROUTE_RE.test(registry.ROUTE || '') || registry.ROUTE === 'catalog'
       || !HASH_RE.test(registry.ROUTE_HASH || '')) {
     fail('pipeline projection has no pinned route identity');
@@ -653,7 +655,7 @@ export async function readFactoryAttemptLedger({ controlDir, stateDir, task, reg
   const terminalProjectionDisagrees = terminal === null
     ? projectedTerminal !== null
     : projectedTerminal !== null && projectedTerminal !== terminal;
-  if (registry.PROFILE !== attemptState.profile || registry.ROUTE !== routePin.routeId
+  if (profile !== attemptState.profile || registry.ROUTE !== routePin.routeId
       || registry.ROUTE_HASH !== routePin.routeHash || terminalProjectionDisagrees) {
     fail('pipeline projection disagrees with trusted attempt ledger');
   }
@@ -667,7 +669,7 @@ export async function readFactoryAttemptLedger({ controlDir, stateDir, task, reg
   const bootstrapStop = await readBootstrapStop(attemptDir, {
     taskId: task,
     attemptId: attempt,
-    profile: attemptState.profile || '',
+    profile,
     catalogHash: attemptState.catalogHash || '',
     routeId: routePin.routeId || '',
     routeHash: routePin.routeHash || '',
@@ -681,7 +683,7 @@ export async function readFactoryAttemptLedger({ controlDir, stateDir, task, reg
     task,
     attempt,
     createdAt: attemptState.createdAt,
-    profile: attemptState.profile,
+    profile,
     catalogHash: attemptState.catalogHash,
     origin: attemptState.origin,
     previousAttemptId: attemptState.previousAttemptId,

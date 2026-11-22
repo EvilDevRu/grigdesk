@@ -4,7 +4,7 @@ import path from 'node:path';
 import { setTimeout as pause } from 'node:timers/promises';
 import { once } from 'node:events';
 import type { StdioOptions } from 'node:child_process';
-import type { Writable } from 'node:stream';
+import { Writable } from 'node:stream';
 
 import {
   configureDarwinProcessHelper, darwinFactoryToolEnvironment, readDarwinProcessIdentity,
@@ -236,7 +236,11 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
 
   try {
     if (held && child.pid) {
-      const permit = child.stdio[9] as Writable;
+      const permit = child.stdio.at(9);
+
+      if (!(permit instanceof Writable)) {
+        throw new Error('external_cli_hold_permit_missing');
+      }
 
       try {
         nativeChild = await waitDarwinExternalProvider(child.pid, AbortSignal.timeout(3500));

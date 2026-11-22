@@ -14,13 +14,13 @@ const scriptPath = path.resolve(import.meta.dirname, 'build-userland.sh');
 const hex64 = /^[a-f0-9]{64}$/u;
 const httpsUrl = /^https:\/\/[^\s]+$/u;
 const utilityNames = ['bash', 'flock', 'timeout', 'nohup', 'git', 'python3'];
-const abiNames = ['arm64-v8a', 'x86_64'];
-const componentNames = ['bash', 'coreutils', 'util-linux', 'git', 'python3'];
+const abiNames = ['arm64-v8a', 'x86_64'] as const;
+const componentNames = ['bash', 'coreutils', 'util-linux', 'git', 'python3'] as const;
 
 export interface UserlandEntry {
   libraryName: string;
   abis: readonly ['arm64-v8a', 'x86_64'];
-  sha256ByAbi: Record<string, string>;
+  sha256ByAbi: Record<(typeof abiNames)[number], string>;
   version: string;
 }
 
@@ -62,7 +62,7 @@ function readUserlandLock() {
     throw new Error('android_userland_lock_invalid');
   }
 
-  const components = lock.components as Record<string, UserlandComponent>;
+  const components = lock.components as Record<(typeof componentNames)[number], UserlandComponent>;
   const sources = lock.sources as Record<string, { url: string; sha256: string }>;
 
   if (JSON.stringify(Object.keys(components).sort()) !== JSON.stringify([...componentNames].sort())) {
@@ -72,11 +72,14 @@ function readUserlandLock() {
   for (const name of componentNames) {
     const component = components[name];
 
-    if (typeof component.source !== 'string' || typeof component.version !== 'string'
-      || typeof component.binaries !== 'object' || component.binaries === null
-      || !sources[component.source]
-      || !hex64.test(sources[component.source].sha256)
-      || !httpsUrl.test(sources[component.source].url)) {
+    if (!component || typeof component.source !== 'string' || typeof component.version !== 'string'
+      || typeof component.binaries !== 'object' || component.binaries === null) {
+      throw new Error('android_userland_lock_invalid');
+    }
+
+    const source = sources[component.source];
+
+    if (!source || !hex64.test(source.sha256) || !httpsUrl.test(source.url)) {
       throw new Error('android_userland_lock_invalid');
     }
   }
@@ -122,18 +125,19 @@ export function readAndroidUserland(): AndroidUserland {
       throw new Error('android_userland_inventory_incomplete');
     }
 
-    for (const abi of abiNames) {
-      if (!hex64.test(record.sha256ByAbi[abi] ?? '')) {
-        throw new Error('android_userland_inventory_incomplete');
-      }
+    const arm64 = record.sha256ByAbi?.['arm64-v8a'];
+    const x64 = record.sha256ByAbi?.x86_64;
+
+    if (!arm64 || !x64 || !hex64.test(arm64) || !hex64.test(x64)) {
+      throw new Error('android_userland_inventory_incomplete');
     }
 
     entries[utility] = {
       libraryName: `lib${utility}.so`,
       abis: ['arm64-v8a', 'x86_64'],
       sha256ByAbi: {
-        'arm64-v8a': record.sha256ByAbi['arm64-v8a'],
-        'x86_64': record.sha256ByAbi.x86_64,
+        'arm64-v8a': arm64,
+        'x86_64': x64,
       },
       version: component.version,
     };
@@ -141,7 +145,7 @@ export function readAndroidUserland(): AndroidUserland {
 
   return {
     entries,
-    bashVersionMajor: Number.parseInt(components.bash.version.split('.')[0], 10),
+    bashVersionMajor: Number.parseInt(components.bash.version, 10),
   };
 }
 
@@ -195,12 +199,13 @@ async function main() {
   const command = args[0];
   const option = (name: string) => {
     const index = args.indexOf(name);
+    const value = args[index + 1];
 
-    if (index === -1 || index + 1 >= args.length) {
+    if (index === -1 || value === undefined) {
       throw new Error(`android_userland_cli_missing_${name}`);
     }
 
-    return args[index + 1];
+    return value;
   };
 
   if (command === 'build') {

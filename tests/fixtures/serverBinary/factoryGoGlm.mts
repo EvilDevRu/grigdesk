@@ -16,15 +16,23 @@ import {
 } from '../../helpers/glmProductionFixture.mts';
 
 const argv = process.argv.slice(2);
-const runDir = argv[argv.indexOf('--run-dir') + 1];
+const runIndex = argv.indexOf('--run-dir');
+const runDir = argv[runIndex + 1];
+
+assert.ok(runIndex >= 0 && runDir, 'фикстуре нужен --run-dir');
+
 const browser = process.env.GRIGDESK_DEEPSEEK_TEST_EXPECT_BROWSER === '1';
 const [progress, result, browserTool] = glmFactoryToolInventory(browser);
+
+assert.ok(progress && result, 'в профиле нужны инструменты статуса');
+
 const calls: [string, Record<string, unknown>][] = [
   [progress, { updates: [{ key: 'SIZE', value: 'M' }] }],
   [result, { result: 'done', comment: 'Ответ loopback принят фабрикой' }],
 ];
 
 if (browser) {
+  assert.ok(browserTool, 'опыт браузера требует браузерный инструмент');
   calls.unshift([browserTool, { action: 'list' }]);
 }
 
@@ -55,13 +63,16 @@ try {
       const runtime = await preparedGlmRuntime(options.config, options.preparedRuntime);
       const inputs = runtime.metadata?.glm?.inputs;
 
-      assert.ok(context && helper && inputs);
+      assert.ok(context && helper && inputs?.llmPiAi);
       context.statusServer.command = process.execPath;
       context.statusServer.args = [helper];
 
       return runGlmTurn(options, {
         env,
-        admission: [{ mode: 'api', compatibility: glmCompatibilityIdentity(inputs, 'api') }],
+        admission: [{ mode: 'api', compatibility: glmCompatibilityIdentity({
+          ...inputs,
+          llmPiAi: inputs.llmPiAi,
+        }, 'api') }],
         modelEndpoint: server.endpoint,
         egressGuard,
       });

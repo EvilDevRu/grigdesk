@@ -4,13 +4,13 @@ import path from 'node:path';
 import test from 'node:test';
 
 import { installedBuild } from '../helpers/installedBuildFixture.mjs';
-import { installedFixture } from '../helpers/installedUpdateFixture.mjs';
 import { ReleaseChannelService } from '../../shared/node/releaseChannel.ts';
+import { extractReleaseArtifact } from '../../shared/node/releaseArchive.ts';
 import { verifyReleaseEnvelope } from '../../shared/node/releaseTrust.ts';
 import type { ReleaseArtifact } from '../../shared/runtime/installedUpdateContracts.ts';
 
 for (const channel of ['release', 'dev'] as const) {
-  test(`CHAIN-${channel.toUpperCase()}: bundle → подписанный канал → настоящая подготовка`, async (t) => {
+  test(`CHAIN-${channel.toUpperCase()}: bundle → подписанный канал → распаковка комплекта v3`, async (t) => {
     const built = await installedBuild(t, channel);
     const reader = new ReleaseChannelService({
       channel,
@@ -18,34 +18,28 @@ for (const channel of ['release', 'dev'] as const) {
       urls: [`https://grigdesk.test/${channel}.json`],
       fetch: async () => new Response(JSON.stringify(built.index)),
     });
-    const envelope = (await reader.latest(true))!;
-    const manifestDigest = verifyReleaseEnvelope(envelope, built.signer.publicKeyPem);
-    const archives = new Map<string, Buffer>();
+    const envelope = await reader.latest(true);
 
-    for (const component of ['desktop', 'server'] as const) {
-      archives.set(envelope.payload.artifacts[component].url,
-        await fs.readFile(path.join(built.directory, `${component}.tar.gz`)));
+    assert.ok(envelope);
+    assert.equal(envelope.format, 3);
+
+    const manifestDigest = verifyReleaseEnvelope(envelope, built.signer.publicKeyPem);
+    const acceptanceFile = path.join(built.directory, 'release-acceptance.json');
+    const acceptance = JSON.parse(await fs.readFile(acceptanceFile, 'utf8'));
+
+    assert.equal(manifestDigest, acceptance.manifestDigest);
+
+    for (const component of ['desktop', 'server', 'control'] as const) {
+      const artifact = envelope.payload.artifacts[component];
+
+      assert.ok(artifact);
+      await extractReleaseArtifact(path.join(built.directory, `${component}.tar.gz`),
+        path.join(built.temporary, component), artifact);
     }
 
-    const box = await installedFixture(t, {
-      release: {
-        envelope,
-        manifestDigest,
-        archives,
-        identity: envelope.payload,
-        publicKeyPem: built.signer.publicKeyPem,
-      },
-    });
-    const job = await box.create();
-    const ready = await box.manager.prepare(job.id);
-
-    assert.equal(ready.stage, 'ready');
-    assert.equal(ready.manifestDigest, manifestDigest);
-    assert.deepEqual(ready.envelope, built.index.latest);
-    assert.deepEqual(await box.pointer(), box.previous);
+    assert.deepEqual(envelope, built.index.latest);
     assert.deepEqual(built.admission, ['verify', 'compatibility']);
     assert.equal(await fs.stat(path.join(built.directory, 'grigdesk-install')).then(() => true), true);
-    await box.preserved();
   });
 }
 
@@ -74,6 +68,6 @@ test('ONLINE-BUNDLE: установщик мал и отделён от helper �
   assert.equal(script.subarray(0, 10).toString(), '#!/bin/sh\n');
   assert.ok(script.length <= 64 * 1024);
   assert.ok((await fs.stat(path.join(box.directory, 'grigdesk-maintenance.gz'))).size > 0);
-  assert.deepEqual(Object.keys(box.index.latest.payload.artifacts).sort(), ['desktop', 'server']);
-  assert.equal(box.index.format, 2);
+  assert.deepEqual(Object.keys(box.index.latest.payload.artifacts).sort(), ['control', 'desktop', 'server']);
+  assert.equal(box.index.format, 3);
 });

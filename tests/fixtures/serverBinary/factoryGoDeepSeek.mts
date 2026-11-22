@@ -8,7 +8,11 @@ import { deepSeekFactoryPort } from '../../server/binary/drivers/providerPorts.m
 import { startDeepSeekLoopback } from '../../helpers/deepseekLoopback.mts';
 
 const argv = process.argv.slice(2);
-const runDirectory = argv[argv.indexOf('--run-dir') + 1];
+const runIndex = argv.indexOf('--run-dir');
+const runDirectory = argv[runIndex + 1];
+
+assert.ok(runIndex >= 0 && runDirectory, 'фикстуре нужен --run-dir');
+
 const browser = process.env.GRIGDESK_DEEPSEEK_TEST_EXPECT_BROWSER === '1';
 const peer = await startDeepSeekLoopback({
   respond: async (payload, index) => {

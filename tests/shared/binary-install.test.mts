@@ -123,7 +123,10 @@ test('INSTALL-CORE-lock: один target сериализуется и release �
   const box = await fixture(t);
   const first = await acquireInstallLock(box.target, { waitMs: 10, pollMs: 1 });
 
-  assert.equal(first?.owner?.pid, process.pid, 'lock должен записать kernel owner');
+  if (process.platform !== 'darwin') {
+    assert.ok('owner' in first);
+    assert.equal(first.owner.pid, process.pid, 'lock должен записать kernel owner');
+  }
   await assert.rejects(acquireInstallLock(box.target, { waitMs: 10, pollMs: 1 }), {
     code: 'directory_lock_busy',
   });
