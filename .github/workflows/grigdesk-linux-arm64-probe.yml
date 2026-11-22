@@ -1,0 +1,97 @@
+name: Проба Linux ARM64 (временная)
+on:
+  push:
+    branches: [ci/native-platforms-20261122]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  probe:
+    name: Комплект и установка Linux ARM64
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 150
+    environment: platform-candidate
+    env:
+      STABLE_NATIVE_TARGET: linux-arm64
+    steps:
+      - name: Исходники
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+      - name: Нативная архитектура
+        run: test "$(uname -s)-$(uname -m)" = Linux-aarch64
+      - name: Версия Node из manifest
+        id: node_runtime
+        run: node -p '"version="+require("./server/build/node-runtime-linux-arm64.json").version' >> "$GITHUB_OUTPUT"
+      - name: Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: ${{ steps.node_runtime.outputs.version }}
+          architecture: arm64
+      - name: Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16
+        with:
+          go-version: '1.27.4'
+      - name: Зависимости комплекта
+        run: |
+          sudo rm -rf -- /usr/share/dotnet /usr/local/.ghcup /opt/ghc /opt/hostedtoolcache/CodeQL
+          bash tools/ci/provision-ubuntu.sh --disposable-environment
+          npm --prefix server ci --no-audit --no-fund
+          npm --prefix web ci --no-audit --no-fund
+          npm --prefix mobile ci --no-audit --no-fund
+          npm --prefix deepseek ci --no-audit --no-fund
+          npm --prefix desktop ci --ignore-scripts --no-audit --no-fund
+          node desktop/node_modules/esbuild/install.js
+          target="$RUNNER_TEMP/appimage-tools"
+          bash tools/ci/prepare-release-desktop.sh "$target"
+          printf '%s\n' "GRIGDESK_APPIMAGE_TOOLS_PATH=$target" \
+            "GRIGDESK_DEEPSEEK_NODE_CACHE=$RUNNER_TEMP/deepseek-node-cache" >> "$GITHUB_ENV"
+          npm --prefix deepseek run prepare:runtime -- --node-cache-dir "$RUNNER_TEMP/deepseek-node-cache"
+          node --input-type=module <<'NODE'
+          import { materializeDeepSeekSnapshot } from './deepseek/scripts/deepseekVendorManifest.ts';
+          await materializeDeepSeekSnapshot('./deepseek/vendor/deepseek-harness');
+          NODE
+      - name: План пробы
+        run: |
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs/promises';
+          import { resolveStablePlatformRelease, stablePlatforms } from './tools/stablePlatformRelease.mts';
+          import { canonicalJson } from './shared/lib/canonicalJson.ts';
+          import { sha256 } from './shared/node/hash.ts';
+          const plan = {
+            format: 1,
+            runId: process.env.GITHUB_RUN_ID,
+            runNumber: process.env.GITHUB_RUN_NUMBER,
+            ...resolveStablePlatformRelease({
+              platforms: [...stablePlatforms],
+              publish: false,
+              testMode: 'full',
+              reason: '',
+              validationRun: '',
+              attempt: '1',
+              runNumber: process.env.GITHUB_RUN_NUMBER,
+              version: '0.3.1',
+              commit: process.env.GITHUB_SHA,
+            }),
+          };
+          const bytes = canonicalJson(plan) + '\n';
+          await fs.writeFile('probe-plan.json', bytes);
+          await fs.appendFile(process.env.GITHUB_ENV, `STABLE_PLAN_SHA256=${sha256(bytes)}\n`);
+          NODE
+      - name: Сборка комплекта
+        env:
+          RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
+        run: |
+          test -n "$RELEASE_SIGNING_KEY"
+          node tools/ci/buildStableNative.mts linux-arm64 probe-plan.json linux-arm64-build
+      - name: Нативная установка и identity сервера
+        run: |
+          node tools/ci/verifyStableNative.mts linux-arm64 probe-plan.json linux-arm64-build linux-arm64-verified
+      - name: Отчёт пробы
+        if: ${{ always() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: linux-arm64-probe-${{ github.run_id }}
+          path: linux-arm64-verified/
+          if-no-files-found: warn
