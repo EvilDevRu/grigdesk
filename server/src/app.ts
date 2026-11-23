@@ -16,6 +16,7 @@ import websocket from '@fastify/websocket';
 
 import { isProjectDeleted, deletedProjectIds } from './lib/projects/deletion.ts';
 import { assertSupportedNode } from './lib/nodeVersion.ts';
+import { applyNetworkFamilyAttemptTimeout } from './lib/networkFamily.ts';
 import { createShutdownCoordinator } from './lib/shutdown.ts';
 import { attachDesktopParent, DESKTOP_WINDOW_KEY_MESSAGE } from './lib/desktopParent.ts';
 import { startProcessWatchdog } from './lib/processWatchdog.ts';
@@ -1727,6 +1728,7 @@ export async function startServer(): Promise<FastifyInstance> {
   // Версию проверяем до сборки сервисов: дальше отказ выглядел бы поломкой
   // конкретного модуля, а не устаревшим рантаймом.
   assertSupportedNode();
+  applyNetworkFamilyAttemptTimeout();
 
   const desktopParent = attachDesktopParent({
     env: process.env,

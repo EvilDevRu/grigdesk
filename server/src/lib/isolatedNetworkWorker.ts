@@ -1,10 +1,15 @@
 import { spawn } from 'node:child_process';
 
+import { NETWORK_FAMILY_ATTEMPT_TIMEOUT_MS } from './networkFamily.ts';
 import { nodeExecutable } from './runtimePaths.ts';
 
 // Ввод передаётся через stdin. Самосторож действует даже при потере родительского процесса.
 const BOOTSTRAP = String.raw`
 import { stdin, stdout } from 'node:process';
+import { setDefaultAutoSelectFamilyAttemptTimeout } from 'node:net';
+
+// Тот же предел попыток happy-eyeballs, что и у сервера: ребёнок не наследует дефолты родителя.
+setDefaultAutoSelectFamilyAttemptTimeout(${NETWORK_FAMILY_ATTEMPT_TIMEOUT_MS});
 
 const terminate = () => process.kill(process.pid, 'SIGKILL');
 process.on('uncaughtException', terminate);
