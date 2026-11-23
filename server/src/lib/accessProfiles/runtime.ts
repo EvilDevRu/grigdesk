@@ -53,3 +53,17 @@ export function applyAccessEnvironment(base: NodeJS.ProcessEnv): NodeJS.ProcessE
 
   return env;
 }
+
+
+/**
+ * Доверенный адаптер может сузить домашний каталог до изолированной копии.
+ * Остальные ключи и проверка актуальности остаются закреплены за снимком.
+ */
+export function withAccessHome<T>(key: string, directory: string, action: () => T): T {
+  const current = environments.getStore();
+
+  if (!current) {
+    return action();
+  }
+  return withAccessEnvironment({ ...current.env, [key]: directory }, action, current.current, current.keys);
+}

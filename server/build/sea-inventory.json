@@ -2,6 +2,24 @@
   "schema": 1,
   "points": [
     {
+      "file": "server/src/lib/graphWorkflowModelHelper.ts",
+      "construct": "exec-path",
+      "target": "",
+      "count": 1,
+      "owner": "task-17",
+      "fate": "helper",
+      "detail": "В Darwin-проверку передаётся Node, исполняющий упакованный помощник."
+    },
+    {
+      "file": "server/src/lib/graphWorkflowModelHelper.ts",
+      "construct": "import-meta",
+      "target": "url",
+      "count": 1,
+      "owner": "task-17",
+      "fate": "helper",
+      "detail": "Проверка прямого запуска отделяет исходный entry от импорта при упаковке."
+    },
+    {
       "file": "server/scripts/factoryRuntimePin.mts",
       "construct": "exec-path",
       "target": "",
@@ -189,6 +207,24 @@
       "owner": "task-19",
       "fate": "development-only",
       "detail": "Один ELF: явные стадии сборки, launcher и ordinary Node payload."
+    },
+    {
+      "file": "server/scripts/buildFactory.mjs",
+      "construct": "import-meta",
+      "target": "url",
+      "count": 1,
+      "owner": "task-19",
+      "fate": "development-only",
+      "detail": "Сборка Go-фабрики из исходников checkout; в runtime payload не входит."
+    },
+    {
+      "file": "server/scripts/buildFactory.mjs",
+      "construct": "resource-ref",
+      "target": ".",
+      "count": 1,
+      "owner": "task-19",
+      "fate": "development-only",
+      "detail": "Сборка Go-фабрики из исходников checkout; в runtime payload не входит."
     },
     {
       "file": "server/scripts/buildSea.mts",
@@ -1152,6 +1188,15 @@
       "owner": "task-9",
       "fate": "asset",
       "detail": "Python-warmup копируется как ресурс."
+    },
+    {
+      "file": "server/src/modules/system/index.ts",
+      "construct": "exec-path",
+      "target": "",
+      "count": 1,
+      "owner": "task-19",
+      "fate": "server-bundle",
+      "detail": "process.execPath только отличает windowsPackage node.exe; запуск идёт через launcher."
     },
     {
       "file": "server/src/modules/routes/draftStore.ts",

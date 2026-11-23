@@ -78,6 +78,26 @@ changes an allowed value using its read from value. It does not create profiles.
 The full technical reference is `docs/grigdesk/pipeline/routes-cli.md` in the source repository.
 The live CLI workflow after restarting the server still needs manual acceptance.
 
+## Graph routes
+
+The "Graph routes" button next to draft creation opens a separate catalog: a new route,
+templates ("Document review", "Meeting review") and your own routes. The catalog is
+available without a Git project. Opening a template loads a copy: "Save" always creates
+a new document and never overwrites the built-in templates.
+
+The editor sets the input kind (documents or meeting transcript), steps and their
+dependencies: input, model, per-item check, join, gate and subflows; joins offer
+"All", "First success" or quorum, gates offer return targets. "Save" records a revision;
+on a version conflict your edits are kept and "Save copy" is offered. "Launch route"
+opens the pipeline with the template preselected in the launch dialog. "Insert subflow"
+adds a step within the open scope and keeps its existing steps. Changing a step kind
+clears fields specific to its previous kind.
+
+Set "Parallelism" in a "For each item" step. "All at once" admits all branches as they
+become ready. For "Up to N at a time", enter the number of branches (1 runs them in
+sequence). The next branch can start after a current branch finishes, including its
+nested steps and gates. The route saves this setting and applies it at launch.
+
 ## Result
 
 New attempts use the published catalog. Saving a draft alone does not change a run.

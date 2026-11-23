@@ -207,7 +207,7 @@ import { createWorkToolRegistry } from './work-tools/index.ts';
 
 export { withBrowserToolPolicy, withHelpToolPolicy } from './work-tools/index.ts';
 
-import { executorLoaders } from './registryTable.ts';
+import { executorLoaders, type ExecutorLoader } from './registryTable.ts';
 import { externalCliAdapter } from '../providerInstall/externalCliAdapter.ts';
 import { normalizeExecutorType } from '../../../../shared/chat/executorTypes.ts';
 
@@ -509,17 +509,41 @@ export async function getProviderAdapters(): Promise<Map<string, ExecutorAdapter
 
     seenNames.add(loader.name);
 
-    const mod = await loader.load();
-    const adapter = mod.default as ExecutorAdapter | undefined;
+    const adapter = await loadExecutorAdapter(loader);
 
-    if (adapter?.id && typeof adapter.probe === 'function' && typeof adapter.auth === 'function') {
-      map.set(adapter.id, accessProfileAdapter(externalCliAdapter(adapter)));
+    if (adapter) {
+      map.set(adapter.id, adapter);
     }
   }
   loadedAdapters = new Map(
     [...map.entries()].sort((a, b) => (a[1].order || 99) - (b[1].order || 99)),
   );
   return loadedAdapters;
+}
+
+/**
+ * Один загрузчик проходит ту же проверку и декораторы, что серверный реестр.
+ * Доступ и выбор внешнего CLI остаются едиными для чата и помощника.
+ */
+async function loadExecutorAdapter(loader: ExecutorLoader): Promise<ExecutorAdapter | null> {
+  const adapter = (await loader.load()).default as ExecutorAdapter | undefined;
+
+  if (!adapter?.id || typeof adapter.probe !== 'function' || typeof adapter.auth !== 'function') {
+    return null;
+  }
+
+  return accessProfileAdapter(externalCliAdapter(adapter));
+}
+
+/**
+ * Одноразовый помощник читает только адаптер выданной ему модели.
+ * Исполнители этого порта объявляются под собственным ID в таблице.
+ */
+export async function loadGraphExecutor(id: string): Promise<ExecutorAdapter | null> {
+  const loader = executorLoaders().find((entry) => entry.name === id);
+  const adapter = loader ? await loadExecutorAdapter(loader) : null;
+
+  return adapter?.id === id && isChatExecutor(adapter) ? adapter : null;
 }
 
 /**

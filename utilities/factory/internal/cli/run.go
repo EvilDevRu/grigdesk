@@ -26,6 +26,9 @@ func Run(args []string, out, diagnostic io.Writer) int {
 	if len(args) > 0 && (args[0] == "stage-result" || args[0] == "stage-progress") {
 		return runStatus(args[0], args[1:], diagnostic)
 	}
+	if len(args) > 0 && args[0] == "graph-workflow" {
+		return runGraphWorkflow(args[1:], os.Stdin, out, diagnostic)
+	}
 	if len(args) > 0 && args[0] == "route" {
 		return runRoute(args[1:], os.Stdin, out, diagnostic)
 	}

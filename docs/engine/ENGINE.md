@@ -48,6 +48,7 @@
 | `utilities/factory/internal/engine` | Запуск и продолжение, ворота, транзакции, восстановление |
 | `utilities/factory/internal/route` | Чтение и проверка route-v2, рендер, редактор и контекст |
 | `utilities/factory/internal/state` | Пины, курсор, lifecycle, CAS статусов и прочие доверенные записи |
+| `utilities/factory/internal/graphworkflow` | Графовые маршруты: DAG областей, расписание, аренды, решения ворот |
 | `utilities/factory/internal/runner` | Адаптеры исполнителей, metadata, failover, браузер и статусный IPC |
 | `utilities/factory/internal/host` | Владелец процесса, границы запуска и остановка |
 | `utilities/factory/internal/hooks` | Метаданные, Bash ABI и профильный канал управления |
@@ -1911,6 +1912,21 @@ key; writers не должны использовать ad-hoc `sed` вне stor
 `lessons-proposed.md` остаются историей. Если разбор процесса понадобится снова, его место —
 не узел в каждом прогоне, а отдельная возможность поверх журналов нескольких попыток, где
 повтор считается, а предложение применяется решением человека в один шаг.
+
+## Графовые маршруты (graph-workflows)
+
+Отдельный namespace `${STATE_DIR}/graph-workflows/` рядом с legacy-реестром попыток:
+декларативный DAG областей (`input`, `sections`, `agent`, `meetingTasks`, `forEach`,
+`call`, `repeat`, `join`, `approval`) исполняется расписанием
+`utilities/factory/internal/graphworkflow`, а доверенные конверты снимков и шаблонов
+хранит `state/graph_workflow.go` под flock через `os.Root`. Поколения экземпляров
+монотонны по каждому ID; `retryFrom` пересоздаёт зависимую область с новыми токенами,
+сохраняя независимые ветки и историю решений. Выдачи ограничены (4 глобально, 2 на
+прогон), модельный helper владеет отдельной сессией и permit-рукопожатием; поздние
+результаты отменённых выдач отклоняются CAS по claimId и поколению. `active.json`
+держит не более 32 активных UUID и карантин `faultUntil` на 6 минут после сбоя.
+HTTP-модуль сервера session-only; подробности хранения и сбоев —
+[графовые маршруты](../grigdesk/pipeline/graph-workflows.md).
 
 ## Учёт времени попытки
 

@@ -3263,6 +3263,7 @@ export default {
   },
   id: 'codex',
   accessProfiles: codexAccess,
+  graphModelProcess: true,
   chatSpeed: {
     modes: ['standard', 'fast', 'ultrafast'] as const,
     /**

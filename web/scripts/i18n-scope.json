@@ -3654,6 +3654,49 @@
         "core.stageWizardReason_prompt_missing",
         "core.stageWizardReason_prompt_limit_exceeded"
       ]
+    },
+    "web/src/views/pipeline/GraphWorkflowRun.vue": {
+      "statusKeys[selectedNode.value?.status ?? 'pending'] ?? 'core.workflowStatusPending'": [
+        "core.workflowStatusPending",
+        "core.workflowStatusReady",
+        "core.workflowStatusRunning",
+        "core.workflowStatusWaiting",
+        "core.workflowStatusDone",
+        "core.workflowStatusFailed",
+        "core.workflowStatusSkipped",
+        "core.workflowStatusBlocked"
+      ],
+      "key": [
+        "core.workflowErrorRunFailed",
+        "core.workflowErrorBadModelResult",
+        "core.workflowErrorBadPlan",
+        "core.workflowErrorModelUnavailable",
+        "core.workflowErrorInputLimit",
+        "core.workflowErrorOutputLimit",
+        "core.workflowErrorNodeLimit",
+        "core.workflowErrorSnapshotLimit",
+        "core.workflowErrorInterrupted",
+        "core.workflowErrorRepeatExhausted",
+        "core.workflowErrorThresholdUnreachable",
+        "core.workflowErrorDependencyFailed",
+        "core.workflowErrorRejected",
+        "core.workflowErrorOperationLimit",
+        "core.workflowErrorGraphBroken",
+        "core.workflowErrorEmptyTranscript"
+      ]
+    },
+    "web/src/views/routes/GraphWorkflowScopeFields.vue": {
+      "kindKey(kind)": [
+        "core.workflowKindInput",
+        "core.workflowKindSections",
+        "core.workflowKindAgent",
+        "core.workflowKindMeetingTasks",
+        "core.workflowKindForEach",
+        "core.workflowKindCall",
+        "core.workflowKindRepeat",
+        "core.workflowKindJoin",
+        "core.workflowKindApproval"
+      ]
     }
   },
   "metadataCoverage": [

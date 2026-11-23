@@ -19,6 +19,7 @@
       @loops="toggleLoops"
       @bulk="runBulkAction"
     />
+    <GraphWorkflowLauncher />
     <UiPaneHeader class="pipeline-toolbar" :aria-label="translate('core.pipeline')">
     <div class="toolbar">
       <div class="pipeline-run-controls" role="group" :aria-label="translate('core.pipelineRunControls')">
@@ -1106,6 +1107,7 @@ import { boardSupportsTimer } from '../shared/trackerCapabilities.ts';
 import StandLink from '../shared/browser/StandLink.vue';
 import PipelineLoading from './PipelineLoading.vue';
 import PipelinePhoneToolbar from './pipeline/PipelinePhoneToolbar.vue';
+import GraphWorkflowLauncher from './pipeline/GraphWorkflowLauncher.vue';
 
 import DeferredFindings from './pipeline/DeferredFindings.vue';
 import StageExecutorFields from './pipeline/StageExecutorFields.vue';

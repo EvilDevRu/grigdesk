@@ -1,7 +1,9 @@
-import { spawn } from '../providerInstall/externalCliProcess.ts';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+
+import { withAccessHome } from '../accessProfiles/runtime.ts';
+import { spawn, currentGraphLaunch } from '../providerInstall/externalCliProcess.ts';
 
 const TIMEOUT_MS = 5 * 60_000;
 const MAX_OUTPUT_BYTES = 2 * 1024 * 1024;
@@ -217,12 +219,13 @@ export async function runCodexUntrusted({
     await fs.symlink(path.join(sourceState, 'auth.json'), path.join(isolatedState, 'auth.json'));
 
     return await new Promise<ModelResult>((resolve, reject) => {
-      const child = spawn(config.codexBin, buildCodexUntrustedArgs(directory), {
-        cwd: directory,
-        env: { ...process.env, ...env, CODEX_HOME: isolatedState },
-        detached: process.platform !== 'win32',
-        stdio: ['pipe', 'pipe', 'pipe'],
-      });
+      const child = withAccessHome('CODEX_HOME', isolatedState, () =>
+        spawn(config.codexBin, buildCodexUntrustedArgs(directory), {
+          cwd: directory,
+          env: { ...process.env, ...env, CODEX_HOME: isolatedState },
+          detached: process.platform !== 'win32',
+          stdio: ['pipe', 'pipe', 'pipe'],
+        }));
       const messages = new Map<string, string>();
       let threadId = '';
       let actualModel = model || '';
@@ -242,6 +245,12 @@ export async function runCodexUntrusted({
        * Завершаем группу запроса вместе со служебными дочерними процессами CLI.
        */
       function kill(signalName: NodeJS.Signals) {
+        // В графовом режиме группой владеет Go-резервация: адаптер сигналит
+        // только lease-посреднику, который передаёт сигнал подтверждённой сессии.
+        if (currentGraphLaunch()) {
+          child.kill(signalName);
+          return;
+        }
         if (process.platform !== 'win32' && child.pid) {
           try {
             process.kill(-child.pid, signalName);

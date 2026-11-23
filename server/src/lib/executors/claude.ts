@@ -6,7 +6,7 @@ import type { ChatSpeed } from '../../../../shared/chat/chatSpeed.ts';
 import { setTimeout as wait } from 'node:timers/promises';
 
 import type { ChatRunMetadata } from '../../../../shared/chat/chatRun.ts';
-import { execFile } from '../providerInstall/externalCliProcess.ts';
+import { execFile, spawn, currentGraphLaunch } from '../providerInstall/externalCliProcess.ts';
 import { randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
@@ -1357,6 +1357,129 @@ function claudeUntrustedResult(stdout: unknown, stderr: unknown) {
   };
 }
 
+/**
+ * Общий разбор stdout/stderr/error model-only хода Claude.
+ * Графовая ветка spawn использует тот же разбор, что обычный execFile.
+ */
+function settleClaudeUntrusted(
+  error: { killed?: boolean; message?: string } | null,
+  stdout: string,
+  stderr: string,
+  ports: {
+    limitMs: number;
+    signal?: AbortSignal;
+    resolve: (value: ReturnType<typeof claudeUntrustedResult>) => void;
+    reject: (reason: unknown) => void;
+  },
+): void {
+  const { limitMs, signal, resolve, reject } = ports;
+
+  if (error) {
+    // Убитый по сроку процесс не оставляет ни result-события, ни stderr, и
+    // прежде выглядел как «завершился без результата» — причина, по которой
+    // человек ничего не может сделать. Срок называется явно, а если CLI за
+    // это время повторял запрос к API, называется и транспорт: такой срыв
+    // не про модель, и вызывающий вправе повторить его после паузы.
+    if (error.killed && !signal?.aborted) {
+      const minutes = Math.round(limitMs / 60_000);
+      const retries = claudeApiRetries(stdout);
+
+      reject(retries.count > 0
+        ? untrustedInputError(
+          'model_unreachable',
+          `Claude не уложился в ${minutes} мин: API не отвечал, CLI повторил запрос `
+            + `${retries.count} раз (${retries.last}).`,
+        )
+        : untrustedInputError(
+          'model_run_failed',
+          `Claude не уложился в ${minutes} мин и остановлен.`,
+        ));
+      return;
+    }
+    // Claude пишет причину API/авторизации в result-событие stdout и при этом
+    // завершается с кодом 1. Разбираем поток до generic ошибки execFile,
+    // иначе BuildRun теряет исправимую причину остановки.
+    try {
+      claudeUntrustedResult(stdout, stderr);
+    } catch (resultError) {
+      reject(resultError);
+      return;
+    }
+    const detail = String(stderr || '').trim().slice(-600);
+
+    reject(untrustedInputError(
+      'model_run_failed',
+      detail || error.message || 'Claude не запустился.',
+    ));
+    return;
+  }
+  try {
+    resolve(claudeUntrustedResult(stdout, stderr));
+  } catch (parseError) {
+    reject(parseError);
+  }
+}
+
+/**
+ * Графовый model-only ход идёт через spawn: execFile не передаёт private stdio
+ * permit-канала. Лимит 2 МиБ на поток и срок сохраняются как в обычном пути.
+ */
+function spawnClaudeUntrustedGraph(
+  bin: string,
+  args: string[],
+  options: { cwd: string; env: NodeJS.ProcessEnv; limitMs: number; signal?: AbortSignal },
+  ports: {
+    resolve: (value: ReturnType<typeof claudeUntrustedResult>) => void;
+    reject: (reason: unknown) => void;
+  },
+) {
+  const child = spawn(bin, args, {
+    cwd: options.cwd,
+    env: options.env,
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+  let stdout = '';
+  let stderr = '';
+  let killed = false;
+  const timer = setTimeout(() => {
+    killed = true;
+    child.kill('SIGTERM');
+  }, options.limitMs);
+  const onAbort = () => child.kill('SIGTERM');
+
+  options.signal?.addEventListener('abort', onAbort, { once: true });
+  child.stdout?.setEncoding('utf8');
+  child.stderr?.setEncoding('utf8');
+  child.stdout?.on('data', (chunk: string) => {
+    stdout += chunk;
+
+    if (Buffer.byteLength(stdout) > 2 * 1024 * 1024) {
+      killed = true;
+      child.kill('SIGTERM');
+    }
+  });
+  child.stderr?.on('data', (chunk: string) => {
+    stderr += chunk;
+
+    if (Buffer.byteLength(stderr) > 2 * 1024 * 1024) {
+      killed = true;
+      child.kill('SIGTERM');
+    }
+  });
+  child.on('error', (error) => {
+    clearTimeout(timer);
+    options.signal?.removeEventListener('abort', onAbort);
+    ports.reject(untrustedInputError('model_run_failed', error.message || 'Claude не запустился.'));
+  });
+  child.on('close', (code) => {
+    clearTimeout(timer);
+    options.signal?.removeEventListener('abort', onAbort);
+    settleClaudeUntrusted(code === 0 && !killed ? null : { killed, message: `exit ${code}` },
+      stdout, stderr, { limitMs: options.limitMs, signal: options.signal, ...ports });
+  });
+  return child;
+}
+
 export async function runClaudeUntrusted({
   config, env, message, images = [], model, effort, providerSettings, signal,
   timeoutMs = UNTRUSTED_TIMEOUT_MS,
@@ -1377,16 +1500,24 @@ export async function runClaudeUntrusted({
   await fs.chmod(cwd, 0o500);
   try {
     return await new Promise<ReturnType<typeof claudeUntrustedResult>>((resolve, reject) => {
-      const child = execFile(config.claudeBin, buildClaudeUntrustedArgs({
-        model, effort, providerSettings,
-      }), {
+      const untrustedEnv = {
+        ...process.env,
+        ...(env || {}),
+        CLAUDE_CODE_SAFE_MODE: '1',
+        CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
+      };
+      const untrustedArgs = buildClaudeUntrustedArgs({ model, effort, providerSettings });
+
+      if (currentGraphLaunch()) {
+        const child = spawnClaudeUntrustedGraph(config.claudeBin, untrustedArgs,
+          { cwd, env: untrustedEnv, limitMs, signal }, { resolve, reject });
+
+        child.stdin?.end(input);
+        return;
+      }
+      const child = execFile(config.claudeBin, untrustedArgs, {
         cwd,
-        env: {
-          ...process.env,
-          ...(env || {}),
-          CLAUDE_CODE_SAFE_MODE: '1',
-          CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
-        },
+        env: untrustedEnv,
         // Inbox обрабатывает недоверенный ввод: ограничиваем не только capabilities,
         // но и ресурсы зависшего/многословного model-only хода. Срок задаёт вызывающий:
         // триажу хватает пяти минут, сценарий ролика на opus с полным effort в них
@@ -1396,44 +1527,7 @@ export async function runClaudeUntrusted({
         killSignal: 'SIGTERM',
         signal,
       }, (error, stdout, stderr) => {
-        if (error) {
-          // Убитый по сроку процесс не оставляет ни result-события, ни stderr, и
-          // прежде выглядел как «завершился без результата» — причина, по которой
-          // человек ничего не может сделать. Срок называется явно, а если CLI за
-          // это время повторял запрос к API, называется и транспорт: такой срыв
-          // не про модель, и вызывающий вправе повторить его после паузы.
-          if (error.killed && !signal?.aborted) {
-            const minutes = Math.round(limitMs / 60_000);
-            const retries = claudeApiRetries(stdout);
-            reject(retries.count > 0
-              ? untrustedInputError(
-                'model_unreachable',
-                `Claude не уложился в ${minutes} мин: API не отвечал, CLI повторил запрос `
-                  + `${retries.count} раз (${retries.last}).`,
-              )
-              : untrustedInputError(
-                'model_run_failed',
-                `Claude не уложился в ${minutes} мин и остановлен.`,
-              ));
-            return;
-          }
-          // Claude пишет причину API/авторизации в result-событие stdout и при этом
-          // завершается с кодом 1. Разбираем поток до generic ошибки execFile,
-          // иначе BuildRun теряет исправимую причину остановки.
-          try {
-            claudeUntrustedResult(stdout, stderr);
-          } catch (resultError) {
-            reject(resultError);
-            return;
-          }
-          const detail = String(stderr || '').trim().slice(-600);
-          reject(untrustedInputError(
-            'model_run_failed',
-            detail || error.message || 'Claude не запустился.',
-          ));
-          return;
-        }
-        try { resolve(claudeUntrustedResult(stdout, stderr)); } catch (parseError) { reject(parseError); }
+        settleClaudeUntrusted(error, stdout, stderr, { limitMs, signal, resolve, reject });
       });
       child.stdin?.end(input);
     });
@@ -1666,6 +1760,7 @@ function claudeConfigDir() {
 export default {
   id: 'claude',
   accessProfiles: claudeAccess,
+  graphModelProcess: true,
   usageRequiresRuntime: false,
   chatSpeed: {
     modes: ['standard', 'fast'] as const,
