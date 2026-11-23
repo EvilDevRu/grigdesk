@@ -18,6 +18,60 @@ import org.junit.Test;
 
 public class ShellApiTest {
   /**
+   * Ручное подключение к встроенной машине запрашивает запуск сервера до проверки связи.
+   * Фоновый повтор и ручное подключение к удалённой машине только проверяют связь.
+   */
+  @Test
+  public void explicitLocalConnectStartsServerBeforeProbing() throws Exception {
+    Path root = Files.createTempDirectory("grigdesk-local-connect-");
+    Path file = root.resolve("profiles.json");
+    ProfileStore store = new ProfileStore(file.toFile(), port -> true, null, true);
+    String local = ProfileStore.LOCAL_ID;
+    String remote = store.add("Фикстура", "https://machine.example:443", "1".repeat(64)).getString("id");
+    List<String> calls = new ArrayList<>();
+    List<Runnable> retries = new ArrayList<>();
+    ShellApi.Native nativeActions = new ShellApi.Native() {
+      public String scan() {
+        return "";
+      }
+      public void save(String name, String type, InputStream body) {
+      }
+      public void unlock() {
+      }
+      public void startLocalServer() {
+        calls.add("start");
+      }
+    };
+
+    try (ShellApi shell = new ShellApi(store, null, (profile, gate, report) -> {
+      calls.add(profile.getString("id"));
+      throw new java.io.IOException();
+    }, (callback, delay) -> {
+      retries.add(callback);
+      return () -> {};
+    }, Runnable::run, id -> {}, nativeActions, () -> 0.5, 0, 1)) {
+      HttpHead request = new HttpHead("POST /__shell/connect HTTP/1.1", java.util.Map.of());
+
+      try (PipeResponse response = shell.handle(request, new ByteArrayInputStream(new byte[0]))) {
+        assertEquals(200, response.status);
+        assertEquals(List.of("start", local), calls);
+      }
+
+      retries.get(0).run();
+      assertEquals(List.of("start", local, local), calls);
+      store.select(remote);
+
+      try (PipeResponse response = shell.handle(request, new ByteArrayInputStream(new byte[0]))) {
+        assertEquals(200, response.status);
+        assertEquals(List.of("start", local, local, remote), calls);
+      }
+    } finally {
+      Files.deleteIfExists(file);
+      Files.deleteIfExists(root);
+    }
+  }
+
+  /**
    * Нативное сохранение получает безопасное имя и поток исходного тела.
    * Отказ камеры возвращает читаемую ошибку без успешной привязки.
    */

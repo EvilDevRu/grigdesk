@@ -35,6 +35,21 @@ public final class AndroidActions implements ShellApi.Native {
     local.grigdesk.client.shell.ClientFailure.await(activity.get().unlock());
   }
 
+  /**
+   * Ручной запуск службы использует текущую Activity, в том числе после поворота.
+   * Если окно уже закрыто, труба возвращает читаемый отказ запроса.
+   */
+  @Override
+  public void startLocalServer() {
+    MainActivity visible = activity.get();
+
+    if (visible == null || visible.isDestroyed()) {
+      throw new IllegalStateException(ClientLocale.text("actionFailure"));
+    }
+
+    visible.startLocalServer();
+  }
+
   @Override
   public String notifyPermission() {
     return Notifications.permission(context);

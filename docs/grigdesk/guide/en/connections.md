@@ -15,6 +15,9 @@ Install the full Android application separately.
 4. Wait for connection. After temporary failure, Connect now and inspect route status.
 5. Revoke devices on the server when needed. Revoking the current device disconnects it.
 
+In the Android probe APK, select **This device** and choose **Connect now** to restart
+the local server if its process has exited. The workspace opens when the server is ready.
+
 ## Remote access and replacing a VPS
 
 On the home server, open Settings → Connections → Server access → Remote access

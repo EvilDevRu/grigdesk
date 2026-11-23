@@ -4,6 +4,7 @@ import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.Service;
+import android.content.Context;
 import android.content.Intent;
 import android.content.pm.ApplicationInfo;
 import android.os.Build;
@@ -43,6 +44,7 @@ public class LocalServerService extends Service {
     static final int SERVER_PORT = 8140;
     private static final String SERVER_BUNDLE = "server-bundle.cjs";
     private static volatile LocalServerService active;
+    private static volatile boolean launchFailed;
 
     private final ExecutorService startup = Executors.newSingleThreadExecutor();
     private Process serverProcess;
@@ -81,6 +83,38 @@ public class LocalServerService extends Service {
     }
 
     /**
+     * У уже запущенной службы новая попытка начинается сразу, до следующей проверки окна.
+     * Создание службы делегируется Android, прежняя ошибка к её запуску не относится.
+     */
+    static void launch(Context context) {
+        LocalServerService service = active;
+
+        if (service == null) {
+            launchFailed = false;
+            context.startForegroundService(new Intent(context, LocalServerService.class));
+        }
+        else {
+            service.requestServerStart();
+        }
+    }
+
+    /**
+     * Сохранившаяся фоновая связь готова только пока служба владеет живым процессом.
+     * Проверка не обращается по сети и используется на UI-потоке.
+     */
+    static boolean running() {
+        LocalServerService service = active;
+
+        if (service == null) {
+            return false;
+        }
+
+        synchronized (service) {
+            return !service.destroyed && service.serverProcess != null && service.serverProcess.isAlive();
+        }
+    }
+
+    /**
      * Повторный вызов от окна не запускает вторую копию сервера.
      * Распаковку выполняет рабочий поток службы.
      */
@@ -88,8 +122,26 @@ public class LocalServerService extends Service {
         if (destroyed || starting || (serverProcess != null && serverProcess.isAlive())) {
             return;
         }
+        launchFailed = false;
         starting = true;
         startup.execute(this::startServer);
+    }
+
+    /**
+     * Пока служба раскрывает пакет, отсутствие процесса означает обычное ожидание.
+     * Ошибка подготовки или завершение дочернего процесса освобождает заставку раньше срока.
+     */
+    static boolean launchFailed() {
+        LocalServerService service = active;
+
+        if (service == null) {
+            return launchFailed;
+        }
+
+        synchronized (service) {
+            return launchFailed || (!service.starting && service.serverProcess != null
+                && !service.serverProcess.isAlive());
+        }
     }
 
     /**
@@ -171,6 +223,7 @@ public class LocalServerService extends Service {
             }
         }
         catch (Exception error) {
+            launchFailed = true;
             Log.e("GrigDeskProbe", "Не удалось запустить локальный сервер", error);
             stopSelf();
         }

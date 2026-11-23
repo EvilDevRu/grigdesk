@@ -7,6 +7,17 @@ allprojects {
         if (project.name == 'client' && project.extensions.findByName('android') != null) {
             def probeRoot = new File(project.rootProject.projectDir,
                     '../../tools/android/probe-apk').canonicalFile
+            def splashAssets = project.layout.buildDirectory.dir('generated/probeSplash')
+            def prepareSplash = project.tasks.register('prepareProbeSplash', Sync) {
+                from(new File(probeRoot, '../../../desktop/assets/splash')) {
+                    into('desktop-splash')
+                }
+                into(splashAssets)
+            }
+
+            project.tasks.matching { it.name == 'preProbeBuild' }.configureEach {
+                dependsOn(prepareSplash)
+            }
 
             project.android {
                 buildTypes {
@@ -23,6 +34,7 @@ allprojects {
                         manifest.srcFile new File(probeRoot, 'AndroidManifest.xml')
                         jniLibs.srcDirs += new File(probeRoot, 'jniLibs')
                         assets.srcDirs += new File(probeRoot, 'assets')
+                        assets.srcDir splashAssets
                     }
                 }
 

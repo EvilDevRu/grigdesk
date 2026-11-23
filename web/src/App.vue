@@ -14,6 +14,7 @@
     <SpeechProvider v-else-if="shell.present || auth.authenticated">
       <div
         class="shell-workspace"
+        :data-workspace-ready="auth.authenticated && shell.status === 'online' ? '' : undefined"
         :inert="shell.present && (shell.status === 'locked' || shell.appLocked) ? true : undefined"
       >
       <ToolWindowPage v-if="surfaceDocument && surfaceTarget?.kind === 'tool'"

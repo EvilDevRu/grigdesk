@@ -170,7 +170,10 @@ For a full release, the downloads list groups the packages by operating system a
 The Actions run bundles them after all platforms pass verification. Android installs and updates separately.
 Open the Android probe APK from its app icon. On first launch, the window starts
 the local server, selects This device, and connects automatically when the server
-is ready. The probe APK supports resuming a saved command route on Android ARM64.
+is ready. On a cold start, wait for the “Starting server…” window to close.
+The same window appears on return to the app if the local connection needs to be restored.
+If startup fails or takes longer than two minutes, the main window opens with the
+current connection status. The probe APK supports resuming a saved command route on Android ARM64.
 The regular Android client connects to the selected host.
 
 ## Related articles

@@ -42,6 +42,13 @@ public final class ShellApi implements ClientPipe.Shell, AutoCloseable {
     void unlock() throws Exception;
 
     /**
+     * Явное подключение к встроенной машине может запустить её сервер.
+     * Обычные пробы связи и оболочки без этой машины не управляют службой.
+     */
+    default void startLocalServer() throws Exception {
+    }
+
+    /**
      * Оповещения необязательны для прежних оболочек: без нативного канала
      * труба объявляет unsupported, и интерфейс сохраняет браузерное поведение.
      */
@@ -108,6 +115,15 @@ public final class ShellApi implements ClientPipe.Shell, AutoCloseable {
   private final java.util.function.BooleanSupplier backgroundLink;
   private boolean closed;
   private boolean suspended;
+
+  /**
+   * Заставка ждёт только встроенную машину, выбранную для первого окна.
+   * Ручное отключение освобождает ожидание независимо от состояния трубы.
+   */
+  public synchronized String localStartupStatus() {
+    return ProfileStore.LOCAL_ID.equals(store.selected) && !disabled.contains(ProfileStore.LOCAL_ID)
+      ? state.status(ProfileStore.LOCAL_ID) : "skipped";
+  }
 
   /**
    * Оболочка объединяет профили, транспорт и нативные действия без доступа из JavaScript.
@@ -610,7 +626,13 @@ public final class ShellApi implements ClientPipe.Shell, AutoCloseable {
           move = true;
         }
       } else if (head.method().equals("POST") && path.equals("/__shell/connect")) {
-        connect(store.selected, true);
+        String selected = store.selected;
+
+        if (ProfileStore.LOCAL_ID.equals(selected) && nativeActions != null) {
+          nativeActions.startLocalServer();
+        }
+
+        connect(selected, true);
       } else if (head.method().equals("POST") && path.equals("/__shell/disconnect")) {
         disconnect(store.selected);
       } else if (path.startsWith("/__shell/profiles/") && head.method().equals("DELETE")) {

@@ -7,6 +7,7 @@ import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
 import android.net.Uri;
 import android.os.Bundle;
+import android.view.View;
 import android.webkit.CookieManager;
 import android.webkit.PermissionRequest;
 import android.webkit.ValueCallback;
@@ -23,6 +24,7 @@ import java.security.SecureRandom;
 import java.util.Base64;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Consumer;
 
 public class MainActivity extends AppCompatActivity {
   private static final int FILE_REQUEST = 1201;
@@ -37,6 +39,7 @@ public class MainActivity extends AppCompatActivity {
   private static volatile ClientRuntime runtime;
   private static volatile AppLock appLock;
   private AppLockScreen appLockScreen;
+  private View startupCover;
   private android.widget.LinearLayout appLockCover;
   private android.widget.Button appLockButton;
   private static volatile boolean coveredUnlocking;
@@ -119,6 +122,11 @@ public class MainActivity extends AppCompatActivity {
     getOnBackPressedDispatcher().addCallback(this, new OnBackPressedCallback(true) {
       @Override
       public void handleOnBackPressed() {
+        if (startupCover != null && web.getVisibility() == View.VISIBLE) {
+          moveTaskToBack(true);
+          return;
+        }
+
         web.evaluateJavascript("Boolean(window.grigdeskBack?.())", result -> {
           if (!"true".equals(result)) {
             moveTaskToBack(true);
@@ -193,6 +201,89 @@ public class MainActivity extends AppCompatActivity {
   }
 
   /**
+   * Запуск встроенного сервера реализует оболочка соответствующего варианта APK.
+   * Обычный клиент подключается к внешнему серверу и не запускает службу.
+   */
+  protected void startLocalServer() {
+  }
+
+  protected View createStartupCover() {
+    return null;
+  }
+
+  /**
+   * Заставка ставится и при первом создании окна, и при восстановлении локального запуска.
+   * Позиция перед карточкой сохраняет приоритет нативной блокировки.
+   */
+  protected final void showStartupCover() {
+    if (startupCover != null) {
+      return;
+    }
+
+    startupCover = createStartupCover();
+
+    if (startupCover != null) {
+      android.widget.FrameLayout root = (android.widget.FrameLayout) appLockCover.getParent();
+
+      root.addView(startupCover, root.indexOfChild(appLockCover), new android.widget.FrameLayout.LayoutParams(
+        android.view.ViewGroup.LayoutParams.MATCH_PARENT, android.view.ViewGroup.LayoutParams.MATCH_PARENT));
+      web.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS);
+    }
+  }
+
+  protected final String localStartupStatus() {
+    ClientRuntime client = runtime;
+
+    if (startupFailure != null) {
+      return "skipped";
+    }
+
+    return client == null ? "none" : client.shell.localStartupStatus();
+  }
+
+  /**
+   * Заставка скрывает WebView от ввода и дерева доступности, пока WebView рисует страницу.
+   * Снятие слоя возвращает доступ к тому же документу без навигации.
+   */
+  protected final void dismissStartupCover() {
+    if (startupCover != null) {
+      ((android.view.ViewGroup) startupCover.getParent()).removeView(startupCover);
+      startupCover = null;
+      web.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_AUTO);
+    }
+  }
+
+  /**
+   * Подключение трубы проверяется отдельно от подтверждённого входа страницы.
+   * Нативный callback кадра учитывает обновление DOM до снятия заставки.
+   */
+  protected final void checkWorkspaceFrame(Consumer<Boolean> ready) {
+    if (!pageLoaded || web.getVisibility() != View.VISIBLE || navigation.peek() != null) {
+      ready.accept(false);
+      return;
+    }
+
+    String origin = web.getUrl();
+
+    web.evaluateJavascript("Boolean(document.querySelector('[data-workspace-ready]'))"
+      + " && !document.querySelector('[data-connection-recovery]')", result -> {
+      if (!"true".equals(result) || startupCover == null || current.get() != this || isDestroyed()) {
+        ready.accept(false);
+        return;
+      }
+
+      web.postVisualStateCallback(0, new WebView.VisualStateCallback() {
+        @Override
+        public void onComplete(long requestId) {
+          ready.accept(current.get() == MainActivity.this && !isDestroyed() && pageLoaded
+            && web.getVisibility() == View.VISIBLE
+            && navigation.peek() == null && java.util.Objects.equals(web.getUrl(), origin));
+        }
+      });
+    });
+  }
+
+  /**
    * Системное оповещение открывает то же окно, что и иконка текущего варианта APK.
    * В пробе это запускает локальный сервер даже при холодном входе через оповещение.
    */
@@ -230,6 +321,8 @@ public class MainActivity extends AppCompatActivity {
     appLockCover.addView(appLockButton);
     root.addView(web, fill);
     root.addView(appLockCover, new android.widget.FrameLayout.LayoutParams(fill));
+    web.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_AUTO);
+    showStartupCover();
     // При следующем показе карточка использует текущий язык установки.
     // Удерживаемый WebView и его Activity ради смены языка не пересоздаются.
     appLockScreen = new AppLockScreen(appLock, visible -> {
