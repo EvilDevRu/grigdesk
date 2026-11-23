@@ -5,6 +5,15 @@ import { compileVue, webFile } from './helpers/compile-vue.js';
 import { installUiBrowser } from './helpers/ui-components.js';
 
 const PERMISSION_PATH = webFile('src/views/chat/ChatPermission.vue');
+// Каталог проектов нужен карточке ради знака SSH-соединения; DB-карточка каталог
+// не запрашивает, поэтому фикстура подменяет вход действий и держит пустой стор.
+const PROJECTS_SERVICE_STUB = `
+  export const useProjectsStore = () => ({
+    activeCatalog: { items: [], loaded: true, loading: false, error: '' },
+  });
+  export const loadProjects = () => Promise.resolve();
+  export const watchProjects = () => () => {};
+`;
 
 async function mountPermission(t, req) {
   const browser = await installUiBrowser(t, 'http://grigdesk.test/#/chats');
@@ -18,6 +27,7 @@ async function mountPermission(t, req) {
           export const confirmDialog = () => Promise.resolve(false);
           export const alertDialog = () => Promise.resolve();
         `,
+        '../../actions/projects/index.ts': PROJECTS_SERVICE_STUB,
       },
     }),
   ]);

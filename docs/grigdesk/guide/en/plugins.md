@@ -37,7 +37,7 @@ Official and Community describe origin, rather than a security assessment.
 
 Narrow SSH panels switch Servers / Terminal; database panels switch profiles, console and queries.
 Catalog searches resemble chat search. Before confirming SSH, check server address and connection tab:
-the card shows the project and same tab name as SSH. Repeated connections are numbered.
+the card shows the project with its icon and same tab name as SSH. Repeated connections are numbered.
 Compound-command parts are separated visually; Allow approves the entire command.
 Refresh precedes other actions. A round plus adds a server/profile; pressing its minus hides the form but keeps drafts.
 Driver in Databases opens Git installation. Updates distinguish changes in manifest and old/new entry files;

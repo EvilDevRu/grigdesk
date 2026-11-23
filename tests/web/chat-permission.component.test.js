@@ -16,6 +16,15 @@ const DIALOG_SERVICE_STUB = `
   export const confirmDialog = () => Promise.resolve(false);
   export const alertDialog = () => Promise.resolve();
 `;
+// Каталог проектов карточка берёт через действия раздела «Проекты»; тест подменяет
+// ровно этот вход, чтобы карточка не открывала SSE и сеть фикстуры.
+const PROJECTS_SERVICE_STUB = `
+  export const useProjectsStore = () => globalThis.__chatPermissionProjectsStore();
+  export const loadProjects = (scope) => globalThis.__chatPermissionProjectsLoad?.(scope)
+    ?? Promise.resolve();
+  export const watchProjects = (scope) => globalThis.__chatPermissionProjectsWatch?.(scope)
+    ?? (() => {});
+`;
 
 let componentPromise;
 
@@ -23,6 +32,7 @@ function compilePermission() {
   componentPromise ||= compileVue(PERMISSION_PATH, {
     stubs: {
       './services/dialogs': DIALOG_SERVICE_STUB,
+      '../../actions/projects/index.ts': PROJECTS_SERVICE_STUB,
     },
   });
 
@@ -41,6 +51,19 @@ const PLAN_REQ = {
 async function mountPermission(t, req = PLAN_REQ) {
   const browser = await installUiBrowser(t, 'http://grigdesk.test/#/chats');
   globalThis.__chatPermissionPrompt = async () => null;
+  globalThis.__chatPermissionProjectsStore ??= () => ({
+    activeCatalog: {
+      items: [],
+      loaded: true,
+      loading: false,
+      error: '',
+    },
+  });
+  t.after(() => {
+    delete globalThis.__chatPermissionProjectsStore;
+    delete globalThis.__chatPermissionProjectsLoad;
+    delete globalThis.__chatPermissionProjectsWatch;
+  });
 
   const [{ mount, flushPromises }, ChatPermission] = await Promise.all([
     import('../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs'),
@@ -584,6 +607,53 @@ test('SSH-карточка показывает сервер пользоват�
     fullCommand: true,
     remember: false,
   });
+});
+
+test('SSH-карточка показывает иконку проекта соединения из каталога проектов', async (t) => {
+  const icon = 'data:image/png;base64,'
+    + 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a6WQAAAAASUVORK5CYII=';
+  globalThis.__chatPermissionProjectsStore = () => ({
+    activeCatalog: {
+      items: [{ id: 'project-a', title: 'Проект А', icon }],
+      loaded: true,
+      loading: false,
+      error: '',
+    },
+  });
+  const { wrapper } = await mountPermission(t, {
+    pid: 'ssh-icon',
+    origin: 'ssh',
+    tool: 'supervised_ssh',
+    server: { label: 'production', host: 'server.internal', port: 22 },
+    tab: { projectId: 'project-a', label: 'production · code' },
+    user: 'deploy',
+    command: 'echo ok',
+  });
+
+  assert.equal(
+    wrapper.get('[data-ssh-tab] [data-project-icon-image]').attributes('src'),
+    icon,
+  );
+});
+
+test('карточка без проекта соединения не запрашивает каталог проектов', async (t) => {
+  const loads = [];
+  globalThis.__chatPermissionProjectsLoad = (scope) => {
+    loads.push(scope);
+
+    return Promise.resolve();
+  };
+  const { wrapper } = await mountPermission(t, {
+    pid: 'db-no-catalog',
+    origin: 'db',
+    tool: 'supervised_db',
+    profile: { label: 'Прод-заказы', role: 'read' },
+    query: 'SELECT 1',
+    queryClass: 'read',
+  });
+
+  assert.deepEqual(loads, []);
+  assert.equal(wrapper.find('[data-ssh-tab]').exists(), false);
 });
 
 test('SSH-карточка визуально разделяет цепочку и подтверждает исходную команду целиком', async (t) => {

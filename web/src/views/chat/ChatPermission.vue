@@ -12,7 +12,14 @@
         <span class="p-label">{{ t('core.interventionSshServer') }}:</span>
         {{ req.server?.label }} — {{ req.server?.host }}:{{ req.server?.port }}
       </div>
-      <div v-if="req.tab" data-ssh-tab>
+      <div v-if="req.tab" data-ssh-tab class="p-ssh-tab">
+        <ProjectAvatar
+          v-if="req.tab.projectId"
+          compact
+          :id="req.tab.projectId"
+          :title="sshProjectTitle"
+          :icon="sshProject?.icon"
+        />
         <span class="p-label">{{ t('core.interventionSshTab') }}: </span>
         <strong>{{ req.tab.projectId }} — {{ req.tab.label }}</strong>
       </div>
@@ -156,6 +163,8 @@ import type { ChatPermission, PermissionChoice } from '../../shared/chatContract
 import { lineDiff, splitRows } from '../../shared/diff.ts';
 import { sshCommandParts } from '../../shared/sshCommandParts.ts';
 import ChatIntervention from './ChatIntervention.vue';
+import ProjectAvatar from '../projects/ProjectAvatar.vue';
+import { loadProjects, useProjectsStore, watchProjects } from '../../actions/projects/index.ts';
 import {
   t,
   uiLocale,
@@ -175,6 +184,10 @@ const props = defineProps({
   },
 });
 const emit = defineEmits(['answer']);
+
+// Каталог проектов даёт карточке знак проекта соединения. Снимок общий с полосой
+// чатов и рабочей папкой, поэтому карточка только дозагружает его при нехватке.
+const projects = useProjectsStore().activeCatalog;
 
 const remember = ref(false);
 const selectedChoice = ref<string | string[] | null>(null);
@@ -345,6 +358,31 @@ const choiceOptions = computed(() => choices.value.map((choice) => ({
   value: String(choice.id),
   label: String(choice.label),
 })));
+
+// Знак соединения: загруженная иконка проекта, иначе первая буква названия,
+// а без записи в каталоге — значок папки на нейтральной плитке.
+const sshProject = computed(() => (
+  projects.items.find((item) => item.id === props.req?.tab?.projectId) || null
+));
+const sshProjectTitle = computed(() => sshProject.value?.title || '');
+
+// Подписка и дозагрузка каталога нужны только SSH-карточке с проектом вкладки:
+// DB и файловые подтверждения не должны трогать сеть из-за знака соединения.
+watch(
+  () => Boolean(props.req?.origin === 'ssh' && props.req.tab?.projectId),
+  (needed, _previous, onCleanup) => {
+    if (!needed) {
+      return;
+    }
+
+    onCleanup(watchProjects('active'));
+
+    if (!projects.loaded && !projects.loading) {
+      void loadProjects('active');
+    }
+  },
+  { immediate: true },
+);
 
 function isAllowChoice(choice: PermissionChoice) {
   return choice.kind === 'allow_once' || choice.kind === 'allow_always';
@@ -569,6 +607,17 @@ function chooseById(value: unknown) {
   font-size: 12px;
   line-height: 1.5;
   overflow-wrap: anywhere;
+}
+
+.p-ssh-tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.p-ssh-tab .p-label {
+  margin-bottom: 0;
 }
 
 .p-db-prod {
