@@ -18,7 +18,9 @@ export const darwinEngineFormulas = [
   ['grep', 'libexec/gnubin', ['grep']],
   ['jq', 'bin', ['jq']],
   ['flock', 'bin', ['flock']],
-  ['python', 'libexec/bin', ['python3']],
+  // Homebrew ставит python3 в bin формулы; libexec/bin несёт только неверсионные
+  // python/pip-симлинки, поэтому python3 там отсутствует (python@3.15+).
+  ['python', 'bin', ['python3']],
 ] as const;
 
 export type MacEngineTool = typeof darwinEngineFormulas[number][2][number] | 'brew'
