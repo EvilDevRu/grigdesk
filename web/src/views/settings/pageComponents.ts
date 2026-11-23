@@ -3,6 +3,7 @@ import type { Component } from 'vue';
 
 import { asyncView } from '../../shared/asyncView.ts';
 import SettingsLoading from './SettingsLoading.vue';
+import ProviderSettingsLoading from './ProviderSettingsLoading.vue';
 
 /**
  * Ключ замыкается при регистрации, пока код страницы ещё не загружен.
@@ -68,7 +69,7 @@ export const SETTINGS_PAGE_COMPONENTS: Record<string, Component> = {
   'tools.docker': asyncView(() => import('./pages/PluginPage.vue'), loading('tools.docker')),
   'tools.showcase': asyncView(() => import('./pages/PluginPage.vue'), loading('tools.showcase')),
   'tools.browser': asyncView(() => import('./pages/BrowserPage.vue'), loading('tools.browser')),
-  'agents.providers': asyncView(() => import('./pages/ProviderPage.vue'), loading('agents.providers')),
+  'agents.providers': asyncView(() => import('./pages/ProviderPage.vue'), ProviderSettingsLoading),
   'speech.dictation': asyncView(() => import('./pages/SpeechPage.vue'), loading('speech.dictation')),
   'system.diagnostics': asyncView(() => import('./pages/DiagnosticsPage.vue'), loading('system.diagnostics')),
 };

@@ -1,0 +1,75 @@
+.settings-provider {
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr);
+  align-content: start;
+  gap: 16px;
+  min-width: 0;
+}
+.settings-provider-general,
+.settings-provider > [role='alert'] {
+  grid-column: 1 / -1;
+}
+.settings-provider-sidebar {
+  display: grid;
+  align-content: start;
+  gap: 12px;
+  min-width: 0;
+  padding-right: 16px;
+  border-right: 1px solid var(--line);
+}
+.settings-provider-list {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+}
+.settings-provider-options {
+  display: grid;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+}
+.settings-provider-picker { display: none; }
+.settings-provider-actions {
+  display: grid;
+  gap: 8px;
+}
+.settings-provider-editor {
+  display: grid;
+  align-content: start;
+  gap: 16px;
+  min-width: 0;
+}
+.settings-provider-title {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  min-width: 0;
+}
+.settings-provider-facts {
+  display: grid;
+  margin: 0;
+  font-size: 12px;
+}
+.settings-provider-facts > div {
+  display: grid;
+  grid-template-columns: minmax(100px, .7fr) minmax(0, 1fr);
+  gap: 16px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--line);
+}
+@container settings-page (max-width: 680px) {
+  .settings-provider { grid-template-columns: minmax(0, 1fr); }
+  .settings-provider-sidebar {
+    gap: 10px;
+    padding: 0 0 16px;
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .settings-provider-list { display: none; }
+  .settings-provider-picker { display: block; }
+  .settings-provider-actions {
+    display: flex;
+    flex-wrap: wrap;
+  }
+}

@@ -18,8 +18,7 @@
         </div>
       </div>
     </div>
-    <div v-else :class="['settings-loading', { split: pageId === 'agents.providers' }]">
-      <UiSkeletonLayout v-if="pageId === 'agents.providers'" layout="list" />
+    <div v-else class="settings-loading">
       <div>
         <div v-if="pageId === 'system.processes' || area === 'processes'" class="facts">
           <UiSkeleton v-for="i in 3" :key="i" shape="block" />
@@ -53,7 +52,6 @@ withDefaults(defineProps<{
 
 <style scoped>
 .settings-loading { min-width: 0; }
-.split { display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: 24px; }
 .facts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-bottom: 16px; }
 .catalog-loading {
   container: loading-plugin-catalog / inline-size;
@@ -118,8 +116,5 @@ withDefaults(defineProps<{
   .catalog-filters > :nth-child(2) {
     grid-column: 1 / -1;
   }
-}
-@media (max-width: 600px) {
-  .split { grid-template-columns: minmax(0, 1fr); }
 }
 </style>

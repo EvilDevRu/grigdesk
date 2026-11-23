@@ -10,7 +10,7 @@
         @update:model-value="edit"
       />
     </SettingsField>
-    <p v-else-if="!visibleError">{{ t('settings.loading') }}</p>
+    <ProviderQuotaFieldLoading v-else-if="!visibleError" />
   </SettingsSection>
 </template>
 
@@ -22,6 +22,7 @@ import { failureText } from '../../shared/apiClient.ts';
 import { loadPreferences } from '../../features/settings/loadPreferences.ts';
 import SettingsSection from './SettingsSection.vue';
 import SettingsField from './SettingsField.vue';
+import ProviderQuotaFieldLoading from './ProviderQuotaFieldLoading.vue';
 
 const props = defineProps<{ active: boolean }>();
 const settings = useSettingsStore();

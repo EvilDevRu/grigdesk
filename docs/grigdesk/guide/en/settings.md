@@ -14,6 +14,10 @@ Check the selected machine: server configuration and device preferences have dif
 4. Apply and wait for the response. Resolve any stated failure and retry.
 5. F1 opens help for the selected page above the unfinished form. Close help to return.
 
+When you first open Executors, wait for the list and the card to load.
+The quota auto-refresh setting loads separately at the top of the page.
+If the server returns an error, select Retry loading.
+
 Interface language is a device preference and changes immediately. English and Russian apply to help contents,
 search and articles as well as buttons. An open help window keeps its selected article when language changes.
 Cancel does not undo a language change. The website link carries the selected language.

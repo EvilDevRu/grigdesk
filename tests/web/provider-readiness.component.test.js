@@ -6,6 +6,87 @@ import { settingsHarness } from './helpers/settings-harness.js';
 process.env.NODE_ENV = 'test';
 
 /**
+ * Обычный снимок может быть пустым до окончания проб, в том числе при открытии ссылки.
+ * Временный отказ даёт повтор, а поздний каталог восстанавливает выбранную карточку.
+ */
+test('PROVIDER-READINESS: холодный пустой снимок, ошибка и восстановление', async (t) => {
+  const cold = Promise.withResolvers();
+  const retry = Promise.withResolvers();
+  const h = await settingsHarness(t, 'agents.providers', 'ProviderPage', {
+    entityId: 'probe',
+    prepare({ control, providers }) {
+      providers.providers = [];
+      control.handlers['/api/providers?wait=1'] = () => cold.promise;
+    },
+  });
+
+  assert.equal(h.wrapper.find('[data-ui-loading]').exists(), true);
+  assert.equal(h.wrapper.find('.settings-provider-general [data-ui-settings-field]').exists(), true);
+
+  const sidebar = h.wrapper.get('[data-loading-region="provider-sidebar"]');
+  const editor = h.wrapper.get('[data-loading-region="provider-editor"]');
+
+  assert.equal(sidebar.find('.settings-provider-picker').exists(), true);
+  assert.equal(editor.find('[data-ui-settings-tabs]').exists(), true);
+  assert.equal(h.wrapper.find('.settings-provider-empty').exists(), false);
+  assert.doesNotMatch(h.wrapper.text(), /Исполнитель больше недоступен/);
+
+  const reads = h.control.calls.map(({ path }) => path).filter((path) => path.startsWith('/api/providers'));
+
+  assert.deepEqual(reads, ['/api/providers?wait=1']);
+
+  cold.resolve(Response.json({ error: 'fixture unavailable' }, { status: 400 }));
+  await h.flushPromises();
+  assert.match(h.wrapper.text(), /Не удалось перечитать реестр исполнителей/);
+
+  h.control.handlers['/api/providers?wait=1'] = () => retry.promise;
+
+  const retryButton = h.wrapper.findAll('button').find((button) => button.text() === 'Повторить загрузку');
+
+  await retryButton.trigger('click');
+  assert.equal(h.wrapper.find('[data-ui-loading]').exists(), true);
+
+  retry.resolve(Response.json({
+    providers: [{
+      id: 'probe',
+      name: 'Probe',
+      models: [],
+    }],
+  }));
+  await h.flushPromises();
+  assert.equal(h.wrapper.get('[data-provider-page="probe"] .settings-provider-title h4').text(), 'Probe');
+  assert.equal(h.wrapper.find('[data-ui-loading]').exists(), false);
+});
+
+/**
+ * При открытии раздела без конкретного исполнителя первый готовый результат выбирает карточку.
+ * Готовой пустой выдаче соответствует обычное состояние отсутствия исполнителей.
+ */
+test('PROVIDER-READINESS: подтверждённый пустой каталог и поздний снимок', async (t) => {
+  const h = await settingsHarness(t, 'agents.providers', 'ProviderPage', {
+    prepare({ control, providers }) {
+      providers.providers = [];
+      control.handlers['/api/providers?wait=1'] = () => Response.json({ providers: [] });
+    },
+  });
+
+  assert.match(h.wrapper.get('.settings-provider-empty').text(), /Исполнители не найдены/);
+
+  h.control.handlers['/api/providers'] = () => Response.json({
+    providers: [{
+      id: 'probe',
+      name: 'Probe',
+      models: [],
+    }],
+  });
+
+  await h.providers.load(false, { invalidate: true, reason: 'sse' });
+  await h.flushPromises();
+  assert.equal(h.settings.entityId, 'probe');
+  assert.equal(h.wrapper.get('[data-provider-page="probe"] .settings-provider-title h4').text(), 'Probe');
+});
+
+/**
  * Каталог и карточка настроек получают один настоящий providers store.
  * Подменяется HTTP, чтобы проверить сохранение снимка при ошибке и восстановление.
  */

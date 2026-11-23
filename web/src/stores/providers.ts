@@ -37,6 +37,7 @@ interface RegistryLoadOptions {
 
 const registryReads = new WeakMap<object, RegistryRead>();
 const registryStatuses = new WeakMap<object, { ok: boolean; message?: string }>();
+const REGISTRY_WAIT_TIMEOUT_MS = 180_000;
 
 type ProviderCliUpdate = (providerId: string) => Promise<void>;
 
@@ -302,7 +303,10 @@ export const useProvidersStore = defineStore('providers', {
       const pending = (async () => {
         try {
           const query = refresh ? '?refresh=1' : wait ? '?wait=1' : '';
-          const reply = await api.get(`/api/providers${query}`);
+          // Холодная проба автономного исполнителя может занять до двух минут.
+          const reply = await api.get(`/api/providers${query}`, {
+            timeoutMs: refresh || wait ? REGISTRY_WAIT_TIMEOUT_MS : undefined,
+          });
 
           if (!isRecord(reply) || (reply.providers != null
             && (!Array.isArray(reply.providers) || !reply.providers.every(isProvider)))) {
@@ -383,6 +387,17 @@ export const useProvidersStore = defineStore('providers', {
         return;
       }
 
+      const status = await this.ensureRegistry();
+
+      if (!status.ok) {
+        throw new Error(status.message || t('settings.providerRegistryFailure'));
+      }
+    },
+    /**
+     * Настройки и чат ждут готовый серверный снимок без принудительной перепроверки.
+     * Если событие меняет поколение, нужен полный снимок уже нового поколения.
+     */
+    async ensureRegistry(): Promise<{ ok: boolean; message?: string }> {
       let version;
       let status;
 
@@ -392,9 +407,7 @@ export const useProvidersStore = defineStore('providers', {
         status = await this.whenRegistryReady();
       } while (version !== this.registryVersion);
 
-      if (!status.ok) {
-        throw new Error(status.message || t('settings.providerRegistryFailure'));
-      }
+      return status;
     },
     /**
      * Координатор настроек ждёт актуальное чтение реестра после записи ключа.

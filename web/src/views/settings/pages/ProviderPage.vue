@@ -6,7 +6,16 @@
   >
     <ProviderQuotaPreferences :active="active" class="settings-provider-general" />
     <p v-if="error" role="alert">{{ resolveUiText(error) }}</p>
-    <aside class="settings-provider-sidebar" :aria-label="t('settings.providerSelection')">
+    <ProviderSettingsLoading v-if="!showCatalog && catalogState === 'loading'"
+      :show-quota="false" class="settings-provider-general" />
+    <UiInlineMessage v-else-if="!showCatalog" class="settings-provider-general" tone="warning"
+      :heading="t('settings.providerRegistryFailure')">
+      <p v-if="catalogError">{{ catalogError }}</p>
+      <template #actions>
+        <UiButton @click="loadCatalog">{{ t('settings.retryLoading') }}</UiButton>
+      </template>
+    </UiInlineMessage>
+    <aside v-else class="settings-provider-sidebar" :aria-label="t('settings.providerSelection')">
       <div class="settings-provider-picker">
         <UiSelect
           :model-value="selected?.id || ''"
@@ -67,7 +76,8 @@
         </UiButton>
       </div>
     </aside>
-    <section class="settings-provider-editor" :aria-label="t('settings.selectedProviderSettings')">
+    <section v-if="showCatalog" class="settings-provider-editor"
+      :aria-label="t('settings.selectedProviderSettings')">
       <template v-if="selected">
         <div class="settings-provider-title">
           <ProviderIcon :provider="selected" :size="22" />
@@ -371,11 +381,9 @@
         />
         <p v-else-if="ready">{{ t('settings.theProviderDoesNotDeclareThisCapability') }}</p>
       </template>
-      <p v-else-if="settings.entityId">{{ t('settings.theProviderIsNoLongerAvailableIn') }}</p>
-      <UiLoadingState v-else-if="!providers.loaded" :label="t('settings.loadingProviders')"
-                      :failed="Boolean(error)">
-        <UiSkeletonLayout layout="form" :header="false" />
-      </UiLoadingState>
+      <p v-else-if="settings.entityId && registry.length">
+        {{ t('settings.theProviderIsNoLongerAvailableIn') }}
+      </p>
       <div v-else class="settings-provider-empty">
         <h4>{{ t('settings.noProvidersFound') }}</h4>
         <p>{{ t('settings.clickRecheckToGetTheListOf') }}</p>
@@ -412,6 +420,7 @@ import { computed, ref, useId, watch } from 'vue';
 import ProviderIcon from '../../../shared/ProviderIcon.vue';
 import SettingsSection from '../SettingsSection.vue';
 import SettingsScope from '../SettingsScope.vue';
+import ProviderSettingsLoading from '../ProviderSettingsLoading.vue';
 import {
   UiTabs,
   UiTab,
@@ -474,6 +483,11 @@ const registry = computed(() => (providers.providers as ProviderEntry[]).map((en
   chatReadiness: providerChatReadiness(localizeProviderMetadata(entry, uiLocale.value), uiLocale),
 })));
 const selected = computed(() => registry.value.find((entry) => entry.id === settings.entityId));
+const activePage = computed(() => props.active && settings.isOpen && settings.pageId === 'agents.providers');
+const catalogState = ref<'loading' | 'ready' | 'failed'>('loading');
+const catalogError = ref('');
+const showCatalog = computed(() => registry.value.length > 0 || catalogState.value === 'ready');
+let catalogRead: Promise<void> | null = null;
 const cliActions = computed(() => selected.value ? providerCliActions(selected.value) : {
   selectedCopy: undefined,
   canUpdate: false,
@@ -623,6 +637,27 @@ async function refreshRegistry(): Promise<void> {
   } finally {
     refreshing.value = false;
   }
+}
+
+/**
+ * Холодный пустой снимок ещё не подтверждает отсутствие исполнителей.
+ * Запрос делится с другими читателями и не сбрасывает кэш сервера.
+ */
+function loadCatalog(): Promise<void> {
+  if (catalogRead) {
+    return catalogRead;
+  }
+
+  catalogState.value = 'loading';
+  catalogError.value = '';
+  catalogRead = providers.ensureRegistry().then((status) => {
+    catalogState.value = status.ok ? 'ready' : 'failed';
+    catalogError.value = status.message || '';
+  }).finally(() => {
+    catalogRead = null;
+  });
+
+  return catalogRead;
 }
 
 /**
@@ -783,21 +818,7 @@ async function reloadNative(): Promise<void> {
  * Открытие закрытой сессии не запускает чтение и не восстанавливает прежний ввод.
  */
 async function load(): Promise<void> {
-  if (!props.active || !settings.isOpen || settings.pageId !== 'agents.providers') {
-    return;
-  }
-
-  if (!providers.loaded) {
-    await providers.load();
-  }
-  if (!settings.entityId) {
-    if (registry.value[0] && !settings.navigationError) {
-      settings.selectPage('agents.providers', registry.value[0].id, settings.tabId);
-    }
-
-    return;
-  }
-  if (!selected.value) {
+  if (!activePage.value || !selected.value) {
     ready.value = false;
 
     return;
@@ -848,9 +869,18 @@ watch([() => props.active, () => settings.isOpen, () => providers.providers], ()
     }
   }
 }, { immediate: true });
-watch([() => props.active, () => settings.pageId, () => settings.entityId,
-  () => settings.tabId, () => settings.snapshot.sessionId,
-], load, { immediate: true });
+watch([activePage, () => registry.value.length > 0], ([active, hasEntries]) => {
+  if (active && !hasEntries) {
+    void loadCatalog();
+  }
+}, { immediate: true });
+watch([activePage, () => registry.value[0]?.id, () => settings.entityId], ([active, first, entity]) => {
+  if (active && first && !entity && !settings.navigationError) {
+    settings.selectPage('agents.providers', first, settings.tabId);
+  }
+}, { immediate: true });
+watch([activePage, () => selected.value?.id, () => settings.tabId, () => settings.snapshot.sessionId],
+  load, { immediate: true });
 watch(() => settings.entityId, () => {
   showNative.value = false;
   nativeQuery.value = '';
@@ -873,33 +903,8 @@ watch(showNative, async (open) => {
 </script>
 
 <style scoped>
-.settings-provider-general {
-  grid-column: 1 / -1;
-}
-
-.settings-provider {
-  display: grid;
-  grid-template-columns: 240px minmax(0, 1fr);
-  gap: 16px;
-  min-width: 0;
-  align-content: start;
-}
 .settings-provider > [role='alert'] {
-  grid-column: 1 / -1;
   margin: 0;
-}
-.settings-provider-sidebar {
-  display: grid;
-  align-content: start;
-  gap: 12px;
-  min-width: 0;
-  padding-right: 16px;
-  border-right: 1px solid var(--line);
-}
-.settings-provider-list {
-  display: grid;
-  gap: 16px;
-  min-width: 0;
 }
 /* Группы каталога подписаны тихо, как группы плагинов: это не разделы формы. */
 .settings-provider-list :deep(.settings-section-heading) {
@@ -908,19 +913,6 @@ watch(showNative, async (open) => {
 .settings-provider-list :deep(.settings-section-heading h4) {
   color: var(--ink-mid);
   font-size: 12px;
-}
-.settings-provider-options {
-  display: grid;
-  gap: 8px;
-  width: 100%;
-  min-width: 0;
-}
-.settings-provider-picker {
-  display: none;
-}
-.settings-provider-actions {
-  display: grid;
-  gap: 8px;
 }
 .settings-provider-install-actions {
   display: grid;
@@ -934,12 +926,6 @@ watch(showNative, async (open) => {
 }
 .settings-provider-install-actions:empty {
   display: none;
-}
-.settings-provider-editor {
-  display: grid;
-  align-content: start;
-  gap: 16px;
-  min-width: 0;
 }
 .settings-provider-editor > [data-settings-field] + [data-settings-field] {
   margin-top: -16px;
@@ -966,13 +952,6 @@ watch(showNative, async (open) => {
   font-size: 12px;
   line-height: 1.6;
 }
-.settings-provider-title {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 10px;
-  min-width: 0;
-}
 .settings-provider-title h4 {
   flex: 1 1 140px;
   margin: 0;
@@ -983,19 +962,6 @@ watch(showNative, async (open) => {
 .settings-provider-status {
   color: var(--ink-mid);
   font-size: 12px;
-}
-.settings-provider-facts {
-  display: grid;
-  gap: 0;
-  margin: 0;
-  font-size: 12px;
-}
-.settings-provider-facts > div {
-  display: grid;
-  grid-template-columns: minmax(100px, .7fr) minmax(0, 1fr);
-  gap: 16px;
-  padding: 12px 0;
-  border-bottom: 1px solid var(--line);
 }
 .settings-provider-facts dt {
   color: var(--ink-mid);
@@ -1032,28 +998,6 @@ watch(showNative, async (open) => {
 }
 .settings-provider-model code, .settings-provider-model span {
   color: var(--ink-mid);
-}
-@container settings-page (max-width: 680px) {
-  .settings-provider {
-    grid-template-columns: minmax(0, 1fr);
-    gap: 16px;
-  }
-  .settings-provider-sidebar {
-    gap: 10px;
-    padding: 0 0 16px;
-    border-right: 0;
-    border-bottom: 1px solid var(--line);
-  }
-  .settings-provider-list {
-    display: none;
-  }
-  .settings-provider-picker {
-    display: block;
-  }
-  .settings-provider-actions {
-    display: flex;
-    flex-wrap: wrap;
-  }
 }
 @container settings-page (max-width: 400px) {
   .settings-native-tools { grid-template-columns: minmax(0, 1fr); }
