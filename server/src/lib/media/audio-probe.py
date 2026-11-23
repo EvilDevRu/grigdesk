@@ -3,9 +3,8 @@
 # Одного импорта недостаточно: несовместимый PyAV падает только при чтении аудио.
 
 import io
+import os
 import wave
-
-from faster_whisper.audio import decode_audio
 
 
 def main():
@@ -24,9 +23,15 @@ def main():
         recording.writeframes(b'\x00\x00' * sample_count)
 
     audio.seek(0)
-    samples = decode_audio(audio, sampling_rate=sample_rate)
+    if os.environ.get('GRIGDESK_ANDROID_WHISPER_LIB'):
+        from android_whisper import check_engine, decode_audio
+        check_engine()
+        decoded_count = len(decode_audio(audio.getvalue())) // 2
+    else:
+        from faster_whisper.audio import decode_audio
+        decoded_count = len(decode_audio(audio, sampling_rate=sample_rate))
 
-    if len(samples) != sample_count:
+    if decoded_count != sample_count:
         raise RuntimeError('Декодер аудио вернул неверное число сэмплов')
 
 

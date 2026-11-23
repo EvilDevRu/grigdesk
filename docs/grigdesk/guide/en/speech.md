@@ -26,6 +26,10 @@ Browser and server recognition have different capabilities; unavailable recognit
 Presentation narration uses the voice package. Install Piper/Silero with the section’s button;
 cloud Qwen uses keys from the server environment. Choose a voice in the video editor.
 
+In the Android probe APK with a local machine, choose a model under Settings → Speech,
+select Install, and confirm. The model downloads to the device and runs offline on the CPU.
+To set up speech again later, choose Update.
+
 ## Related articles
 
 [Settings](settings.md) · [Tasks](tasks.md) · [Presentations](showcase.md)

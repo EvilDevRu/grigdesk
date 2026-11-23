@@ -5,6 +5,7 @@
 import argparse
 import ctypes
 import json
+import os
 import sys
 
 
@@ -48,6 +49,10 @@ def main():
     parser.add_argument('--model-revision', default=None)
     parser.add_argument('--model-alias', action='append', default=[])
     args = parser.parse_args()
+
+    if os.environ.get('GRIGDESK_ANDROID_WHISPER_LIB'):
+        answer('no_device', 'Android-окружение использует CPU')
+        return
 
     try:
         import ctranslate2

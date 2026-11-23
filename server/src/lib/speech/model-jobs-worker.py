@@ -148,6 +148,17 @@ def model_dir_name(repo: str) -> str:
 
 
 def download(task: dict[str, Any]) -> dict[str, Any]:
+    if os.environ.get('GRIGDESK_ANDROID_WHISPER_LIB'):
+        from android_whisper import install_model
+        model = task['model']
+        install_model(model['modelId'], progress=report_progress)
+        return {
+            'modelId': model['modelId'],
+            'repo': model['repo'],
+            'revision': model['revision'],
+            'cached': True,
+        }
+
     from huggingface_hub import HfApi, snapshot_download
     from huggingface_hub.constants import HF_HUB_CACHE
     from tqdm.auto import tqdm
@@ -229,6 +240,9 @@ def copy_tree(source: Path, destination: Path, total: int) -> None:
 
 
 def copy_cached(task: dict[str, Any], job_id: str) -> dict[str, Any]:
+    if os.environ.get('GRIGDESK_ANDROID_WHISPER_LIB'):
+        raise FileNotFoundError('У Android нет общего кэша GGML. Скачайте модель в настройках GrigDesk.')
+
     from huggingface_hub import snapshot_download
     from huggingface_hub.constants import HF_HUB_CACHE
 
@@ -320,14 +334,35 @@ def copy_cached(task: dict[str, Any], job_id: str) -> dict[str, Any]:
 
 
 def benchmark(task: dict[str, Any]) -> dict[str, Any]:
-    from faster_whisper import WhisperModel
-    from huggingface_hub import snapshot_download
-
     model = task["model"]
     options = task.get("benchmark") or {}
     audio = Path(task.get("benchmarkAudioPath") or "")
     if not audio.is_file():
         raise FileNotFoundError("эталонная запись benchmark не настроена")
+    language = options.get("language", "ru")
+    if os.environ.get('GRIGDESK_ANDROID_WHISPER_LIB'):
+        from android_whisper import open_model
+        started = time.perf_counter()
+        with open_model(model['modelId']) as whisper:
+            _, info = whisper.transcribe(str(audio), language=None if language == 'auto' else language)
+        elapsed = time.perf_counter() - started
+    else:
+        info, elapsed = benchmark_faster_whisper(model, options, audio, language)
+    return {
+        "modelId": model["modelId"],
+        "audioSec": round(float(info.duration or 0), 3),
+        "elapsedSec": round(elapsed, 3),
+        "realtimeFactor": (
+            round(elapsed / float(info.duration), 3) if float(info.duration or 0) > 0 else None
+        ),
+    }
+
+
+def benchmark_faster_whisper(model, options, audio, language):
+    """Измеряет загрузку локального снапшота и сбор сегментов на десктопе."""
+    from faster_whisper import WhisperModel
+    from huggingface_hub import snapshot_download
+
     snapshot = None
     last_snapshot_error = None
     for repo in [model["repo"], *(model.get("aliases") or [])]:
@@ -351,20 +386,11 @@ def benchmark(task: dict[str, Any]) -> dict[str, Any]:
         compute_type=options.get("computeType", "int8"),
         local_files_only=True,
     )
-    language = options.get("language", "ru")
     segments, info = whisper.transcribe(
         str(audio), language=None if language == "auto" else language,
     )
     list(segments)
-    elapsed = time.perf_counter() - started
-    return {
-        "modelId": model["modelId"],
-        "audioSec": round(float(info.duration or 0), 3),
-        "elapsedSec": round(elapsed, 3),
-        "realtimeFactor": (
-            round(elapsed / float(info.duration), 3) if float(info.duration or 0) > 0 else None
-        ),
-    }
+    return info, time.perf_counter() - started
 
 
 def error_code(exc: BaseException, kind: str) -> str:

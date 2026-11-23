@@ -110,10 +110,12 @@ export function inspectSpeechModelCache({
   mediaHfDir,
   verifiedSnapshots = [],
   catalog = SPEECH_MODEL_CATALOG,
+  modelFiles = ['model.bin', 'config.json', 'tokenizer.json'],
 }: {
   mediaHfDir?: string;
   verifiedSnapshots?: VerifiedSnapshot[];
   catalog?: Record<string, SpeechModel>;
+  modelFiles?: string[];
 } = {}): SpeechModelStatus[] {
   if (!mediaHfDir) throw new TypeError('mediaHfDir обязателен для проверки моделей');
   return Object.values(catalog).map((model) => {
@@ -123,9 +125,7 @@ export function inspectSpeechModelCache({
       verified?.cached
       && snapshot
       && isInside(mediaHfDir, snapshot)
-      && existsSync(path.join(snapshot, 'model.bin'))
-      && existsSync(path.join(snapshot, 'config.json'))
-      && existsSync(path.join(snapshot, 'tokenizer.json')),
+      && modelFiles.every((file) => existsSync(path.join(snapshot, file))),
     );
     const bytes = cached ? directoryBytes(String(snapshot)) : 0;
     const status: SpeechModelStatus = {
@@ -308,6 +308,7 @@ export async function probeSpeechModelCache({
     mediaHfDir,
     verifiedSnapshots: payload.models,
     catalog,
+    modelFiles: env?.GRIGDESK_ANDROID_WHISPER_LIB ? ['model.bin'] : undefined,
   });
 }
 

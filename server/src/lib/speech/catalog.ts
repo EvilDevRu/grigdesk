@@ -1,3 +1,5 @@
+import androidModels from './android-models.json' with { type: 'json' };
+
 // Единственный allowlist локальных моделей речи. Полная ревизия не даёт обновлению
 // faster-whisper незаметно подменить веса под прежним коротким именем модели.
 
@@ -19,7 +21,7 @@ function model(
   return Object.freeze({ modelId, repo, revision, aliases: Object.freeze([...aliases]) });
 }
 
-export const SPEECH_MODEL_CATALOG = Object.freeze({
+const fasterWhisperModels = {
   small: model(
     'small',
     'Systran/faster-whisper-small',
@@ -41,14 +43,20 @@ export const SPEECH_MODEL_CATALOG = Object.freeze({
     '0a363e9161cbc7ed1431c9597a8ceaf0c4f78fcf',
     ['mobiuslabsgmbh/faster-whisper-large-v3-turbo'],
   ),
-});
+};
+
+export const SPEECH_MODEL_CATALOG = Object.freeze(process.env.GRIGDESK_ANDROID_WHISPER_LIB
+  ? Object.fromEntries(Object.keys(androidModels.files).map((id) => [
+    id, model(id, androidModels.repo, androidModels.revision),
+  ]))
+  : fasterWhisperModels);
 
 export const SPEECH_MODEL_IDS = Object.freeze(Object.keys(SPEECH_MODEL_CATALOG));
 
 export function speechModel(modelId: unknown): SpeechModel | null {
   const catalog = SPEECH_MODEL_CATALOG as Record<string, SpeechModel | undefined>;
 
-  return catalog[String(modelId)] || null;
+  return isSpeechModelId(modelId) ? catalog[modelId as string] ?? null : null;
 }
 
 export function isSpeechModelId(modelId: unknown): boolean {

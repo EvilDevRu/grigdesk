@@ -99,7 +99,7 @@ def word_payload(word, offset_seconds):
 
 def decode(model, args, request, numpy):
     pcm, start_byte, end_byte, offset_ms = read_pcm_window(request)
-    audio = numpy.frombuffer(pcm, dtype='<i2').astype(numpy.float32) / 32768.0
+    audio = pcm if numpy is None else numpy.frombuffer(pcm, dtype='<i2').astype(numpy.float32) / 32768.0
     language = None if args.lang == 'auto' else args.lang
     segments, info = model.transcribe(
         audio,
@@ -171,17 +171,21 @@ def main():
     args = parser.parse_args()
 
     try:
-        import numpy
-        from faster_whisper import WhisperModel
-        from huggingface_hub import snapshot_download
-
-        snapshot = resolve_snapshot(snapshot_download, args)
-        model = WhisperModel(
-            snapshot,
-            device=args.device,
-            compute_type=args.compute_type,
-            local_files_only=True,
-        )
+        if os.environ.get('GRIGDESK_ANDROID_WHISPER_LIB'):
+            from android_whisper import open_model
+            model = open_model(args.model)
+            numpy = None
+        else:
+            import numpy
+            from faster_whisper import WhisperModel
+            from huggingface_hub import snapshot_download
+            snapshot = resolve_snapshot(snapshot_download, args)
+            model = WhisperModel(
+                snapshot,
+                device=args.device,
+                compute_type=args.compute_type,
+                local_files_only=True,
+            )
         send({
             'type': 'ready',
             'nonce': args.nonce,

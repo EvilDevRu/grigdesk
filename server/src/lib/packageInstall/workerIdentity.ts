@@ -56,7 +56,15 @@ export async function liveGroupMembers(pgid: number): Promise<ProcessIdentity[]>
       continue;
     }
 
-    const current = await readProcessIdentity(Number(entry));
+    const current = await readProcessIdentity(Number(entry)).catch((error: NodeJS.ErrnoException) => {
+      // Android показывает чужие PID в /proc, но закрывает их stat.
+      // Чужой UID не вступает в отсоединённую группу команды приложения.
+      if (process.platform === 'android' && (error.code === 'EACCES' || error.code === 'EPERM')) {
+        return null;
+      }
+
+      throw error;
+    });
 
     if (current?.pgid === pgid && current.state !== 'Z' && current.state !== 'X') {
       members.push(current);

@@ -230,6 +230,10 @@ export function pythonEnv({ mediaHfDir, pythonPath = '', baseEnv = process.env }
   delete env.HUGGINGFACE_HUB_CACHE;
   env.HF_HOME = mediaHfDir;
   env.HF_XET_CACHE = path.join(mediaHfDir, 'xet');
+  if (env.GRIGDESK_ANDROID_SPEECH_MODULES) {
+    env.PYTHONPATH = env.GRIGDESK_ANDROID_SPEECH_MODULES;
+  }
+
   const sitePackages = sitePackagesDir(pythonPath);
   if (sitePackages) {
     const cublasLib = path.join(sitePackages, 'nvidia', 'cublas', 'lib');

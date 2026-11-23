@@ -108,10 +108,14 @@ def main() -> None:
 
     # Импорт внутри main: ошибка импорта попадёт в stderr с ненулевым кодом,
     # а не уронит парсер аргументов.
-    from faster_whisper import WhisperModel
-
-    model = load_model(WhisperModel, args)
-    hotwords_measure = measure_hotwords(model, args.hotwords)
+    if os.environ.get('GRIGDESK_ANDROID_WHISPER_LIB'):
+        from android_whisper import open_model
+        model = open_model(args.model)
+        hotwords_measure = {}
+    else:
+        from faster_whisper import WhisperModel
+        model = load_model(WhisperModel, args)
+        hotwords_measure = measure_hotwords(model, args.hotwords)
 
     language = None if args.lang == 'auto' else args.lang
     initial_prompt = args.initial_prompt or None

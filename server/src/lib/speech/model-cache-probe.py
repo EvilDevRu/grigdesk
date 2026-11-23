@@ -74,12 +74,13 @@ def main():
     parser.add_argument('--models-json', required=True)
     args = parser.parse_args()
     models = json.loads(args.models_json)
-    from huggingface_hub import snapshot_download
-    json.dump(
-        {'models': [inspect_model(snapshot_download, model) for model in models]},
-        sys.stdout,
-        ensure_ascii=False,
-    )
+    if os.environ.get('GRIGDESK_ANDROID_WHISPER_LIB'):
+        from android_whisper import inspect_model as inspect_android_model
+        results = [inspect_android_model(model['modelId']) for model in models]
+    else:
+        from huggingface_hub import snapshot_download
+        results = [inspect_model(snapshot_download, model) for model in models]
+    json.dump({'models': results}, sys.stdout, ensure_ascii=False)
 
 
 if __name__ == '__main__':

@@ -92,16 +92,21 @@ def main():
     args = parser.parse_args()
 
     try:
-        from faster_whisper import WhisperModel
-        from huggingface_hub import snapshot_download
-        snapshot = resolve_snapshot(snapshot_download, args)
-        model = WhisperModel(
-            snapshot,
-            device=args.device,
-            compute_type=args.compute_type,
-            local_files_only=True,
-        )
-        hotwords_measure = measure_hotwords(model, args.hotwords)
+        if os.environ.get('GRIGDESK_ANDROID_WHISPER_LIB'):
+            from android_whisper import open_model
+            model = open_model(args.model)
+            hotwords_measure = {}
+        else:
+            from faster_whisper import WhisperModel
+            from huggingface_hub import snapshot_download
+            snapshot = resolve_snapshot(snapshot_download, args)
+            model = WhisperModel(
+                snapshot,
+                device=args.device,
+                compute_type=args.compute_type,
+                local_files_only=True,
+            )
+            hotwords_measure = measure_hotwords(model, args.hotwords)
         send({'type': 'ready', 'nonce': args.nonce})
         line = sys.stdin.readline()
         if not line:

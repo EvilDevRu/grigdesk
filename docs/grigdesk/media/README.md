@@ -14,7 +14,7 @@
 - [Qwen Token Plan в voice: каталог голосов и языков, инструкции, ударения и потоковый WAV](voice-qwen-token-plan.md)
 
 - [Ссылки установки системных зависимостей речи](speech-dependency-links.md)
-- [Установка, обновление и удаление окружения Whisper через настройки](speech-installation.md)
+- [Установка Whisper, проверка PCM и модель GGML для локального Android](speech-installation.md)
 - [Встреча из нескольких файлов](multi-file-meetings.md)
 - [Кадр записи: превью до постановки и вложение к задаче](frame-preview-and-attachments.md)
 - [Кому и в какой проект](task-assignment.md)

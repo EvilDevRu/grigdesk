@@ -106,6 +106,13 @@ NativeLibraryDir — единственное рабочее место: на An
 
 ## Сборка probe APK на машине с Android SDK
 
+Для ARM64-кандидата с установкой речи пересоберите `assets/runtime.zip` из текущих
+исходников и соберите `libffmpeg.so`, `libffprobe.so` и `libgrigdesk_whisper.so`
+скриптом `build-speech.sh` с Android NDK, исходниками whisper.cpp и FFmpeg.
+Проверьте наличие всех трёх библиотек в `lib/arm64-v8a/` готового APK и файлов
+`android_whisper.py`, `android-models.json` и `roots.pem` в `assets/runtime.zip`.
+Холодная установка через настройки должна перейти от подготовки окружения к модели GGML.
+
 ~~~bash
 cd mobile/android
 ./gradlew :client:assembleProbe -I ../../tools/android/probe-apk/probe.init.gradle

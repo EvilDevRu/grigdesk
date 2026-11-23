@@ -189,7 +189,9 @@ public class LocalServerService extends Service {
             File runtime = new File(dataDir, "runtime");
             File bundle = new File(runtime, SERVER_BUNDLE);
             File python = preparePython(dataDir);
-            File tools = prepareNativeTools(dataDir, info, python != null);
+            File whisper = new File(info.nativeLibraryDir, "libgrigdesk_whisper.so");
+            boolean speech = python != null && whisper.isFile();
+            File tools = prepareNativeTools(dataDir, info, python != null, speech);
 
             home.mkdirs();
             projects.mkdirs();
@@ -218,6 +220,17 @@ public class LocalServerService extends Service {
             if (python != null) {
                 builder.environment().put("PYTHONHOME", python.getPath());
             }
+            if (speech) {
+                File speechResources = new File(runtime, "server/src/lib/speech");
+
+                builder.environment().put("GRIGDESK_ANDROID_WHISPER_LIB", whisper.getAbsolutePath());
+                builder.environment().put("GRIGDESK_ANDROID_SPEECH_MODULES", speechResources.getAbsolutePath());
+                builder.environment().put(
+                    "GRIGDESK_ANDROID_SPEECH_PYTHON", new File(tools, "python3").getAbsolutePath());
+                builder.environment().put(
+                    "GRIGDESK_ANDROID_SPEECH_CA", new File(speechResources, "roots.pem").getAbsolutePath());
+            }
+
             /**
              * Автономная поставка DeepSeek кладётся в nativeLibraryDir как libdeepseek.so:
              * W^X targetSdk 29+ запрещает исполнять ELF из каталога данных, а эту папку
@@ -257,7 +270,8 @@ public class LocalServerService extends Service {
      * Фабрика находит Bash и Git под штатными именами, а двоичные файлы остаются в APK.
      * Атомарная замена ссылки обновляет адрес при установке нового APK.
      */
-    private File prepareNativeTools(File dataDir, ApplicationInfo info, boolean python) throws IOException {
+    private File prepareNativeTools(File dataDir, ApplicationInfo info, boolean python, boolean speech)
+        throws IOException {
         File tools = new File(dataDir, "native-tools");
         Path directory = tools.toPath();
 
@@ -269,6 +283,10 @@ public class LocalServerService extends Service {
 
         if (python) {
             names.add("python3");
+        }
+        if (speech) {
+            names.add("ffmpeg");
+            names.add("ffprobe");
         }
         for (String name : names) {
             File library = new File(info.nativeLibraryDir, "lib" + name + ".so");

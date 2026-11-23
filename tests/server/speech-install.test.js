@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync,
-  writeFileSync,
+  readlinkSync, writeFileSync,
   symlinkSync,
 } from 'node:fs';
 import os from 'node:os';
@@ -353,6 +353,30 @@ test('UI установки речи: install/update/uninstall сохраняю�
   assert.equal(existsSync(fx.venv), false);
   assert.equal(readFileSync(cache, 'utf8'), 'сохранённая модель');
   assert.equal(fx.refreshed(), 3);
+});
+
+test('Android: явная установка подключает Python APK и запускает загрузку выбранной GGML', async (t) => {
+  const fx = installationFixture(t);
+  const nativePython = path.join(fx.directory, 'native-tools', 'python3');
+  const managedPython = path.join(fx.venv, 'bin', 'python');
+
+  mkdirSync(path.dirname(nativePython));
+  writeFileSync(nativePython, 'исполняемый файл из APK', { mode: 0o755 });
+  fx.config.env = { GRIGDESK_ANDROID_SPEECH_PYTHON: nativePython };
+
+  assert.equal((await fx.service.current()).installed, false);
+  assert.equal(fx.calls.length, 0);
+  await fx.service.start('install', undefined, 'small');
+
+  assert.equal((await installedOutcome(fx.service)).job.status, 'succeeded');
+  assert.equal(readlinkSync(managedPython), nativePython);
+  assert.deepEqual(fx.calls.map(({ file }) => file), [managedPython, 'ffmpeg', 'ffprobe', managedPython]);
+  assert.match(fx.calls.at(-1).args[1], /android_whisper/);
+  assert.equal(fx.calls.at(-1).args.at(-1), 'small');
+
+  await fx.service.start('uninstall');
+  assert.equal((await installedOutcome(fx.service)).installed, false);
+  assert.equal(existsSync(nativePython), true);
 });
 
 test('UI установки речи: занятость и повторный старт не создают вторую команду', async (t) => {

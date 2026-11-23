@@ -358,6 +358,14 @@ export class SpeechInstallationService {
    */
   private async installModel(model: SpeechModel): Promise<void> {
     await this.stage('model');
+    if (this.androidPython()) {
+      await this.command(this.python, [
+        '-c', 'import sys; from android_whisper import install_model; install_model(sys.argv[1])', model.modelId,
+      ]);
+
+      return;
+    }
+
     await this.command(this.python, ['-c', [
       'import json, runpy, sys',
       'from huggingface_hub import snapshot_download',
@@ -369,6 +377,30 @@ export class SpeechInstallationService {
       'from faster_whisper import WhisperModel',
       'WhisperModel(result["snapshotPath"], device="cpu", compute_type="int8", local_files_only=True)',
     ].join('\n'), JSON.stringify(model), MODEL_CACHE_PROBE_PY]);
+  }
+
+  private androidPython(): string | undefined {
+    return (this.options.env ?? process.env).GRIGDESK_ANDROID_SPEECH_PYTHON;
+  }
+
+  /**
+   * Android использует штатный Python из APK через стабильную ссылку native-tools.
+   * Каталог окружения нужен для явного включения и управляемого удаления.
+   */
+  private async activateAndroidPython(python: string): Promise<void> {
+    const bin = path.dirname(this.python);
+
+    await fs.mkdir(bin, { recursive: true });
+    await writeDurableFile(path.join(this.venv, 'pyvenv.cfg'), 'include-system-site-packages = false\n');
+
+    const next = path.join(bin, `.python-${randomUUID()}`);
+
+    try {
+      await fs.symlink(python, next);
+      await fs.rename(next, this.python);
+    } finally {
+      await fs.rm(next, { force: true });
+    }
   }
 
   /**
@@ -387,15 +419,28 @@ export class SpeechInstallationService {
 
         await fs.rm(this.venv, { recursive: true });
       } else {
-        await this.command('python3', ['-m', 'venv', this.venv]);
+        const androidPython = this.androidPython();
 
-        await this.stage('packages');
-        await this.installRequirements('requirements-media.txt');
-        await this.installCuda(cuda);
+        if (androidPython) {
+          if (cuda === true) {
+            throw new Error('На Android распознавание речи работает на CPU. Выберите авто или отключите CUDA.');
+          }
+
+          await this.activateAndroidPython(androidPython);
+        } else {
+          await this.command('python3', ['-m', 'venv', this.venv]);
+
+          await this.stage('packages');
+          await this.installRequirements('requirements-media.txt');
+          await this.installCuda(cuda);
+        }
+
         await this.stage('verification');
-        await this.command(this.python, [
-          '-c', 'import faster_whisper, ctranslate2, huggingface_hub, numpy',
-        ]);
+        if (!androidPython) {
+          await this.command(this.python, [
+            '-c', 'import faster_whisper, ctranslate2, huggingface_hub, numpy',
+          ]);
+        }
         await this.command(this.python, [AUDIO_PROBE_PY]);
         await this.command('ffmpeg', ['-version']);
         await this.command('ffprobe', ['-version']);
