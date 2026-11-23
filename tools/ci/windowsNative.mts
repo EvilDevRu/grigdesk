@@ -544,6 +544,29 @@ export async function verifyFirstLaunch(
     console.error(tree.slice(-8000));
     console.error(processes.slice(-4000));
 
+    // Пустой Server Data означает, что сервер не стартовал: отличаем неподготовленный
+    // runtime (нет node.exe/factory.exe/app.ts) от отказа spawn по журналу desktop.
+    const runtimeFiles = [
+      path.join(destination, 'server', 'runtime', 'node.exe'),
+      path.join(destination, 'server', 'bin', 'factory.exe'),
+      path.join(destination, 'server', 'src', 'app.ts'),
+    ];
+    const presence = await Promise.all(runtimeFiles.map(async (file) => {
+      const stat = await fs.stat(file).catch(() => null);
+
+      return `${file}: ${stat ? `exists ${stat.size}B` : 'MISSING'}`;
+    }));
+
+    console.error('installed runtime files:\n' + presence.join('\n'));
+
+    const windowData = path.join(work, 'Window Data').replaceAll("'", "''");
+    const desktopLogs = await execute('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command',
+      `Get-ChildItem -Recurse -Force '${windowData}' -Filter *.log -ErrorAction SilentlyContinue`
+      + ' | ForEach-Object { "=== " + $_.FullName + " ==="; Get-Content $_.FullName -Tail 60 }'],
+    { timeout: 20000, windowsHide: true }).then((r) => r.stdout).catch(() => 'no-desktop-logs');
+
+    console.error(desktopLogs.slice(-8000));
+
     throw error;
   } finally {
     if (child.exitCode === null) {
