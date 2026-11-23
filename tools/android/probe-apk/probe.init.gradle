@@ -41,6 +41,9 @@ allprojects {
                 packaging {
                     jniLibs {
                         useLegacyPackaging = true
+                        // Поставка DeepSeek — SEA: payload живёт в секциях ELF, и strip
+                        // может их удалить. Отключаем strip только для этого файла.
+                        keepDebugSymbols += '**/libdeepseek.so'
                     }
                 }
             }

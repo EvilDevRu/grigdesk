@@ -195,8 +195,16 @@ public class LocalServerService extends Service {
             projects.mkdirs();
             extractArchive("runtime.zip", runtime);
 
+            /**
+             * Ключи доступа лежат в файле env папки данных — тот же путь серверу
+             * показывает config.envPath, поэтому ручной файл и записи UI не
+             * расходятся. Флаг условный: до первого ключа файла просто нет.
+             */
+            File envFile = new File(home, "env");
+
             String node = new File(info.nativeLibraryDir, "libnode.so").getAbsolutePath();
-            ProcessBuilder builder = new ProcessBuilder(node, bundle.getAbsolutePath());
+            ProcessBuilder builder = new ProcessBuilder(
+                node, "--env-file-if-exists", envFile.getAbsolutePath(), bundle.getAbsolutePath());
 
             builder.directory(dataDir);
             builder.environment().put("HOME", dataDir.getAbsolutePath());
@@ -209,6 +217,17 @@ public class LocalServerService extends Service {
             builder.environment().put("TMPDIR", dataDir.getAbsolutePath());
             if (python != null) {
                 builder.environment().put("PYTHONHOME", python.getPath());
+            }
+            /**
+             * Автономная поставка DeepSeek кладётся в nativeLibraryDir как libdeepseek.so:
+             * W^X targetSdk 29+ запрещает исполнять ELF из каталога данных, а эту папку
+             * установщик распаковывает с правами исполнения. Серверу достаточно env-пути,
+             * код сервера и поставки не меняются.
+             */
+            File deepseekBinary = new File(info.nativeLibraryDir, "libdeepseek.so");
+
+            if (deepseekBinary.isFile()) {
+                builder.environment().put("GRIGDESK_DEEPSEEK_BIN", deepseekBinary.getAbsolutePath());
             }
             builder.environment().put(
                 "GRIGDESK_FACTORY_BIN", new File(info.nativeLibraryDir, "libfactory.so").getAbsolutePath());

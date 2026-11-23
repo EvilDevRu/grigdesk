@@ -38,6 +38,9 @@ Prices and models change; this guide does not fix prices. Harness primarily rest
 additional paths may require permission. Supported project MCP servers do not start in read-only mode.
 The distribution checks update/rollback compatibility. Operations with unknown outcomes are not repeated automatically.
 
+The model list may take a little longer to appear after you install or update Harness.
+On the first catalog refresh, GrigDesk extracts and verifies the new distribution.
+
 When GLM reports an exhausted Coding Plan quota, GrigDesk ends the turn without scheduling a one-minute continuation.
 Check the reset time in GLM limits and resume after recovery. The Z.ai response code identifies this failure
 even if Harness labels it a rate limit. Harness may perform its own retries before returning the final error.

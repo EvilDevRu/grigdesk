@@ -3,6 +3,10 @@ import { setTimeout as pause } from 'node:timers/promises';
 
 import { errorMessage } from '../../../../shared/lib/errors.ts';
 
+// Первый ответ Harness ждёт распаковку ELF и полную проверку холодного кэша.
+// Для каталогов и ACP-хода действует один ограниченный бюджет запуска.
+export const DEEPSEEK_BINARY_STARTUP_TIMEOUT_MS = 120_000;
+
 export interface BinaryProcessExit {
   code: number | null;
   signal: NodeJS.Signals | null;

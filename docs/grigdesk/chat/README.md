@@ -236,7 +236,7 @@
 - [Субагенты GLM: исследование наследования и пробелов прежнего корневого сторожа](glm-subagent-boundaries.md)
 - [Native-контракты делегирования GLM: child never, окончательный guard, каталог, страницы истории и remote owner](glm-delegation-contracts.md)
 - [MCP у GLM: только grigdesk-work, готовность до prompt, потеря без переподключения](glm-mcp.md)
-- [Каталог GLM: ACP-чтение без prompt, уровни по модели, glm-4.7 и glm-5-turbo без выбора](glm-catalog.md)
+- [Каталог GLM: ACP без prompt, холодный запуск ELF, уровни по модели](glm-catalog.md)
 - [Память GLM: привязка, проверка журнала перед resume, сброс и summary-сжатие](glm-session-memory.md)
 - [Стоп и падение GLM: cancel, ограниченное ожидание, kill своего процесса, без повтора эффекта](glm-stop-recovery.md)
 - [GLM в маршруте чата: auth guard, turnId и pending, режимы, знак и modelRef](glm-chat-route.md)

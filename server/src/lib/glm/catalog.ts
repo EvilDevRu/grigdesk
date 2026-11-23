@@ -8,6 +8,7 @@ import type { ChildProcess } from 'node:child_process';
 import { recordOrEmpty } from '../../../../shared/lib/objects.ts';
 
 import { createAcpClient, initializeAcp } from '../acp/client.ts';
+import { DEEPSEEK_BINARY_STARTUP_TIMEOUT_MS } from '../deepseek/binaryProcess.ts';
 import { ensurePrivateDir } from '../deepseek/env.ts';
 import { resolveDeepSeekRuntimeAsync } from '../deepseek/runtimeProcess.ts';
 import { glmRuntimeConfig } from './generation.ts';
@@ -163,7 +164,7 @@ export async function readGlmCatalog({
     const client = createAcpClient(child);
 
     try {
-      await initializeAcp(client, 15_000);
+      await initializeAcp(client, runtime.kind === 'binary' ? DEEPSEEK_BINARY_STARTUP_TIMEOUT_MS : 15_000);
 
       const created = recordOrEmpty(await client.request(
         'session/new', { cwd: project, mcpServers: [] }, 30_000

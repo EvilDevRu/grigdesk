@@ -29,3 +29,16 @@ if [[ -n ${GRIGDESK_ANDROID_USERLAND_BUILD:-} ]]; then
     sha256sum "$HERE/assets/$archive"
   done
 fi
+
+# Автономная поставка DeepSeek (android/arm64) кладётся в jniLibs как libdeepseek.so:
+# nativeLibraryDir — единственное место, откуда домен приложения вправе делать exec
+# (W^X targetSdk 29+ запрещает исполнение из каталога данных). GRIGDESK_ANDROID_DEEPSEEK_SUPPLY
+# указывает каталог кандидата (sea-bionic-fix/work) с ELF «deepseek». SEA несёт payload
+# внутри себя; strip отключается отдельно в probe.init.gradle, чтобы не тронуть SEA-блоб.
+if [[ -n ${GRIGDESK_ANDROID_DEEPSEEK_SUPPLY:-} ]]; then
+  elf="$GRIGDESK_ANDROID_DEEPSEEK_SUPPLY/deepseek"
+
+  test -f "$elf"
+  cp -f -- "$elf" "$HERE/jniLibs/arm64-v8a/libdeepseek.so"
+  sha256sum "$HERE/jniLibs/arm64-v8a/libdeepseek.so"
+fi

@@ -6,7 +6,11 @@ import type { AcpClient } from '../acp/client.ts';
 import { createAcpClient, initializeAcp } from '../acp/client.ts';
 import type { DeepSeekRuntimeDescriptor } from './runtimeProcess.ts';
 import { verifyDeepSeekRuntimeDescriptorAsync } from './runtimeProcess.ts';
-import { combineDeepSeekCleanupFailure, spawnDeepSeekBinary } from './binaryProcess.ts';
+import {
+  combineDeepSeekCleanupFailure,
+  DEEPSEEK_BINARY_STARTUP_TIMEOUT_MS,
+  spawnDeepSeekBinary,
+} from './binaryProcess.ts';
 
 export interface DeepSeekSettingsRpc {
   rpc(method: string, args?: unknown, timeoutMs?: number, signal?: AbortSignal): Promise<unknown>;
@@ -19,7 +23,7 @@ export interface DeepSeekSettingsRpc {
 export async function initializeDeepSeekAcp(client: AcpClient, signal?: AbortSignal): Promise<unknown> {
   signal?.throwIfAborted();
 
-  return initializeAcp(client, 120_000);
+  return initializeAcp(client, DEEPSEEK_BINARY_STARTUP_TIMEOUT_MS);
 }
 
 /**

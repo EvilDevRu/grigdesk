@@ -14,7 +14,11 @@ import {
   verifyDeepSeekRuntimeDescriptorAsync,
 } from './runtimeProcess.ts';
 import type { DeepSeekRuntimeConfig } from './runtimeProcess.ts';
-import { combineDeepSeekCleanupFailure, spawnDeepSeekBinary } from './binaryProcess.ts';
+import {
+  combineDeepSeekCleanupFailure,
+  DEEPSEEK_BINARY_STARTUP_TIMEOUT_MS,
+  spawnDeepSeekBinary,
+} from './binaryProcess.ts';
 
 interface SelectOption {
   value?: unknown;
@@ -200,7 +204,7 @@ export async function readDeepSeekCatalog({
   let primaryFailure: unknown;
 
   try {
-    await initializeAcp(client, 10_000);
+    await initializeAcp(client, owned ? DEEPSEEK_BINARY_STARTUP_TIMEOUT_MS : 10_000);
     const created = await client.request('session/new', {
       cwd: projectRoot,
       mcpServers: [],

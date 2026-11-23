@@ -69,6 +69,41 @@ GRIGDESK_ANDROID_USERLAND_BUILD="$P/probe3-userland/build" \
 worktree на устройстве. Bionic Python с полной stdlib прошёл `forkpty` в процессе
 приложения. Профиль Qwen и весь комплект на x86_64 требуют отдельного прогона.
 
+## Поставка DeepSeek в probe APK
+
+Автономный ELF DeepSeek Harness (android/arm64) кладётся в
+`jniLibs/arm64-v8a/libdeepseek.so`. Передайте сборщику каталог готового кандидата:
+
+~~~bash
+GRIGDESK_ANDROID_DEEPSEEK_SUPPLY="/путь/к/кандидату" \
+  bash tools/android/probe-apk/build-server-bundle.sh
+~~~
+
+`LocalServerService` указывает его серверу через `GRIGDESK_DEEPSEEK_BIN`.
+NativeLibraryDir — единственное рабочее место: на Android 10+ домен
+приложения получает EACCES на exec из собственного каталога данных
+(проверено на планшете: карточки дают `deepseek_binary_not_executable`),
+а библиотеки установщик распаковывает исполнимыми. `probe.init.gradle`
+отключает strip для этого файла: payload SEA живёт в секциях ELF.
+Целостность проверяется сравнением SHA-256 ELF в APK с кандидатом.
+
+Поставка включает `node-pty` и `koffi` для Bionic и `sharp-wasm32` с полным набором
+зависимостей. Для `sharp-wasm32` 0.35.3 нужны `@emnapi/runtime` 1.11.3 и `tslib` 2.8.1
+из lock-файла Harness. Worker использует упаковочный `libnode.so` из nativeLibraryDir.
+До пересчёта identity ARM64-поколения примените `patch-harness-journal.mjs` к его
+абсолютному пути. Он переводит атомарную публикацию журналов на Bionic `renameat2`
+с `RENAME_NOREPLACE`. Синхронизация файла и каталога остаётся частью контракта Harness.
+
+На Android 16 ARM64 прошли `--runtime-info --json` и холодный `--verify`.
+Для проверки полного дерева плагинов запустите чтение обеих карточек через
+`GET /api/providers?refresh=1` и дождитесь непустых списков моделей. Готовый ELF
+в карточке подтверждает установку. Чтобы открыть каталоги, задайте `DEEPSEEK_API_KEY`,
+допущенный `GRIGDESK_GLM_API_MODE` и ключ этого режима. Каталог не отправляет `session/prompt`.
+
+После установки исправленной поставки на физический Android 16 ARM64 первый запрос
+к серверу вернул 4 модели DeepSeek и 7 моделей GLM (`api`) за 34 с. Повторное чтение
+получило те же списки. Проверка каталога прошла без модельного запроса.
+
 ## Сборка probe APK на машине с Android SDK
 
 ~~~bash
