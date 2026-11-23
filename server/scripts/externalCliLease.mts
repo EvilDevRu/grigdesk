@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { fstatSync, promises as fs } from 'node:fs';
+import { closeSync, createReadStream, fstatSync, promises as fs, writeSync } from 'node:fs';
 import path from 'node:path';
 import { setTimeout as pause } from 'node:timers/promises';
 import { once } from 'node:events';
@@ -25,7 +25,10 @@ import {
  * Стадийный протокол передаёт статус и события отдельными fd выше 2.
  * Хелпер обязан пропустить их в CLI, иначе factory-стадия теряет отчёт инструмента.
  */
-async function inheritedStdio(): Promise<StdioOptions> {
+async function inheritedStdio(graphPermit = false): Promise<StdioOptions> {
+  if (graphPermit) {
+    return ['inherit', 'inherit', 'inherit'];
+  }
   if (process.platform === 'darwin') {
     const inherited: StdioOptions = ['inherit', 'inherit', 'inherit'];
 
@@ -50,6 +53,43 @@ async function inheritedStdio(): Promise<StdioOptions> {
 
   return Array.from({ length: max + 1 }, (_, fd) =>
     fd < 3 || fds.includes(fd) ? 'inherit' : 'ignore');
+}
+
+
+/**
+ * Графовый scope сообщает свою identity по fd 11 и ждёт единственный permit byte.
+ * EOF, посторонние байты и тайм-аут прекращают запуск до вызова провайдера.
+ */
+async function graphPermitHandshake(): Promise<boolean> {
+
+  try {
+    writeSync(11, JSON.stringify({ pid: process.pid }) + '\n');
+  } catch {
+    return false;
+  }
+  const stream = createReadStream('', { fd: 10, autoClose: true });
+  const timer = new AbortController();
+
+  try {
+    const byte = await Promise.race([
+      new Promise<number>((resolve) => {
+        stream.once('data', (chunk: string | Buffer) => {
+          const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+
+          resolve(buffer.length > 0 ? buffer[0]! : -1);
+        });
+        stream.once('end', () => resolve(-1));
+        stream.once('error', () => resolve(-1));
+      }),
+      pause(5000, undefined, { signal: timer.signal }).then(() => -1).catch(() => -1),
+    ]);
+
+    return byte === 1;
+  } finally {
+    timer.abort();
+    stream.destroy();
+    try { closeSync(11); } catch { /* уже закрыт */ }
+  }
 }
 
 /** Отдельная сессия CLI принимает сигнал только по подтверждённым участникам. */
@@ -85,6 +125,7 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
   let providerId = '';
   let resourceKey = '';
   let chatKey: string | null = null;
+  let graphPermit = false;
   let index = 0;
 
   for (; index < argv.length; index += 2) {
@@ -93,6 +134,13 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
 
     if (flag === '--' || flag === undefined) {
       break;
+    }
+    if (flag === '--graph-permit') {
+      if (value !== '1') {
+        return 2;
+      }
+      graphPermit = true;
+      continue;
     }
     if (!['--lease-dir', '--provider', '--resource', '--job'].includes(flag)
       || typeof value !== 'string') {
@@ -141,11 +189,35 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
     setsid = tools.FACTORY_DARWIN_SETSID!;
   } else {
     const stat = await fs.readFile(`/proc/${process.pid}/stat`, 'utf8');
+    const fields = stat.slice(stat.lastIndexOf(')') + 2).split(/\s+/u);
 
-    sessionId = Number(stat.slice(stat.lastIndexOf(')') + 2).split(/\s+/u)[3]);
+    sessionId = Number(fields[3]);
+    if (graphPermit) {
+      const info = await fs.stat('/proc/self');
+
+      if (Number(fields[2]) !== process.pid || sessionId !== process.pid
+        || info.uid !== process.getuid!()) {
+        process.stderr.write('GrigDesk: graph_permit_session_invalid\n');
+        return 78;
+      }
+    }
   }
 
-  const stdio = await inheritedStdio();
+  if (graphPermit && darwin && owner && (owner.pid !== process.pid || owner.sid !== process.pid)) {
+    process.stderr.write('GrigDesk: graph_permit_session_invalid\n');
+    return 78;
+  }
+
+  if (graphPermit) {
+    const permitted = await graphPermitHandshake();
+
+    if (!permitted) {
+      process.stderr.write('GrigDesk: graph_permit_denied\n');
+      return 78;
+    }
+  }
+
+  const stdio = await inheritedStdio(graphPermit);
   const lease = await acquireCliLease({
     directory,
     providerId,

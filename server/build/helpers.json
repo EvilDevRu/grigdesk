@@ -32,6 +32,13 @@
       "description": "Host-side привязка runtime до active pointer новой попытки."
     },
     {
+      "id": "graph-workflow-model",
+      "entry": "server/src/lib/graphWorkflowModelHelper.ts",
+      "entryKind": "main",
+      "exports": ["main"],
+      "description": "Владеет модельной выдачей графового конвейера и сохраняет её результат."
+    },
+    {
       "id": "launch-sea-server",
       "entry": "server/scripts/launchSeaServer.mts",
       "entryKind": "main",

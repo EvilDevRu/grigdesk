@@ -12,11 +12,60 @@ interface AdapterOptions {
 
 const origins = new WeakMap<object, { adapter: ExecutorAdapter; options: AdapterOptions }>();
 
+export interface ExecutorAccessInput {
+  snapshot: SelectedAccess['snapshot'];
+  env: SelectedAccess['env'];
+  keys: SelectedAccess['keys'];
+  profile: Pick<SelectedAccess['profile'], 'id' | 'mode' | 'accountGeneration' | 'memoryGeneration'>;
+}
+
+type AccessSelection = ExecutorAccessInput & Pick<SelectedAccess, 'isCurrent'>;
+
+/**
+ * Подготавливает снимок в сервере, где установлен сервис профилей.
+ * Секреты передаются помощнику только по приватному stdin.
+ */
+export async function captureExecutorAccess(adapter: ExecutorAdapter, config: AccessConfig) {
+  const origin = origins.get(adapter);
+  const service = origin?.options.service ?? accessService(origin?.options.config ?? config);
+
+  if (!origin || !service) {
+    throw new Error('access_profile_unavailable');
+  }
+  const selection = await service.select(adapter.id);
+
+  if (!selection) {
+    throw new Error('access_profile_unavailable');
+  }
+  const { snapshot, env, keys, release } = selection;
+  const { id, mode, accountGeneration, memoryGeneration } = selection.profile;
+  const access: ExecutorAccessInput = {
+    snapshot, env, keys, profile: { id, mode, accountGeneration, memoryGeneration },
+  };
+
+  return { access, release };
+}
+
+/**
+ * Восстанавливает фасад выбранного профиля из доверенного входа помощника.
+ * Этот вызов сохраняет тот же аккаунт до закрытия выданного задания.
+ */
+export function executorWithCapturedAccess(adapter: ExecutorAdapter, access: ExecutorAccessInput) {
+  const origin = origins.get(adapter);
+
+  if (!origin) {
+    throw new Error('access_profile_unavailable');
+  }
+
+  return selectedAdapter(origin.adapter, { ...access, isCurrent: async () => true });
+}
+
+
 /**
  * Отказ доступа наблюдается и у заранее зарезервированного хода, и у живой сессии.
  * Снимок связывает ошибку с прежней ревизией, не затрагивая последующий повторный вход.
  */
-async function withSelectedAccess<T>(adapter: ExecutorAdapter, selection: SelectedAccess,
+async function withSelectedAccess<T>(adapter: ExecutorAdapter, selection: AccessSelection,
   service: AccessProfileService | undefined, action: () => T): Promise<Awaited<T>> {
   try {
     return await withAccessEnvironment(selection.env, action, selection.isCurrent, selection.keys);
@@ -35,7 +84,7 @@ async function withSelectedAccess<T>(adapter: ExecutorAdapter, selection: Select
  * Служебное окружение хода сохраняет транспорт инструментов и параметры runtime.
  * Поля доступа поверх него всегда задаёт серверный снимок, включая удаление чужих ключей.
  */
-function runtimeEnvironment(selection: SelectedAccess, supplied?: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+function runtimeEnvironment(selection: AccessSelection, supplied?: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   const env = { ...selection.env };
 
   for (const [key, value] of Object.entries(supplied ?? {})) {
@@ -59,7 +108,7 @@ function runtimeEnvironment(selection: SelectedAccess, supplied?: NodeJS.Process
  * Выбранный профиль применяется после входного env, включая session.open.
  * Сам снимок безопасен для метаданных; секреты остаются только в серверном окружении.
  */
-function selectedAdapter(adapter: ExecutorAdapter, selection: SelectedAccess,
+function selectedAdapter(adapter: ExecutorAdapter, selection: AccessSelection,
   service?: AccessProfileService): ExecutorAdapter {
   const capability = adapter.accessProfiles as AccessCapability;
   const result: ExecutorAdapter = { ...adapter };

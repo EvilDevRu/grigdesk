@@ -106,6 +106,29 @@ The Go factory in the Linux x64 package supports both actions. Settings saved
 during a launch take effect the next time that stage runs.
 History remains available when the editor is unavailable.
 
+## Graph runs
+
+The "Graph runs" block shows history and a "Launch route" button. Choose a template and
+files: up to 20 .txt/.md documents or one .txt/.json transcript, up to 64 KiB per file and
+256 KiB total. For a model step, choose a compatible Codex or Claude model. Each step uses
+the executor's active access profile when it is dispatched. Model steps are available on
+Linux and macOS. Windows can run routes made of local steps and gates. If a launch response
+is lost, submit the same selection again in the open form to recover the same run.
+
+The live graph updates node states and join edges while keeping zoom and selection.
+A group shows completed, active, failed and pending steps. Branches start according to
+the saved [route parallelism setting](routes.md#graph-routes).
+At a gate, read all displayed rows. After a recalculation, wait for the new version to load
+before deciding. "Return with comment" recalculates the chosen branch, including inside a
+subflow, and gives the comment to new model calls. When the preview exceeds its size limit,
+the node shows the reason and approval is unavailable. Use "Show more" to page through the
+result. A source marker opens the exact input line or timecode.
+
+Accepted results survive a server restart. An empty task list is a successful result.
+If a call is interrupted or fails, the node details show the reason. "Retry stage" runs
+that node again and reuses finished results. If all 32 active slots are occupied,
+a run stays paused until capacity becomes available.
+
 ## Result
 
 Cards and documents show actual progress and verification. An agent finishing is not acceptance or delivery.

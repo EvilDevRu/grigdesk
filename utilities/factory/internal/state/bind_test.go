@@ -18,6 +18,12 @@ func TestMain(m *testing.M) {
 	if mode := os.Getenv("FACTORY_TEST_STAGE_CHILD"); mode != "" {
 		os.Exit(runStageFixture(mode))
 	}
+	if os.Getenv("FACTORY_TEST_GRAPH_MODEL_RPC") == "1" {
+		os.Exit(runGraphModelRPC())
+	}
+	if os.Getenv("FACTORY_TEST_GRAPH_MODEL_CHILD") == "1" {
+		os.Exit(runGraphModelChild())
+	}
 	os.Exit(m.Run())
 }
 

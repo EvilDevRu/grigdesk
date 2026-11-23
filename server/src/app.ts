@@ -146,6 +146,7 @@ import chatModule from './modules/chat/index.ts';
 import settingsModule from './modules/settings/index.ts';
 import terminalModule from './modules/terminal/index.ts';
 import routesModule from './modules/routes/index.ts';
+import graphWorkflowsModule from './modules/graphWorkflows/index.ts';
 import providersModule from './modules/providers/index.ts';
 import usageForecastModule from './modules/usage-forecast/index.ts';
 import analysisModule from './modules/analysis/index.ts';
@@ -1429,6 +1430,10 @@ async function build(desktopParent: DesktopParent | null) {
   });
   await fastify.register(terminalModule);
   await fastify.register(routesModule, { config, prefs });
+  await fastify.register(graphWorkflowsModule, {
+    config,
+    providerSettings: () => (prefs.read().providerSettings || {}) as Record<string, Record<string, unknown>>,
+  });
   await fastify.register(providersModule, { config, claudeAuth, prefs });
   // Прогноз лимитов слушает тик providers по SSE, поэтому регистрируется следом за ним.
   await fastify.register(usageForecastModule, { filePath: config.usageForecastPath });

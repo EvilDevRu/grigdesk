@@ -4,6 +4,7 @@ import path from 'node:path';
 import { build as esbuildBuild } from 'esbuild';
 import ts from 'typescript';
 
+import { createRegistryPlugin } from './bundle.mts';
 import { createRuntimeContextPlugin } from './context.mts';
 import { createModuleUrlsPlugin } from './moduleUrls.mts';
 
@@ -297,7 +298,10 @@ export async function buildHelper(input: BuildHelperInput): Promise<BuiltHelper>
     packages: 'external',
     sourcemap: false,
     logLevel: 'silent',
-    plugins: [createRuntimeContextPlugin(input.root, 'helper'), moduleUrls.plugin],
+    plugins: [
+      ...(helper.id === 'graph-workflow-model' ? [createRegistryPlugin(input.root)] : []),
+      createRuntimeContextPlugin(input.root, 'helper'), moduleUrls.plugin,
+    ],
   });
 
   if (result.warnings.length > 0) {

@@ -15,8 +15,40 @@
           <UiCreateButton v-if="profile" data-test="create-draft" :disabled="!pageReady"
                           :label="currentHash ? t('core.routeSozdatChernovikIzCurrent') : t('core.routeSozdatChernovik')"
                           @click="createEditorDraft" />
+          <UiButton data-open-graph-editor variant="ghost" @click="openGraphEditor">{{ t('core.workflowOpenEditor') }}</UiButton>
         </template>
       </UiPaneHeader>
+      <UiDialog v-model:open="graphDialogOpen" size="workspace" :title="t('core.workflowEditorTitle')">
+        <div class="graph-workflow-catalog">
+          <UiTabs v-model="graphTab" size="compact" :label="t('core.workflowEditorTitle')">
+            <UiTab value="new">{{ t('core.workflowNewRoute') }}</UiTab>
+            <UiTab value="templates">{{ t('core.workflowTemplatesTab') }}</UiTab>
+            <UiTab value="own">{{ t('core.workflowOwnTab') }}</UiTab>
+          </UiTabs>
+          <ul v-if="graphTab !== 'new'" class="graph-workflow-catalog__list">
+            <li v-for="item in graphCatalog" :key="item.id">
+              <button type="button" :data-workflow-template="item.id" @click="openGraphTemplate(item.id)">{{ item.title }}</button>
+              <UiButton variant="ghost" :data-workflow-launch-template="item.id" @click="launchGraphTemplate(item.id)">
+                {{ t('core.workflowLaunch') }}
+              </UiButton>
+            </li>
+          </ul>
+          <UiButton v-if="graphTab === 'new'" data-workflow-new @click="newGraphDocument">{{ t('core.workflowNewRoute') }}</UiButton>
+        </div>
+        <GraphWorkflowEditor
+          v-if="graphDocument"
+          :document="graphDocument"
+          :busy="graphBusy"
+          :conflict="graphConflict"
+          :server-error="graphServerError"
+          @save="saveGraphDocument"
+          @save-copy="saveGraphCopy"
+          @reload="reloadGraphDocument"
+        />
+        <template #footer>
+          <UiButton variant="ghost" @click="closeGraphEditor">{{ t('core.workflowClose') }}</UiButton>
+        </template>
+      </UiDialog>
       <div class="catalog-content">
         <ProjectSwitcher compact :profiles="activeProfiles" :model-value="profile"
                          @update:model-value="switchProfile" @create="openProjectCreate" @manage="manageProject" />
@@ -349,6 +381,7 @@ import { routesApi } from '../shared/routesApi.ts';
 import type { DraftCreateRequest } from '../shared/routesApi.ts';
 import {
   UiButton,
+  UiDialog,
   UiIconButton,
   UiCreateButton,
   UiInlineMessage,
@@ -364,6 +397,10 @@ import {
 import { useUiContextSource } from '../composables/useUiContextSource.ts';
 import ProjectSwitcher from '../features/projects/ProjectSwitcher.vue';
 import FactoryGraph from './pipeline/FactoryGraph.vue';
+import GraphWorkflowEditor from './routes/GraphWorkflowEditor.vue';
+import { useGraphWorkflowsStore } from '../stores/graphWorkflows.ts';
+import type { Workflow } from '../../../shared/pipeline/graphWorkflowContracts.ts';
+import type { WorkflowTemplateHeader } from '../stores/graphWorkflows.ts';
 import RouteCatalog from './routes/RouteCatalog.vue';
 import RouteBootstrapEditor from './routes/RouteBootstrapEditor.vue';
 import RouteDraftPanel from './routes/RouteDraftPanel.vue';
@@ -507,6 +544,116 @@ const helpPanel = computed(() => t('core.routeChernovikMozhnoRedaktirovatI'));
 const helpRevisions = computed(() => t('core.routeReviziyaSlepokKatalogaAdresuemyy'));
 
 const router = useRouter();
+const graphStore = useGraphWorkflowsStore();
+const graphDialogOpen = ref(false);
+const graphTab = ref<'new' | 'templates' | 'own'>('templates');
+const graphDocument = ref<Workflow | null>(null);
+const graphTemplateId = ref<string | null>(null);
+const graphExpectedRevision = ref<string | null>(null);
+const graphBusy = ref(false);
+const graphConflict = ref(false);
+const graphServerError = ref<string | null>(null);
+
+const graphCatalog = computed<WorkflowTemplateHeader[]>(() => graphStore.templates.filter((item) =>
+  graphTab.value === 'templates' ? item.builtIn : !item.builtIn));
+
+/**
+ * Графовый каталог доступен и при пустом списке проектов Git.
+ * Открытие диалога читает шаблоны без загрузки проектных черновиков.
+ */
+function openGraphEditor(): void {
+  graphDialogOpen.value = true;
+  void graphStore.loadTemplates().catch(() => {});
+}
+
+/**
+ * Форма сбрасывается к пустому документу без ID и ревизии.
+ * Первое сохранение создаст новый собственный шаблон.
+ */
+function newGraphDocument(): void {
+  graphTemplateId.value = null;
+  graphExpectedRevision.value = null;
+  graphConflict.value = false;
+  graphServerError.value = null;
+  graphDocument.value = {
+    title: '',
+    inputKind: 'documents',
+    scope: {
+      steps: [],
+      returns: [],
+    },
+  };
+}
+
+/**
+ * Встроенный шаблон открывается копией без ID: сохранение всегда создаёт документ.
+ * Свой маршрут открывается со своим ID и текущей ревизией.
+ */
+async function openGraphTemplate(id: string): Promise<void> {
+  try {
+    const value = await graphStore.loadTemplateDocument(id);
+
+    graphConflict.value = false;
+    graphServerError.value = null;
+    graphTemplateId.value = value.builtIn ? null : value.id;
+    graphExpectedRevision.value = value.builtIn ? null : value.revision;
+    graphDocument.value = value.document as Workflow;
+  } catch (caught) {
+    graphServerError.value = failureText(caught);
+  }
+}
+
+/**
+ * Сохранение шлёт ожидаемую ревизию и принимает новые ID с ревизией.
+ * Конфликт 409 поднимает панель конфликта, прочая ошибка — текст сервера.
+ */
+async function saveGraphDocument(document: Workflow): Promise<void> {
+  graphBusy.value = true;
+  graphConflict.value = false;
+  graphServerError.value = null;
+
+  try {
+    const value = await graphStore.saveTemplate({
+      id: graphTemplateId.value,
+      expectedRevision: graphExpectedRevision.value,
+      document,
+    });
+
+    graphTemplateId.value = value.id;
+    graphExpectedRevision.value = value.revision;
+    graphDocument.value = document;
+  } catch (caught) {
+    if (caught instanceof Error && 'status' in caught && (caught as { status: number }).status === 409) {
+      graphConflict.value = true;
+    } else {
+      graphServerError.value = failureText(caught);
+    }
+  } finally {
+    graphBusy.value = false;
+  }
+}
+
+async function saveGraphCopy(document: Workflow): Promise<void> {
+  graphTemplateId.value = crypto.randomUUID();
+  graphExpectedRevision.value = null;
+  await saveGraphDocument(document);
+}
+
+async function reloadGraphDocument(): Promise<void> {
+  if (graphTemplateId.value) {
+    await openGraphTemplate(graphTemplateId.value);
+  }
+}
+
+function launchGraphTemplate(id: string): void {
+  graphDialogOpen.value = false;
+  void router.push({ path: '/pipeline', query: { workflow: id } });
+}
+
+function closeGraphEditor(): void {
+  graphDialogOpen.value = false;
+}
+
 const routesContext = useUiContextSource('routes', { layer: 'page', active: false });
 
 watch([profile, selectedRoute], ([project, route], previous) => {

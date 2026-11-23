@@ -199,13 +199,14 @@ export function parseMeetingPlan(
 export function meetingTaskDraft(
   task: MeetingPlanTask,
   segments: MeetingSegment[] = [],
+  appendTimecode = true,
 ): MeetingTaskDraft {
   const marks = task.segments
     .map((index) => segments[index - 1])
     .filter((segment): segment is MeetingSegment => Boolean(segment))
     .map((segment) => timecode(segment.start));
   const unique = [...new Set(marks)];
-  const source = unique.length ? `На записи: ${unique.join(', ')}` : '';
+  const source = appendTimecode && unique.length ? `На записи: ${unique.join(', ')}` : '';
   return {
     title: task.title,
     description: [task.description, source].filter(Boolean).join('\n\n'),
@@ -228,6 +229,8 @@ export async function runMeetingPlan({
   log = console,
   signal,
   resolveTarget = resolveInboxTriageTarget,
+  appendTimecode = true,
+  invoke = <T>(action: () => T) => action(),
 }: {
   segments?: MeetingSegment[];
   modelRef?: unknown;
@@ -237,6 +240,8 @@ export async function runMeetingPlan({
   log?: LogPort;
   signal?: AbortSignal;
   resolveTarget?: typeof resolveInboxTriageTarget;
+  appendTimecode?: boolean;
+  invoke?: <T>(action: () => T) => T;
 } = {}): Promise<MeetingPlanResult> {
   const prompt = buildMeetingPlanPrompt(segments, { hint });
   if (!prompt.count) return { ok: false, error: 'empty_transcript' };
@@ -249,7 +254,9 @@ export async function runMeetingPlan({
   const { provider, model } = target.ref;
   let output: { reply?: unknown };
   try {
-    output = await target.executor.runUntrusted({
+    const run = target.executor.runUntrusted;
+
+    output = await invoke(() => run.call(target.executor, {
       config,
       message: `${prompt.system}\n\n${prompt.user}`,
       model,
@@ -260,7 +267,7 @@ export async function runMeetingPlan({
       providerSettings: providerSettings?.[provider] || {},
       log,
       signal,
-    });
+    }));
   } catch (error) {
     // Причина обязана попасть в журнал: наружу уходит машинный код, и без записи
     // «модель не ответила» становится немым отказом, который нечем разбирать.
@@ -275,6 +282,6 @@ export async function runMeetingPlan({
     effort: target.effort || null,
     truncated: prompt.truncated,
     count: prompt.count,
-    tasks: plan.map((task) => meetingTaskDraft(task, segments)),
+    tasks: plan.map((task) => meetingTaskDraft(task, segments, appendTimecode)),
   };
 }

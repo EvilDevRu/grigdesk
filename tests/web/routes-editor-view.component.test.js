@@ -287,9 +287,14 @@ async function fixture(t, {
     '../ui': (UI_STUB) +
       "\nexport { vTooltip } from \"./src/services/tooltipDirective.ts\";",
     '../shared/apiClient.ts': 'export const api = globalThis.__routesViewHarness.api;'
-      + ' export const failureText = (error) => error.message;',
+      + ' export const failureText = (error) => error.message;'
+      + ' export class ApiError extends Error { constructor(message, status, data) { super(message); this.status = status; this.data = data; } }',
     './apiClient.ts': 'export const api = globalThis.__routesViewHarness.api;'
-      + ' export const failureText = (error) => error.message;',
+      + ' export const failureText = (error) => error.message;'
+      + ' export class ApiError extends Error { constructor(message, status, data) { super(message); this.status = status; this.data = data; } }',
+    '../composables/useSse.ts': 'export const sseSubscribe = (fn) => {'
+      + ' globalThis.__routesViewHarness.listeners.push(fn); return () => {}; };',
+    '../pipeline/FactoryGraph.vue': 'export default { template: "<div />" };',
     'vue-router': 'export const useRoute = () => globalThis.__routesViewHarness.route;'
       + ' export const useRouter = () => globalThis.__routesViewHarness.router;'
       + ' export const onBeforeRouteLeave = () => {};'

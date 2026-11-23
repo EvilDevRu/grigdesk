@@ -222,3 +222,27 @@ func TestHostFixture(t *testing.T) {
 	}
 	_ = cmd.Wait()
 }
+
+// TestCaptureTreeRefusesOwnSession доказывает инвариант detached-вызова model-open.
+// Собственная сессия не захватывается, дочерняя сессия подтверждается с PPID владельца.
+func TestCaptureTreeRefusesOwnSession(t *testing.T) {
+	if _, err := CaptureTree(os.Getpid()); !errors.Is(err, ErrUnconfirmedTree) {
+		t.Fatalf("захват собственной сессии запрещён: %v", err)
+	}
+	child := exec.Command("sleep", "30")
+	child.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	if err := child.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		_ = child.Process.Kill()
+		_ = child.Wait()
+	}()
+	owner, err := CaptureTree(child.Process.Pid)
+	if err != nil {
+		t.Fatalf("дочерняя сессия захватывается: %v", err)
+	}
+	if owner.Leader.PPID != os.Getpid() || owner.Leader.Session != owner.Leader.PID {
+		t.Fatalf("лидер подтверждён с PPID владельца и своей сессией: %+v", owner.Leader)
+	}
+}

@@ -1,0 +1,93 @@
+{
+  "id": "74906bac-48d5-40ce-a6a9-96cbce242146",
+  "nodes": [
+    {
+      "id": "inventory",
+      "parent": "",
+      "title": "Список",
+      "kind": "input",
+      "status": "done",
+      "generation": 1,
+      "after": [],
+      "members": [],
+      "slot": 0
+    },
+    {
+      "id": "files",
+      "parent": "",
+      "title": "Документы",
+      "kind": "forEach",
+      "status": "done",
+      "generation": 1,
+      "after": [
+        "inventory"
+      ],
+      "members": [
+        "files.1.a",
+        "files.2.a",
+        "files.3.a"
+      ],
+      "slot": 1,
+      "outputs": [
+        "files.2.a",
+        "files.3.a"
+      ],
+      "counts": {
+        "done": 2,
+        "failed": 0,
+        "running": 1,
+        "total": 3
+      }
+    },
+    {
+      "id": "report",
+      "parent": "",
+      "title": "Сборка",
+      "kind": "join",
+      "status": "done",
+      "generation": 1,
+      "after": [
+        "files"
+      ],
+      "members": [],
+      "slot": 2
+    },
+    {
+      "id": "files.1.a",
+      "parent": "files",
+      "title": "Работа",
+      "kind": "agent",
+      "status": "running",
+      "generation": 1,
+      "after": [],
+      "members": [],
+      "slot": 3
+    },
+    {
+      "id": "files.2.a",
+      "parent": "files",
+      "title": "Работа",
+      "kind": "agent",
+      "status": "done",
+      "generation": 1,
+      "after": [],
+      "members": [],
+      "slot": 4
+    },
+    {
+      "id": "files.3.a",
+      "parent": "files",
+      "title": "Работа",
+      "kind": "agent",
+      "status": "done",
+      "generation": 1,
+      "after": [],
+      "members": [],
+      "slot": 5
+    }
+  ],
+  "revision": 6,
+  "status": "running",
+  "templateId": "a2372fd2-e591-41c8-964a-64d321e3c677",
+  "title": "Кворум"
+}

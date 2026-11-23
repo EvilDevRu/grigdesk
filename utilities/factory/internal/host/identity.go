@@ -171,3 +171,24 @@ func StillRunning(expected ProcessIdentity) bool {
 	current, err := readIdentity(expected.PID, boot)
 	return err == nil && current.State != "Z" && current.State != "X" && sameProcess(current, expected)
 }
+
+// CurrentBootID открывает платформенный bootID для графовых резерваций.
+// Смена загрузки освобождает прежние слоты даже при повторных номерах PID.
+var CurrentBootID = func() (string, error) {
+	return bootID()
+}
+
+// TreeExitConfirmed возвращает true только для двух полных пустых проверок сессии.
+// Ошибка probe остаётся неизвестным состоянием и не освобождает место.
+func TreeExitConfirmed(owner TreeOwner) (bool, error) {
+	for attempt := 0; attempt < 2; attempt++ {
+		live, err := owner.identify()
+		if err != nil {
+			return false, err
+		}
+		if len(live) > 0 {
+			return false, nil
+		}
+	}
+	return true, nil
+}

@@ -1,9 +1,11 @@
 package host
 
 import (
+	"context"
 	"os"
 	"strings"
 	"sync"
+	"time"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -82,4 +84,25 @@ func StillRunning(expected ProcessIdentity) bool {
 	current, err := windowsIdentity(expected.PID)
 
 	return err == nil && current.Start == expected.Start && current.Boot == expected.Boot
+}
+
+// CurrentBootID читает идентификатор загрузки Windows для графовых резерваций.
+var CurrentBootID = func() (string, error) {
+	return windowsBootID()
+}
+
+// CaptureTree на Windows не подтверждает сессию графового владельца.
+// Графовый модельный порт первой поставки работает на Linux и Darwin.
+func CaptureTree(pid int) (TreeOwner, error) {
+	return TreeOwner{}, ErrUnconfirmedTree
+}
+
+// StopTree на Windows не управляет графовыми сессиями.
+func StopTree(ctx context.Context, owner TreeOwner, grace time.Duration) error {
+	return ErrUnconfirmedTree
+}
+
+// TreeExitConfirmed на Windows не подтверждает выход графового scope.
+func TreeExitConfirmed(owner TreeOwner) (bool, error) {
+	return false, ErrUnconfirmedTree
 }
