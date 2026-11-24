@@ -15,6 +15,9 @@ import { acquireDirectoryLock } from '../../shared/node/directoryLock.ts';
 import { glmCompatibilityHash } from '../../shared/node/glmCompatibility.ts';
 import { removePrivateTree } from '../../shared/node/files.ts';
 import { sha256, sha256File } from '../../shared/node/hash.ts';
+import {
+  componentNodeRuntimeManifest, readTargetNodeRuntime, seaHostTarget, type NodeRuntime,
+} from '../../shared/node/nodeRuntime.ts';
 import { nodeArchive } from '../../shared/node/seaBuild.ts';
 import { artifactsPath } from '../../shared/runtime/dataHome.ts';
 import { binaryPackageInputs } from '../../deepseek/scripts/binaryInputs.mts';
@@ -155,6 +158,24 @@ export async function testDeepSeekRuntimeDependencies(): Promise<
 }
 
 /**
+ * Fixture использует только архив, закреплённый самим пакетом для выбранной цели.
+ * Отсутствующий или повреждённый архив требует явной подготовки cache.
+ */
+export async function verifyTestDeepSeekNodeArchive(
+  cache: string,
+  target: NodeRuntime['platform'] = seaHostTarget(),
+  packageDir: string = deepSeekPackagePaths().root,
+): Promise<void> {
+  const pin = await readTargetNodeRuntime(componentNodeRuntimeManifest(packageDir, target), target);
+  const digest = await sha256File(path.join(cache, nodeArchive(pin).name)).catch(() => null);
+
+  if (digest !== pin.sha256) {
+    throw new Error('Подготовьте архив pinned Node: npm --prefix deepseek run prepare:runtime -- '
+      + `--node-cache-dir ${cache}`);
+  }
+}
+
+/**
  * Ключ включает собственный пакет и проверенные входы generation, без UI и ABI Node сервера.
  * Зависимости должны быть явно подготовлены; helper не запускает npm и не загружает архив.
  */
@@ -162,16 +183,8 @@ async function candidateRoot(): Promise<{ directory: string; cache: string }> {
   const root = deepSeekTestArtifactsRoot();
   const dependencies = await testDeepSeekRuntimeDependencies();
   const cache = dependencies.cacheDir;
-  const pinFile = path.join(repository, 'deepseek/build/node-runtime.json');
-  const pin = JSON.parse(await fs.readFile(pinFile, 'utf8'));
 
-  const archiveValid = await sha256File(path.join(cache, nodeArchive(pin).name))
-    .then((digest) => digest === pin.sha256, () => false);
-
-  if (!archiveValid) {
-    throw new Error('Подготовьте архив pinned Node: npm --prefix deepseek run prepare:runtime -- '
-      + `--node-cache-dir ${cache}`);
-  }
+  await verifyTestDeepSeekNodeArchive(cache);
 
   const generation = await deepSeekBuildInputs(deepSeekPackagePaths().vendorDir, dependencies.directory);
   const identity = sha256(canonicalJson({

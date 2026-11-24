@@ -48,8 +48,9 @@ grigdesk-ctl artifacts-cleanup --older-than 7d --keep-generations 3 --json
 и `provider-install-probes`. Сама папка `deepseek-binary` сохраняется: `test-builds`, `gates`,
 `build-input-tests` и `explicit-cache` раскрываются до дочерних каталогов. Другие каталоги
 темы выбираются по возрасту. В `deepseek-binary/node-cache` убираются только лишние
-`generations`; архив pinned Node, `payloads`, `runtime-deps-node24`, `node-runtime` и прочее
-содержимое сохраняется. Пустые структурные контейнеры остаются.
+`generations`. Архив pinned Node, `payloads` и каталоги `<цель>-<SHA256 архива>/`
+с `runtime-deps-node24` и `node-runtime` сохраняются вместе с прежними кэшами.
+Пустые структурные контейнеры остаются.
 
 Возраст определяется самым свежим mtime всего дерева. Ровно на пороге, в будущем либо
 со свежей вложенной записью каталог сохраняется. Поколения сортируются по этому времени

@@ -53,7 +53,7 @@ HTTP, TLS, сигналы и синтетический синтез через 
 - [Типы тестов установки: реестр без UI, Fastify, опись выпуска и TCP-адрес фикстуры](provider-install-type-boundaries.md)
 - [Изолированные HTTP-фикстуры чата: типы multipart и WebSocket без импорта приложения](http-fixture-fastify-types.md)
 - [Source-фикстуры с установленным ELF и trusted файлы legacy /gate](source-runtime-fixtures.md)
-- [Prefix source/SEA, native preflight, быстрый young-retention и полная проверка ELF](source-runtime-dependencies.md)
+- [Prefix source/SEA по цели и SHA worker, native preflight и проверка ELF](source-runtime-dependencies.md)
 - [Smoke GLM: admission без внешней модели и срок хода после подготовки ELF](glm-release-admission-fixture.md)
 - [Фикстуры GLM: smoke, изолированный CLI, model-only, команды и frozen admission](glm-smoke-mode-fixtures.md)
 - [Родитель фикстуры в артефактах: создание и GRIGDESK_ARTIFACTS_DIR без пути машины](artifact-fixture-parent.md)

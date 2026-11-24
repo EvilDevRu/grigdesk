@@ -20,6 +20,7 @@ import {
   buildSeaBinary,
   postjectCli,
 } from '../../server/scripts/sea/buildSteps.mts';
+import { readTargetNodeRuntime } from '../../shared/node/nodeRuntime.ts';
 import { nodeArchive } from '../../shared/node/seaBuild.ts';
 
 const ROOT = fileURLToPath(new URL('../../', import.meta.url));
@@ -120,19 +121,19 @@ function baseInput(packageDir, target, cacheDir) {
   };
 }
 
-test('SEA-BS-01: runtime закреплён и совпадает у server и deepseek', async () => {
-  // После Go-перехода tracker и relay собираются как Go-бинарники и не имеют
-  // Node SEA-манифеста; общий Node runtime остался у server и deepseek.
-  const server = JSON.parse(await readFile(path.join(ROOT, 'server/build/node-runtime.json'), 'utf8'));
-  const deepseek = JSON.parse(await readFile(path.join(ROOT, 'deepseek/build/node-runtime.json'), 'utf8'));
+test('SEA-BS-01: server и deepseek выбирают свои закреплённые архивы', async () => {
+  const server = await readTargetNodeRuntime(path.join(ROOT, 'server/build/node-runtime.json'), 'linux-x64');
+  const deepseek = await readTargetNodeRuntime(
+    path.join(ROOT, 'deepseek/build/node-runtime.json'), 'linux-x64',
+  );
 
   assert.deepEqual(server, {
     version: '24.21.0',
     platform: 'linux-x64',
     sha256: 'fd8e59d5a511510f6a298afb548f18c7d2b1be404d8b4a27d94fbe49f56cb2d6',
   });
-  assert.deepEqual(server, deepseek);
   assert.equal(nodeArchive(server).name, 'node-v24.21.0-linux-x64.tar.xz');
+  assert.equal(nodeArchive(deepseek).name, 'node-v24.22.3-linux-x64.tar.xz');
 });
 
 test('SEA-BS-02: ошибка платформы и manifest не трогают прежний файл', async (t) => {

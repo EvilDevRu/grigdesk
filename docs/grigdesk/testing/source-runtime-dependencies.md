@@ -10,9 +10,10 @@ Binary candidate использует тот же helper. Выбор cache об�
 3. Корень артефактов — `GRIGDESK_TEST_DEEPSEEK_ROOT`, иначе
    `<artifactsPath()>/deepseek-binary`.
 
-Dependencies находятся в `<cache>/runtime-deps-node24`, пакеты — в его `node_modules`.
-Соседний `<cache>/node-runtime/bin/node` — подготовленный pinned worker.
-Bootstrap берёт закреплённый архив Node из того же cache, используя `nodeArchive(pin)`.
+Dependencies находятся в `<cache>/<цель>-<SHA256 архива>/runtime-deps-node24`,
+пакеты — в его `node_modules`. Соседний `node-runtime/bin/node` — подготовленный
+pinned worker. Вызывающий получает оба пути через `readPreparedRuntimeDependencies()`.
+Bootstrap берёт закреплённый архив Node из корня cache, используя `nodeArchive(pin)`.
 Папка `tracker/.cache` не является общим тестовым prefix и на чистом CI может отсутствовать.
 Обычная подготовка без `--node-cache-dir` использует `deepseek/.cache`, поэтому для
 тестов нужно явно указать cache, который выберет helper:

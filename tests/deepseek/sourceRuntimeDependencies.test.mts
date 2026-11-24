@@ -6,8 +6,14 @@ import test, { type TestContext } from 'node:test';
 
 import { deepSeekPackagePaths } from '../../deepseek/scripts/paths.ts';
 import { sha256 } from '../../shared/node/hash.ts';
+import {
+  componentNodeRuntimeManifest, readTargetNodeRuntime, seaHostTarget,
+} from '../../shared/node/nodeRuntime.ts';
+import { nodeArchive } from '../../shared/node/seaBuild.ts';
 import { artifactsPath } from '../../shared/runtime/dataHome.ts';
-import { testDeepSeekRuntimeDependencies } from '../helpers/deepseekBinary.mts';
+import {
+  testDeepSeekRuntimeDependencies, verifyTestDeepSeekNodeArchive,
+} from '../helpers/deepseekBinary.mts';
 
 const ENVIRONMENT = [
   'GRIGDESK_DEEPSEEK_NODE_CACHE',
@@ -50,20 +56,24 @@ async function fixture(t: TestContext): Promise<string> {
  * Синтетический stamp проверяет делегирование существующему verifier без установки пакетов.
  * Node здесь только файл с хешем: source helper не исполняет worker или native addons.
  */
-async function preparedFixture(cache: string): Promise<string> {
-  const directory = path.join(cache, 'runtime-deps-node24');
-  const node = Buffer.from('synthetic pinned executable\n');
+async function preparedFixture(cache: string): Promise<{ directory: string; node: string }> {
+  const target = seaHostTarget();
   const paths = deepSeekPackagePaths();
-  const pin = JSON.parse(await fs.readFile(path.join(paths.root, 'build/node-runtime.json'), 'utf8'));
+  const pin = await readTargetNodeRuntime(componentNodeRuntimeManifest(paths.root, target), target);
+  const root = path.join(cache, `${target}-${pin.sha256}`);
+  const directory = path.join(root, 'runtime-deps-node24');
+  const node = path.join(root, 'node-runtime/bin/node');
+  const nodeBytes = Buffer.from('synthetic pinned executable\n');
   const stamp: Record<string, string> = {
+    target,
     version: pin.version,
     archiveSha256: pin.sha256,
     abi: '137',
-    nodeSha256: sha256(node),
+    nodeSha256: sha256(nodeBytes),
   };
 
-  await fs.mkdir(path.join(cache, 'node-runtime/bin'), { recursive: true });
-  await fs.writeFile(path.join(cache, 'node-runtime/bin/node'), node);
+  await fs.mkdir(path.dirname(node), { recursive: true });
+  await fs.writeFile(node, nodeBytes);
 
   for (const name of ['typescript', 'esbuild']) {
     const compiler = path.join(directory, 'node_modules', name);
@@ -81,7 +91,32 @@ async function preparedFixture(cache: string): Promise<string> {
 
   await fs.writeFile(path.join(directory, '.prepared.json'), JSON.stringify(stamp));
 
-  return directory;
+  return { directory, node };
+}
+
+for (const target of ['linux-arm64', 'darwin-arm64'] as const) {
+  test(`binary fixture проверяет свой архив ${target} без x64 cache`, async (t) => {
+    const root = await fixture(t);
+    const cache = path.join(root, 'cache');
+    const packageRoot = path.join(root, 'deepseek');
+    const bytes = Buffer.from(`synthetic archive ${target}\n`);
+    const pin = {
+      platform: target,
+      version: '24.22.3',
+      sha256: sha256(bytes),
+    };
+    const archive = path.join(cache, nodeArchive(pin).name);
+
+    await fs.mkdir(path.join(packageRoot, 'build'), { recursive: true });
+    await fs.mkdir(cache);
+    await fs.writeFile(path.join(packageRoot, 'build', `node-runtime-${target}.json`), JSON.stringify(pin));
+
+    await assert.rejects(verifyTestDeepSeekNodeArchive(cache, target, packageRoot), /архив pinned Node/u);
+    await fs.writeFile(archive, bytes);
+    await verifyTestDeepSeekNodeArchive(cache, target, packageRoot);
+    await fs.writeFile(archive, 'повреждённый архив');
+    await assert.rejects(verifyTestDeepSeekNodeArchive(cache, target, packageRoot), /архив pinned Node/u);
+  });
 }
 
 for (const mode of ['explicit-cache', 'test-root', 'artifacts'] as const) {
@@ -100,12 +135,12 @@ for (const mode of ['explicit-cache', 'test-root', 'artifacts'] as const) {
       cache = path.join(root, 'artifacts/deepseek-binary/node-cache');
     }
 
-    const directory = await preparedFixture(cache);
+    const { directory, node } = await preparedFixture(cache);
     const dependencies = await testDeepSeekRuntimeDependencies();
 
     assert.equal(dependencies.cacheDir, cache);
     assert.equal(dependencies.directory, directory);
-    assert.equal(dependencies.node, path.join(cache, 'node-runtime/bin/node'));
+    assert.equal(dependencies.node, node);
     assert.equal(dependencies.abi, '137');
   });
 }
@@ -130,7 +165,7 @@ for (const broken of ['stamp', 'version', 'archive', 'node', 'package.json', 'pa
   test(`повреждение ${broken} требует явной подготовки без ремонта cache`, async (t) => {
     const root = await fixture(t);
     const cache = path.join(root, 'broken-cache');
-    const directory = await preparedFixture(cache);
+    const { directory, node } = await preparedFixture(cache);
     const stampFile = path.join(directory, '.prepared.json');
     let changed = stampFile;
 
@@ -143,7 +178,7 @@ for (const broken of ['stamp', 'version', 'archive', 'node', 'package.json', 'pa
       await fs.writeFile(stampFile, JSON.stringify(stamp));
     } else {
       if (broken === 'node') {
-        changed = path.join(cache, 'node-runtime/bin/node');
+        changed = node;
       } else if (broken === 'package.json' || broken === 'package-lock.json') {
         changed = path.join(directory, broken);
       } else if (broken === 'typescript' || broken === 'esbuild') {

@@ -24,7 +24,7 @@ export interface PreparedRuntimeDependencies {
 }
 
 function runtimeCache(cacheDir: string, pin: NodeRuntime) {
-  return pin.platform === 'linux-x64' ? cacheDir : path.join(cacheDir, `${pin.platform}-${pin.sha256}`);
+  return path.join(cacheDir, `${pin.platform}-${pin.sha256}`);
 }
 
 /**

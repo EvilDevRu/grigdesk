@@ -10,9 +10,10 @@ Harness, web/ACP-мосты GrigDesk, плагин GLM, native resources и ли
 ## Сборка из чистого checkout
 
 Из корня репозитория нужны Node `^22.19.0 || >=24.0.0`, npm, git, tar/xz, C compiler и
-системные библиотеки native dependencies. Версия и SHA worker закреплены в
-`build/node-runtime.json` для Linux и `../server/build/node-runtime-darwin-arm64.json`
-для macOS. Сборка generation использует ABI выбранного runtime.
+системные библиотеки native dependencies. Worker Node 24.22.3 закреплён в
+`build/node-runtime.json` для Linux x64 и в отдельных описях
+`build/node-runtime-linux-arm64.json` и `build/node-runtime-darwin-arm64.json`.
+Сборка generation использует ABI выбранного worker. Версия Node сервера выбирается отдельно.
 
 ```bash
 npm ci --include=dev --prefix deepseek
@@ -28,6 +29,7 @@ objects нужного commit или `seedDir` с проверяемыми ис�
 нужна сеть для Node, npm и upstream. Обычный build не устанавливает dependencies скрыто:
 `prepare:runtime` — отдельный явный шаг. Его и build можно направить в один внешний cache
 аргументом `--node-cache-dir /absolute/build-cache`. По умолчанию это `deepseek/.cache/`.
+Подготовленные worker и зависимости лежат внутри `<цель>-<SHA256 архива>/` в этом кэше.
 
 Для разработки default output — `bin/deepseek`. Для управляемой установки собирайте в
 отдельный release-каталог, затем публикуйте через установщик. Параметры `--binary-version`

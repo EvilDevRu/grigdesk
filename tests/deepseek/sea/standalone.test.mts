@@ -66,7 +66,7 @@ test('реальный ELF читает metadata после удаления sou
 
   assert.equal(result.stderr, '');
   assert.equal(info.packageId, candidate.info.packageId);
-  assert.equal(info.workerNode.version, '24.21.0');
+  assert.equal(info.workerNode.version, '24.22.3');
   assert.notEqual(info.workerNode.abi, '', 'ABI worker получен из настоящего Node');
   assert.deepEqual(await fs.readdir(scratch), ['deepseek']);
   assert.equal((await fs.readdir(path.dirname(path.dirname(candidate.binary))))

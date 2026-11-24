@@ -13,6 +13,7 @@ import { deepSeekBuildInputs } from '../../deepseek/scripts/buildRuntime.mts';
 import { assertKnownDynamicReferences } from '../../deepseek/scripts/deepseekBuildInputs.ts';
 import { verifyDeepSeekSnapshot } from '../../deepseek/scripts/deepseekVendorManifest.ts';
 import { sha256 } from '../../shared/node/hash.ts';
+import { componentNodeRuntimeManifest, readTargetNodeRuntime } from '../../shared/node/nodeRuntime.ts';
 import { artifactsPath } from '../../shared/runtime/dataHome.ts';
 import { createDeepSeekVendorFixture } from '../helpers/deepseekVendor.mts';
 import { verifyTestDeepSeekArtifact } from '../helpers/deepseekRuntimeArtifact.mts';
@@ -25,6 +26,27 @@ interface CommandFailure extends Error {
 }
 
 const exec = promisify(execFile);
+
+it('Harness выбирает свой Node 24.22.3 на всех трёх нативных целях', async () => {
+  const { root } = deepSeekPackagePaths();
+  const pins = {
+    'linux-x64': '4f2b175a6d53a5c617a80dba2676238a0688cef28c6da4eba35c7d844e66fcfb',
+    'linux-arm64': '6e51a2ada00f0011cc266f65d98922b403d7ad88f809ca2aa615a5fe1ce6e86c',
+    'darwin-arm64': '1d64136c8a43d648d1b3bad10797a4c995b1ca032d2bde8799de43b37f058fe5',
+  } as const;
+
+  for (const target of Object.keys(pins) as (keyof typeof pins)[]) {
+    const file = componentNodeRuntimeManifest(root, target);
+    const pin = await readTargetNodeRuntime(file, target);
+
+    assert.equal(path.dirname(file), path.join(root, 'build'));
+    assert.deepEqual(pin, {
+      version: '24.22.3',
+      platform: target,
+      sha256: pins[target],
+    });
+  }
+});
 
 describe('runtime-deps package и lock принадлежат пакету', () => {
   it('читает exact metadata и учитывает неизменные байты lock по новому пути', async () => {

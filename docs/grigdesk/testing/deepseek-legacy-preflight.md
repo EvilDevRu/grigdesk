@@ -3,7 +3,8 @@
 Успешная подготовка автономного ELF не означает готовность legacy fixture общего прогона.
 `tests/run-all.sh` сначала вызывает `deepseekBinary.mts --prepare-suite`: этот helper
 проверяет бинарный candidate, A/B и admitted варианты с pinned Node 24. Зависимости берутся
-из `<node-cache>/runtime-deps-node24`; обычная сборка использует тот же способ подготовки.
+из `<node-cache>/<цель>-<SHA256 архива>/runtime-deps-node24`; обычная сборка использует
+тот же способ подготовки.
 
 После этого `deepseekRuntimeArtifact.mts` отдельно строит прежнюю generation под текущим
 Node тестового процесса. Для сценариев первого перехода это обычно Node 22. Когда нет

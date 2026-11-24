@@ -25,18 +25,13 @@ test('SEA config принимает assets пакета и сохраняет н
   });
 });
 
-test('пакет DeepSeek закрепляет свои build deps и тот же Node pin без runtime npm dependencies', async () => {
+test('пакет DeepSeek закрепляет свои build deps без runtime npm dependencies', async () => {
   const manifest = JSON.parse(await readFile(
     new URL('../../deepseek/package.json', import.meta.url), 'utf8',
   ));
   const lock = JSON.parse(await readFile(
     new URL('../../deepseek/package-lock.json', import.meta.url), 'utf8',
   ));
-  const pin = await readFile(new URL('../../deepseek/build/node-runtime.json', import.meta.url), 'utf8');
-  // После Go-перехода tracker не имеет Node SEA-манифеста; общий pin сверяется с server.
-  const serverPin = await readFile(
-    new URL('../../server/build/node-runtime.json', import.meta.url), 'utf8',
-  );
 
   assert.equal(manifest.name, 'grigdesk-deepseek');
   assert.equal(manifest.private, true);
@@ -50,7 +45,6 @@ test('пакет DeepSeek закрепляет свои build deps и тот ж�
     typescript: '5.9.3',
   });
   assert.equal(lock.packages[''].name, 'grigdesk-deepseek');
-  assert.equal(pin, serverPin);
   assert.equal(manifest.scripts.build, 'node scripts/buildBinary.mts');
   assert.equal(manifest.scripts.test, 'node scripts/test.mts');
   assert.equal(manifest.scripts['test:sea'], 'node scripts/test.mts --sea');

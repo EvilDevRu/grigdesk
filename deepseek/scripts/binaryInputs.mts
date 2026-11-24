@@ -57,6 +57,8 @@ export async function binaryPackageInputs(): Promise<Record<string, string>> {
     'deepseek/package.json',
     'deepseek/package-lock.json',
     'deepseek/build/node-runtime.json',
+    'deepseek/build/node-runtime-linux-arm64.json',
+    'deepseek/build/node-runtime-darwin-arm64.json',
     'deepseek/compatibility/glm.json',
   ].sort();
   const entries = await Promise.all(files.map(async (name) => [

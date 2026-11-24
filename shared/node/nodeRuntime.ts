@@ -64,14 +64,13 @@ export function serverNodeRuntimeManifest(target: NodeRuntime['platform']): stri
 }
 
 /**
- * CLI-пакеты сохраняют собственные описи Linux x64.
- * На Apple Silicon и Linux ARM64 Node SEA-компоненты используют ту же опись,
- * что серверный SEA своей платформы (tracker/relay после Go-перехода — Go-бинарники).
+ * Пакет выбирает собственный архив Node для нативной цели.
+ * Его worker и сервер могут обновляться независимо.
  */
 export function componentNodeRuntimeManifest(packageDir: string, target: NodeRuntime['platform']): string {
-  return target === 'darwin-arm64' || target === 'linux-arm64'
-    ? path.resolve(packageDir, '..', serverNodeRuntimeManifest(target))
-    : path.join(packageDir, 'build/node-runtime.json');
+  return path.join(
+    packageDir, 'build', target === 'linux-x64' ? 'node-runtime.json' : `node-runtime-${target}.json`,
+  );
 }
 
 /**

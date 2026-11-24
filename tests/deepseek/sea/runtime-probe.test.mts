@@ -58,7 +58,7 @@ test('изолированный Node 24 runtime работает через ELF
     }
   });
 
-  assert.equal(candidate.info.workerNode.version, '24.21.0');
+  assert.equal(candidate.info.workerNode.version, '24.22.3');
   await mkdir(binaryDir);
   await copyFile(candidate.binary, binary);
   await writeFile(nativeProbe, nativeSource);
