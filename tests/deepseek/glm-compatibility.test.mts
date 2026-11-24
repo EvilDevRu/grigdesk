@@ -9,7 +9,7 @@ test('GLM_ADMISSION допускает api и coding-plan с проверенн�
     compatibility: 'e283e8ee57dcd06e1caaf2abb0ec186f7fc691ebee04cda0f0cf9873966fab47',
   }, {
     mode: 'coding-plan',
-    compatibility: 'f9c39e6f240dcd12136ce32722da177f8b513f3d92d8bd0be91a6efee09ded28',
+    compatibility: '1bacf128077cdcd4e10b859227a9ae79677923f01465099add9a872b6ff583eb',
   }]);
   assert.equal(Object.isFrozen(GLM_ADMISSION), true);
   assert.equal(GLM_ADMISSION.every((entry) => Object.isFrozen(entry)), true);

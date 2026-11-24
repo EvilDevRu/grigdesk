@@ -1,0 +1,55 @@
+--- a/packages/llm/llm-pi-ai/src/catalog.ts
++++ b/packages/llm/llm-pi-ai/src/catalog.ts
+@@ -832,6 +832,52 @@
+   const { provider } = request
+   const defaults = catalogModels(provider)
+   const providerBaseUrl = catalogProvider(provider)?.baseUrl
++  // Расширяем только штатные маршруты Z.ai. Список /models может быть общим для обоих ключей,
++  // поэтому FlashX и FlashX Legal добавляем только на документированный обычный API.
++  const endpoint = request.baseURL ?? providerBaseUrl
++  const standardApi = endpoint === 'https://api.z.ai/api/paas/v4'
++  const codingPlan = endpoint === 'https://api.z.ai/api/coding/paas/v4'
++
++  if (provider === 'zai' && (standardApi || codingPlan)
++    && (request.api ?? 'openai-completions') === 'openai-completions') {
++    const glm53 = defaults.get('glm-5.3')
++
++    if (glm53 && !defaults.has('glm-5.4')) {
++      defaults.set('glm-5.4', {
++        ...glm53,
++        id: 'glm-5.4',
++        name: 'GLM-5.4',
++        contextWindow: 1_000_000,
++        maxTokens: 131_072,
++        cost: NO_COST,
++      })
++    }
++
++    const flash = defaults.get('glm-5.3-flash')
++
++    if (standardApi && flash) {
++      const variants = [
++        { id: 'glm-5.3-flashx', name: 'GLM-5.3-FlashX' },
++        { id: 'glm-5.3-flashx-legal', name: 'GLM-5.3-FlashX-Legal' },
++      ]
++      const cost = {
++        input: 0.37,
++        cacheRead: 0.075,
++        output: 1.25,
++        cacheWrite: 0,
++      }
++
++      for (const variant of variants) {
++        if (!defaults.has(variant.id)) {
++          defaults.set(variant.id, {
++            ...flash,
++            ...variant,
++            cost,
++          })
++        }
++      }
++    }
++  }
+   // An absent `models` key and an empty one are the same request: the config
+   // schema materializes `[]` for the absent case, and an empty catalog could
+   // serve no request anyway, so both mean "serve the installed catalog".

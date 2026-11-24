@@ -28,6 +28,9 @@ Keys saved through the window apply on the server without manual file editing.
 
 GLM's ordinary API and Coding Plan are separate access profiles with separate keys and limits.
 One executor profile is active at a time.
+On Harness 0.1.5-rc.2, the optional patch adds GLM-5.4 to both profiles.
+It also adds GLM-5.3-FlashX and GLM-5.3-FlashX-Legal to the standard API profile.
+Chat requires a build approved for the selected mode. Model responses depend on access at Z.ai.
 DeepSeek cannot identify the account belonging to a replacement key during sign-in.
 Replacement requires explicit confirmation; cancelling keeps the old key.
 Confirmation preserves the profile ID and history but starts a native session without previous memory.

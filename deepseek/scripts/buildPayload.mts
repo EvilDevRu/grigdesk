@@ -18,6 +18,7 @@ import { createReadStream } from 'node:fs';
 import { binaryPackageInputs } from './binaryInputs.mts';
 import { deepSeekBuildInputs } from './buildRuntime.mts';
 import type { BinaryBuildOptions } from './buildSteps.mts';
+import { GLM_54_BACKPORT_ENV, GLM_54_BACKPORT_PATCH } from './glm54Backport.mts';
 import { packagePayload } from './packagePayload.mts';
 import { deepSeekPackagePaths } from './paths.ts';
 import { readPreparedRuntimeDependencies } from './prepareRuntimeDeps.mts';
@@ -105,6 +106,7 @@ async function generation(work: string, options: BinaryBuildOptions, target: Nod
           HOME: home,
           TMPDIR: temporary,
           XDG_CACHE_HOME: path.join(options.nodeCacheDir, 'build-cache'),
+          ...(inputs.hashes[GLM_54_BACKPORT_PATCH] ? { [GLM_54_BACKPORT_ENV]: '1' } : {}),
         },
         timeout: 300000,
         maxBuffer: 16 * 1024 * 1024,

@@ -18,6 +18,7 @@ import {
   verifyDeepSeekVendorMetadata,
 } from './deepseekVendorManifest.ts';
 import { writeDeepSeekLicenseInventory } from './deepseekBuildLicenses.ts';
+import { GLM_54_BACKPORT_PATCH, glm54BackportEnabled } from './glm54Backport.mts';
 import {
   assertKnownDynamicReferences,
   scanDynamicRuntimeReferences,
@@ -75,6 +76,11 @@ export async function deepSeekBuildInputs(
     'deepseek/build/licenses/xterm-6.0.0-LICENSE.txt',
     'deepseek/build/licenses/LGPL-3.0.txt', 'deepseek/build/licenses/GPL-3.0.txt'];
   const hashes: Record<string, string> = {};
+
+  if (glm54BackportEnabled(source)) {
+    inputs.push(GLM_54_BACKPORT_PATCH);
+  }
+
   const licenses = JSON.parse(await fs.readFile(
     path.join(deepSeekPackagePaths().licensesDir, 'sources.json'), 'utf8',
   ));
@@ -128,7 +134,7 @@ export async function glmRuntimeIdentity(options: {
   const dependencyRoot = options.dependencyRoot ?? defaultDependencyRoot;
   const manifest = await verifyDeepSeekVendorMetadata(vendorDir);
   const inputs = await deepSeekBuildInputs(vendorDir, dependencyRoot);
-  const llmPiAi = await llmPiAiContract(manifest, dependencyRoot);
+  const llmPiAi = await llmPiAiContract(manifest, dependencyRoot, inputs.hashes[GLM_54_BACKPORT_PATCH]);
 
   return {
     source: { commit: manifest.commit },
@@ -354,7 +360,7 @@ async function compileWorkspace(
 async function llmPiAiContract(manifest: {
   files: readonly { path: string; sha256: string }[];
   patches: readonly { path: string; sha256: string }[];
-}, dependencyRoot: string): Promise<Record<string, unknown> | null> {
+}, dependencyRoot: string, backportHash?: string): Promise<Record<string, unknown> | null> {
   const sources = manifest.files
     // Сборка переписывает tsconfig пакета; commit upstream и так входит в identity допуска.
     .filter((file) => file.path.startsWith('packages/llm/llm-pi-ai/'))
@@ -373,13 +379,19 @@ async function llmPiAiContract(manifest: {
     throw new Error('В lock сборки нет exact pi-ai с integrity');
   }
 
+  const patches = manifest.patches.map((patch) => ({ path: patch.path, sha256: patch.sha256 }));
+
+  if (backportHash) {
+    patches.push({ path: GLM_54_BACKPORT_PATCH, sha256: backportHash });
+  }
+
   return {
     piAi: {
       version: piAi.version,
       integrity: piAi.integrity,
     },
     sourceHash: sha256(JSON.stringify(sources)),
-    patches: manifest.patches.map((patch) => ({ path: patch.path, sha256: patch.sha256 })),
+    patches,
   };
 }
 
@@ -421,9 +433,12 @@ export async function buildDeepSeekRuntime(options: {
 
   const container = await fs.mkdtemp(path.join(stagingParent, '.deepseek-build-'));
   const staging = path.join(container, 'generation');
+  const backport = originalInputs.hashes[GLM_54_BACKPORT_PATCH]
+    ? path.join(repositoryRoot, GLM_54_BACKPORT_PATCH)
+    : undefined;
 
   try {
-    await checkDeepSeekPatches(options.vendorDir, staging);
+    await checkDeepSeekPatches(options.vendorDir, staging, backport);
     await fs.cp(path.join(dependencyRoot, 'node_modules'), path.join(staging, 'node_modules'), {
       recursive: true,
       dereference: false,
