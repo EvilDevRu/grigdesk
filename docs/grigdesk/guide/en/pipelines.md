@@ -73,7 +73,7 @@ auto-launches and bulk start work as before. The enabled toggle (default) keeps 
 ordinary immediate launch.
 
 After a confirmed stop of a stage that reads code and writes only pipeline documents,
-Resume retries that stage from the current cursor.
+Resume retries that stage from the current cursor. You can save a future stage’s settings while another stage is running.
 
 ## Stage executor, model and effort
 

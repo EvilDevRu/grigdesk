@@ -113,8 +113,8 @@ func decodeStageRunnerSettings(raw []byte, id StageRunnerIdentity) (StageRunnerS
 	return result, err
 }
 
-// SaveStageRunnerSettings сериализует правку с запуском задачи или проверяет её живую эпоху.
-// Под task lock повторно проверяются terminal, receipt, revision и снимок политики редактора.
+// SaveStageRunnerSettings сериализует правку с публикацией процесса выбранного узла.
+// Под task lock сверяются попытка, exact run, receipt, revision и снимок политики редактора.
 func (s Store) SaveStageRunnerSettings(
 	id StageRunnerIdentity, revision uint64, expectedRun *StageRunnerEpoch, selection StageRunnerSelection,
 	receipt StageRunnerReceipt, restart *StageRunnerRestart, validatePolicy func() error,
@@ -128,16 +128,6 @@ func (s Store) SaveStageRunnerSettings(
 		(restart != nil && (expectedRun == nil || !restart.valid() ||
 			*expectedRun != restart.Source || receipt.State != "pending" || receipt.RequestID != restart.RequestID)) {
 		return result, fmt.Errorf("settings_input: неверная запись")
-	}
-	if expectedRun == nil {
-		orchestrator, rc, err := s.LockOrchestrator(id.Task)
-		if err != nil {
-			if rc == 73 {
-				err = fmt.Errorf("%w: identity_conflict: оркестратор ещё работает", ErrConflict)
-			}
-			return result, err
-		}
-		defer orchestrator.Close()
 	}
 	task, err := s.openTask(id.Task, true)
 	if err != nil {
@@ -170,14 +160,13 @@ func (s Store) SaveStageRunnerSettings(
 	if err := s.requireNoLegacySwitch(id); err != nil {
 		return result, err
 	}
-	if expectedRun != nil {
-		actual, err := s.readStageRunnerActual(task, id)
-		if err != nil {
-			return result, err
-		}
-		if actual == nil || actual.Run != *expectedRun {
-			return result, fmt.Errorf("%w: identity_conflict: работающий запуск сменился", ErrConflict)
-		}
+	actual, err := s.readStageRunnerActual(task, id)
+	if err != nil {
+		return result, err
+	}
+	if actual == nil && expectedRun != nil ||
+		actual != nil && (expectedRun == nil || actual.Run != *expectedRun) {
+		return result, fmt.Errorf("%w: identity_conflict: работающий запуск этапа сменился", ErrConflict)
 	}
 	result = StageRunnerSettings{
 		Selection: selection, Revision: revision + 1, Receipt: &receipt, Restart: restart,

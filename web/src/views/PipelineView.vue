@@ -900,7 +900,9 @@
                   <p v-if="runnerSettingsLoading" class="runner-hint" role="status">
                     {{ translate('core.stageSettingsLoading') }}
                   </p>
-                  <p v-if="runnerSettingsError" class="runner-hint" role="alert">{{ runnerSettingsError }}</p>
+                  <UiInlineMessage v-if="runnerSettingsError" tone="danger">
+                    {{ runnerSettingsError }}
+                  </UiInlineMessage>
                   <UiButton v-if="runnerSettingsError && !runnerSettings" variant="text"
                             @click="retryRunnerSettings">
                     {{ translate('core.stageSettingsRetry') }}
@@ -1179,6 +1181,7 @@ import {
   alertDialog,
   confirmDialog,
   UiButton,
+  UiInlineMessage,
   UiDialog,
   UiDisclosureButton,
   UiIconButton,

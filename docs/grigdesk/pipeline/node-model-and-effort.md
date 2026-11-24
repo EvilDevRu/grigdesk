@@ -70,13 +70,13 @@ Inherited — живая базовая пара выбранного испол
 argv profile/attempt/node/stage и JSON payload. Оба API закрыты общим auth guard.
 
 Authority — `runner-settings/<node>.json` внутри trusted attempt directory: каталог 0700,
-owned regular-файл 0600 без symlink/hardlink. Commit использует pipeline lock, затем
-task-directory lock, CAS identity/revision/run и durable replace с fsync. До commit ошибка
+owned regular-файл 0600 без symlink/hardlink. Go использует task-directory lock,
+CAS identity/revision/run и durable replace с fsync. До commit ошибка
 не меняет ни одного поля и не останавливает процесс. Повтор requestId с тем же payload
 возвращает receipt; другой payload либо прежний запрос после новой записи конфликтуют.
 
-На Linux режим `next` сверяет живую эпоху или блокирует запуск остановленной
-попытки до записи. Проверка модели и effort использует metadata helper закреплённого
+На Linux режим `next` сверяет живую эпоху выбранного этапа. Если другой узел
+работает, настройки будущего этапа можно сохранить до публикации его процесса. Проверка модели и effort использует metadata helper закреплённого
 runtime. Снимки каталога и политики проверяются при записи. Формат защищённой
 записи и хэш запроса совместимы с историческим движком. Go публикует параметры
 запуска в защищённом control до выдачи процессу разрешения на выполнение.
