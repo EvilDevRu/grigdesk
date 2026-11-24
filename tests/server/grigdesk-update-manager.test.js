@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { hash } from 'node:crypto';
+import { mkdtemp, readFile, realpath, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -152,7 +153,7 @@ test('UP-01 desktop запускает отвязанный worker с origin и 
   assert.equal(launches[0].file, process.execPath);
   assert.deepEqual(launches[0].args.slice(1), [
     '--root', root,
-    '--work-root', path.join(root, '.state'),
+    '--work-root', path.join(root, 'update-work', hash('sha256', await realpath(root))),
     '--state', path.join(root, 'state.json'),
     '--job', job.id,
     '--mode', 'desktop',
@@ -202,7 +203,7 @@ test('UP-08 isRestarting сверяет id и статус без fresh-пров
   assert.equal(await manager.isRestarting('fixture-job'), false);
 });
 
-test('DH-17 worker размещает рабочую копию на диске кода', async (t) => {
+test('DH-17 worker размещает рабочую копию в папке данных на том же диске', async (t) => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-work-root-'));
   let argv;
 
@@ -229,5 +230,6 @@ test('DH-17 worker размещает рабочую копию на диске 
   });
 
   await manager.startApply({ expectedCheckoutSha: HEAD });
-  assert.equal(argv[argv.indexOf('--work-root') + 1], path.join(root, '.state'));
+  assert.equal(argv[argv.indexOf('--work-root') + 1],
+    path.join(root, 'data', 'update-work', hash('sha256', await realpath(root))));
 });

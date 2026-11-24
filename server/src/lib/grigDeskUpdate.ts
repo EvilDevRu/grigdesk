@@ -2,8 +2,8 @@ import { config as runtimeConfig } from '../config.ts';
 import { PACKAGE_UPDATE_ERROR, PACKAGE_UPDATE_MESSAGE } from './packagedRelease.ts';
 
 import { spawn } from 'node:child_process';
-import { randomUUID } from 'node:crypto';
-import { mkdir, rm, stat, writeFile } from 'node:fs/promises';
+import { hash, randomUUID } from 'node:crypto';
+import { mkdir, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -259,10 +259,21 @@ export class GrigDeskUpdateManager {
    */
   async #launch(job: UpdateJob): Promise<void> {
     const mode = this.desktop() ? 'desktop' : this.underSystemd() ? 'systemd' : 'script';
+    const stateDirectory = path.dirname(this.statePath);
+    const [codeDirectory, codeStat, stateStat] = await Promise.all([
+      realpath(this.rootDir),
+      stat(this.rootDir),
+      stat(stateDirectory),
+    ]);
+    // Публикация сборки использует rename. На разных дисках worker создаёт
+    // временный игнорируемый каталог рядом с исходниками и удаляет его сам.
+    const workRoot = codeStat.dev === stateStat.dev
+      ? path.join(stateDirectory, 'update-work', hash('sha256', codeDirectory))
+      : codeDirectory;
     const workerArgs = [
       WORKER_PATH,
       '--root', this.rootDir,
-      '--work-root', path.join(this.rootDir, '.state'),
+      '--work-root', workRoot,
       '--state', this.statePath,
       '--job', job.id,
       '--mode', mode,

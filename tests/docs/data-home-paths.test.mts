@@ -29,7 +29,6 @@ const exceptions: Array<[string, string, string]> = [
   ['server/src/lib/kimi/sandbox.ts', 'const legacyEnv =', 'Защита настоящей старой раскладки.'],
   ['server/src/lib/dataHomeBoot.ts', 'server/.state', 'Сторож прежней раскладки.'],
   ['server/src/lib/dataHomeBoot.ts', "codeRoot, '.env'", 'Сторож прежнего файла настроек.'],
-  ['server/src/lib/grigDeskUpdate.ts', "'--work-root'", 'Рабочая копия обновления на диске кода.'],
   ['server/scripts/glmLiveSmoke.mts', "chatsDir: path.join(root, 'chats')", 'Временная тестовая область.'],
 ];
 

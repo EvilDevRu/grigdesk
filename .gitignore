@@ -15,6 +15,7 @@ mobile/android/**/*.keystore
 # как новый сервер подтвердил SHA, и не должны делать checkout dirty в это окно.
 web/dist.grigdesk-backup-*/
 server/node_modules.grigdesk-backup-*/
+/grigdesk-update-work.*/
 server/runtime/deepseek/
 # Пакет DeepSeek владеет snapshot по commit из upstream.lock.json; в Git — manifest и патчи.
 /deepseek/vendor/deepseek-harness/upstream/
