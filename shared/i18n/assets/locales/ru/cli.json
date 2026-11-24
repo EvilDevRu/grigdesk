@@ -396,9 +396,21 @@
   "distribution": {
     "build": "Собрать дистрибутив",
     "buildDescription": "полный релизный прогон в отдельной копии",
+    "linuxX64": "Linux x64",
+    "linuxX64Description": "полный релизный прогон в отдельной копии",
+    "windowsX64": "Windows x64",
+    "windowsX64Description": "локальный офлайн-ZIP с окном и сервером, для упаковки нужен Wine",
+    "android": "Android APK",
+    "androidDescription": "debug-сборка приложения со встроенным интерфейсом",
+    "macos": "macOS Apple Silicon",
+    "linuxArm64": "Linux ARM64",
+    "windowsArm64": "Windows ARM64",
+    "unavailable": "недоступно",
+    "unavailableDescription": "Сборка этой цели из меню недоступна.",
     "progress": {
       "snapshot": "Снимок исходников",
       "setup": "Подготовка Node.js и рабочих копий",
+      "windows": "Упаковка Windows x64",
       "acceptance": "Проверка установки",
       "record": "Запись проверенного кандидата",
       "scope": {

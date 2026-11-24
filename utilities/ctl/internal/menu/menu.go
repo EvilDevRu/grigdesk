@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"regexp"
+	"runtime"
 	"slices"
 	"strings"
 
@@ -20,6 +21,7 @@ type item struct {
 	children []item
 	prompt   string
 	desc     string
+	disabled bool
 }
 
 type session struct {
@@ -116,7 +118,12 @@ func ConfirmCleanup(
 	return choice == 1, err
 }
 
+// rootItems перечисляет доступные команды checkout и запланированные цели.
+// Заблокированные платформы видны в меню, но не получают команду сборки.
 func rootItems() []item {
+	linux := runtime.GOOS == "linux"
+	linuxX64 := linux && runtime.GOARCH == "amd64"
+
 	return []item{
 		{label: "open", argv: []string{"open"}},
 		{label: "status", argv: []string{"status"}},
@@ -151,7 +158,20 @@ func rootItems() []item {
 		}},
 		{label: "artifactsCleanup", argv: []string{"artifacts-cleanup"}},
 		{label: "dist", children: []item{
-			{label: "distribution.build", argv: []string{"dist", "build", "--channel", "dev"}},
+			{
+				label:    "distribution.linuxX64",
+				argv:     []string{"dist", "build", "--target", "linux-x64", "--channel", "dev"},
+				disabled: !linuxX64,
+			},
+			{
+				label:    "distribution.windowsX64",
+				argv:     []string{"dist", "build", "--target", "windows-x64", "--channel", "dev"},
+				disabled: !linuxX64,
+			},
+			{label: "distribution.android", argv: []string{"build", "apk"}, disabled: !linux},
+			{label: "distribution.macos", disabled: true},
+			{label: "distribution.linuxArm64", disabled: true},
+			{label: "distribution.windowsArm64", disabled: true},
 			{label: "distribution.doctor", argv: []string{"dist", "doctor"}},
 		}},
 		{label: "exit"},
@@ -179,6 +199,9 @@ func (ui *session) choose(title string, items []item, root bool) int {
 		}
 		selected = choice
 		current := items[choice]
+		if current.disabled {
+			continue
+		}
 		if len(current.children) > 0 {
 			if code := ui.choose(current.label, current.children, false); code != 0 {
 				return code

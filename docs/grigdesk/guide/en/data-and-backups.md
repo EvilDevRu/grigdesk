@@ -22,6 +22,7 @@ Folders are created on demand: a missing folder means the feature has not been u
 | `factory/` | Pipeline: engine state and executor homes, routes and drafts, task triage |
 | `qwen-runtime/` | Qwen Code session homes: memory and executor session bindings |
 | `runtimes/` | Standalone server and DeepSeek delivery caches |
+| `dev/android/` | Android SDK, Java, Android settings, Gradle, and source build downloads |
 | `profiles/` | Factory project profiles (binary delivery) |
 | `plugins/` | Installed user plugins; working data lives in `state/plugins/` |
 | `drivers/`, `db-engines/` | External tracker drivers and database engines |

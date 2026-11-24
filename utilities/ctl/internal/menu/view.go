@@ -145,8 +145,15 @@ func (ui *session) itemRows(items []item, selected int, root bool, columns int) 
 		if index == selected {
 			active = len(rows)
 		}
-		rows = append(rows, terminal.Option(ui.lang.Text(value.label), columns, index == selected,
-			len(value.children) != 0))
+		label := ui.lang.Text(value.label)
+		if value.disabled {
+			label += " · " + ui.lang.Text("distribution.unavailable")
+		}
+		line := terminal.Option(label, columns, index == selected, len(value.children) != 0)
+		if value.disabled {
+			line.Spans[0].Tone = terminal.Muted
+		}
+		rows = append(rows, line)
 	}
 	return rows, active
 }
@@ -166,7 +173,9 @@ func itemGroup(label string) string {
 // Пункты без описания не получают техническое имя ключа вместо текста.
 func (ui *session) descriptionRows(selection item, columns int, inset string) []terminal.Row {
 	key := selection.desc
-	if key == "" {
+	if selection.disabled {
+		key = "distribution.unavailableDescription"
+	} else if key == "" {
 		key = selection.label + "Description"
 	}
 	text := ui.lang.Text(key)

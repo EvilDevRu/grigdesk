@@ -136,36 +136,92 @@ async function returnFromBuild(session: ReturnType<typeof startPty>) {
   assertRestored(result, output);
 }
 
-test('CTL-GO-08: сборка дистрибутива возвращается на тот же экран после результата', async (t) => {
+for (const [index, target, label] of [
+  [0, 'linux-x64', 'Linux x64'], [1, 'windows-x64', 'Windows x64'],
+] as const) {
+  test(`CTL-GO-08: ${label} запускает свою цель и возвращается в меню`, {
+    skip: process.platform !== 'linux' || process.arch !== 'x64',
+  }, async (t) => {
+    const fixture = await terminalBuildFixture(t, true);
+    const script = path.join(fixture.root, 'tools/distribution.mts');
+    const expected = JSON.stringify(['build', '--target', target, '--channel', 'dev']);
+
+    await writeFile(script, [
+      'if (process.env.GRIGDESK_CTL_DIST_PROGRESS !== "1") process.exit(2);',
+      `if (JSON.stringify(process.argv.slice(2)) !== ${JSON.stringify(expected)}) process.exit(2);`,
+      'process.stderr.write("\\r25% Подготовка дистрибутива");',
+      'await new Promise((resolve) => setTimeout(resolve, 300));',
+      'process.stderr.write("\\r100% Готово\\n");',
+      'process.stdout.write("Кандидат собран\\n");',
+    ].join('\n'));
+
+    const session = launchBuild(t, fixture, 'web', true);
+
+    await session.wait(menuTitle);
+
+    const root = session.output().length;
+
+    session.write(down.repeat(8) + '\r');
+    await session.wait(/› Linux x64/u, 4000, root);
+
+    if (index > 0) {
+      session.write(down);
+      await session.wait(new RegExp('› ' + label, 'u'), 4000, root);
+    }
+
+    session.write('\r');
+    await session.wait(/25% Подготовка дистрибутива/u);
+    await session.wait(/Кандидат собран/u);
+    await session.wait(/Enter \/ Esc — назад/u);
+
+    const beforeResult = session.output().length;
+
+    session.write('\x1b');
+    await session.wait(new RegExp('› ' + label, 'u'), 4000, beforeResult);
+    assert.doesNotMatch(session.output(), /\x1b\[\?1049l/u);
+    session.write('\x03');
+
+    const result = await session.done;
+
+    assert.equal(result.code, 130);
+    assertRestored(result, session.output());
+  });
+}
+
+test('CTL-GO-DIST: заблокированные платформы сохраняют выбор, Android запускает сборку APK', {
+  skip: process.platform !== 'linux' || process.arch !== 'x64',
+}, async (t) => {
   const fixture = await terminalBuildFixture(t, true);
-  const script = path.join(fixture.root, 'tools/distribution.mts');
-
-  await writeFile(script, [
-    'if (process.env.GRIGDESK_CTL_DIST_PROGRESS !== "1") process.exit(2);',
-    'process.stderr.write("\\r25% Подготовка дистрибутива");',
-    'await new Promise((resolve) => setTimeout(resolve, 300));',
-    'process.stderr.write("\\r100% Готово\\n");',
-    'process.stdout.write("Кандидат собран\\n");',
-  ].join('\n'));
-
-  const session = launchBuild(t, fixture, 'web', true);
+  const session = launchBuild(t, fixture, 'apk', true);
 
   await session.wait(menuTitle);
-
-  const root = session.output().length;
-
   session.write(down.repeat(8) + '\r');
-  await session.wait(/› Собрать дистрибутив/u, 4000, root);
+  await session.wait(/› Linux x64/u);
+  session.write(down.repeat(3));
+
+  for (const label of ['macOS Apple Silicon', 'Linux ARM64', 'Windows ARM64']) {
+    const selected = new RegExp('› ' + label + ' · недоступно', 'u');
+
+    await session.wait(selected);
+
+    const before = session.output().length;
+
+    session.write('\r');
+    await session.wait(selected, 4000, before);
+    session.write(down);
+  }
+
+  const before = session.output().length;
+
+  session.write(up.repeat(4));
+  await session.wait(/› Android APK/u, 4000, before);
   session.write('\r');
-  await session.wait(/25% Подготовка дистрибутива/u);
-  await session.wait(/Кандидат собран/u);
-  await session.wait(/Enter \/ Esc — назад/u);
+  await session.wait(/Сборка завершена|Сборка выполнена/iu);
 
-  const beforeResult = session.output().length;
+  const log = await buildLog(fixture);
 
-  session.write('\x1b');
-  await session.wait(/› Собрать дистрибутив/u, 4000, beforeResult);
-  assert.doesNotMatch(session.output(), /\x1b\[\?1049l/u);
+  assert.match(log.text, /fixture-out build/u);
+  assert.doesNotMatch(session.output(), /Собрать дистрибутив/u);
   session.write('\x03');
 
   const result = await session.done;

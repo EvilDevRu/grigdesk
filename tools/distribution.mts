@@ -11,7 +11,7 @@ import { verifyDistributionArtifacts, type DistributionTrust }
 import { verifyInstallation, type VerificationScopeState } from './verifyInstallation.mts';
 import { runDistributionBuild } from './distributionBuild.mts';
 import { artifactsPath } from '../shared/runtime/dataHome.ts';
-import { runEnvironmentReport } from './releaseEnvironment.mts';
+import { runEnvironmentReport, selectDistributionTarget } from './releaseEnvironment.mts';
 import { RELEASE_SIGNING_PUBLIC_KEY }  from '../shared/runtime/releaseChannelContracts.ts';
 import { copyInstallFile } from '../shared/node/binaryInstall.ts';
 import { verifyReleaseInstaller } from './releaseArtifactVerification.mts';
@@ -27,7 +27,8 @@ const USAGE = [
   'grigdesk-ctl dist — подготовка и проверка дистрибутива из исходников',
   '',
   'Использование:',
-  '  dist build [--channel release|dev]',
+  '  dist build [--target linux-x64|windows-x64] [--channel release|dev]',
+  '  Windows x64: локальный ZIP канала dev, требуется Wine.',
   '  dist check --from <каталог> [--commit <SHA40>]',
   '  dist check --local-run <UUID>',
   '  dist install --from <каталог> [--commit <SHA40>] --mode local|remote|server',
@@ -253,7 +254,7 @@ async function chooseConfirmation(question: string, details: string[]): Promise<
  */
 function validateArguments(argv: string[]): void {
   const command = argv[0];
-  const allowed = command === 'build' ? ['--channel'] : command === 'doctor' ? []
+  const allowed = command === 'build' ? ['--channel', '--target'] : command === 'doctor' ? []
     : ['--from', '--local-run', '--commit', ...command === 'install'
       ? ['--mode', '--root', '--data-home', '--user-data', '--bin-dir',
         '--applications-dir', '--unit-dir', '--yes'] : []];
@@ -525,11 +526,27 @@ async function main(argv: string[]): Promise<number> {
   }
 
   if (command === 'build') {
+    const target = valueOf(argv, '--target');
+    const channel = valueOf(argv, '--channel');
+
+    if (target && target !== 'windows-x64'
+      && (target !== 'linux-x64' || selectDistributionTarget(process.platform, process.arch) !== target)) {
+      throw new Error('dist_target_unsupported');
+    }
+    if (target === 'windows-x64' && channel && channel !== 'dev') {
+      throw new Error('dist_windows_requires_dev');
+    }
+
     const progress = createDistributionProgress();
 
     try {
-      return await runDistributionBuild(process.cwd(), valueOf(argv, '--channel') ?? 'release',
-        defaultRunsRoot(), progress);
+      if (target === 'windows-x64') {
+        const { runDistributionWindowsBuild } = await import('./distributionWindows.mts');
+
+        return await runDistributionWindowsBuild(process.cwd(), progress);
+      }
+
+      return await runDistributionBuild(process.cwd(), channel ?? 'release', defaultRunsRoot(), progress);
     } finally {
       progress?.close();
     }

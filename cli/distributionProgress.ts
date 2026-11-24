@@ -3,7 +3,7 @@ import { cliTranslator } from './i18n.ts';
 import { terminalLabel, terminalText } from './terminal.ts';
 import type { PipelineObserver } from '../tools/releasePipeline.mts';
 
-type Phase = 'snapshot' | 'setup' | 'acceptance' | 'record';
+type Phase = 'snapshot' | 'setup' | 'windows' | 'acceptance' | 'record';
 
 /**
  * Терминал обновляет одну строку, а меню читает ту же строку из stderr через CR.

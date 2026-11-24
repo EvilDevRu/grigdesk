@@ -19,10 +19,11 @@ tools/mobile build
 ```
 
 Эта же debug-сборка доступна как `grigdesk-ctl build apk` и пункт «Android APK»
-в меню «Сборка»: [команда, прогресс и путь результата](../server/ctl-build-apk.md).
+в меню «Сборка» и «Дистрибутив». [Команда, прогресс и путь результата](../server/ctl-build-apk.md)
 
 `deps` загружает и проверяет закреплённые архивы, принимает SDK-лицензии и устанавливает
-пакеты. `doctor` сверяет настоящие исполнимые файлы, версии, установленный SDK и jar
+пакеты. Загрузки, JDK, SDK, настройки Android и кэш Gradle по умолчанию лежат в `dev/android/`
+папки данных. `doctor` сверяет настоящие исполнимые файлы, версии, установленный SDK и jar
 [Gradle Wrapper](gradle-wrapper.md) с суммой из lock.
 Пути меняются через `GRIGDESK_ANDROID_JDK`, `GRIGDESK_ANDROID_HOME`,
 `GRIGDESK_ANDROID_USER_HOME`, `GRIGDESK_ANDROID_GRADLE_HOME`, `GRIGDESK_MOBILE_DOWNLOADS`.
@@ -31,7 +32,8 @@ tools/mobile build
 `check` запускает прежние мобильные unit/UI/contract тесты под memory guard, typecheck и
 подготовку прежнего :app (mobile build и cap sync), Gradle unit/lint обоих модулей. `build` собирает общий web атомарно через
 `tools/client-ui.mts` в client/src/main/assets/ui с api-version.json и release.json, затем
-:client:assembleDebug. Результат — grigdesk-mobile-debug.apk в GRIGDESK_MOBILE_APK_DIR.
+`:client:assembleDebug`. Результат по умолчанию — `~/.grigdesk/dists/grigdesk-mobile-debug.apk`.
+Каталог `dists/` находится в папке данных, а `GRIGDESK_MOBILE_APK_DIR` переопределяет путь APK.
 В build/release Capacitor sync и web/dist не участвуют; старый :app остаётся только в проверках. Android-сборка не входит в общий
 `tests/run-all.sh` и не перезапускает рабочий GrigDesk.
 
@@ -43,7 +45,8 @@ GRIGDESK_ANDROID_KEY_ALIAS. Новый ключ автоматически не 
 этим ключом через apksigner/keytool, пакет и версия — через aapt2 и mobile/package.json.
 До первого выпуска версия остаётся 0.1.0, versionCode 100.
 
-Готовые grigdesk-mobile-release.apk и grigdesk-mobile-release.json остаются в каталоге
-сборки GRIGDESK_MOBILE_APK_DIR. Публикации, установки на устройство и раздачи обновления
+Готовые `grigdesk-mobile-release.apk` и `grigdesk-mobile-release.json` сохраняются в
+`state/mobile-apk` папки данных или в явно заданном `GRIGDESK_MOBILE_APK_DIR`.
+Публикации, установки на устройство и раздачи обновления
 с сервером эта команда не выполняет. APK legacy-приложения и его протокол обновлений
 остаются отдельными. Прежний пакет того же applicationId перед установкой удаляет человек.

@@ -33,7 +33,7 @@ debug —grigdesk-mobile-debug.apk. Метаданные содержат раз
 0.1.9 с прежними именами с этим сервером не работает; новое приложение собирается заново.
 Переименование клиента не требует переиздания сертификатов посредника.
 
-`tools/mobile` берёт JDK/SDK из `.state/android-jdk-21` и `.state/android-sdk`; пути можно
-переопределить через GRIGDESK_ANDROID_JDK/GRIGDESK_ANDROID_HOME. DevLink использует юнит
+`tools/mobile` берёт JDK и SDK из `dev/android/` папки данных. Пути можно переопределить
+через `GRIGDESK_ANDROID_JDK` и `GRIGDESK_ANDROID_HOME`. DevLink использует юнит
 `grigdesk-mobile-devlink` и `~/.config/grigdesk/mobile-devlink`. Release и установка на устройство
 остаются действиями владельца; автоматические проверки используют временные каталоги.

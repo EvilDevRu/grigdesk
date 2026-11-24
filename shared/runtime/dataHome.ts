@@ -29,6 +29,7 @@ export const DATA_LAYOUT = {
   dbEngines: 'db-engines',
   profiles: 'profiles',
   artifacts: 'artifacts',
+  dists: 'dists',
   moveJournal: '.move-journal.json',
   moveLock: '.move-lock',
 } as const;

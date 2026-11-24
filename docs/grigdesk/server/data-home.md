@@ -32,7 +32,7 @@ GrigDesk хранит настройки и рабочие данные вне �
 | `uiReleases` | `state/ui-releases` | Прежние UI-версии; новым сервером не используются |
 | `serverRuntime` | `runtimes/server` | Приватный кэш автономного сервера |
 | `deepseekRuntime` | `runtimes/deepseek` | Приватный кэш распакованных поставок DeepSeek |
-| `mobileApk` | `state/mobile-apk` | APK, описание выпуска и журнал DevLink |
+| `mobileApk` | `state/mobile-apk` | Подписанный APK, описание выпуска и журнал DevLink |
 | `mediaVenv` | `state/media-venv` | Python для речи |
 | `mediaHf` | `state/hf` | Модели речи |
 | `mobile` | `mobile` | TLS-ключи и привязки телефона |
@@ -44,6 +44,7 @@ GrigDesk хранит настройки и рабочие данные вне �
 | `dbEngines` | `db-engines` | Внешние драйверы баз данных |
 | `profiles` | `profiles` | Проектные профили фабрики в бинарной поставке |
 | `artifacts` | `artifacts` | Рабочая папка агентов: снимки, дампы, скрипты и отчёты проверок |
+| `dists` | `dists` | Готовые локальные дистрибутивы Linux x64, Windows x64 и отладочный Android APK |
 | `moveJournal` | `.move-journal.json` | Журнал переноса |
 | `moveLock` | `.move-lock` | Блокировка команды переноса |
 
@@ -204,7 +205,8 @@ leases копий внешних CLI исполнителей: живые сес
 - Установленное окно `<код>/bin/grigdesk-app`, его `runtime.json` в
   `~/.local/share/grigdesk/desktop`, каталог данных окна `~/.config/GrigDesk`: это клиентская
   программа.
-- Разработка: Android SDK, Gradle, загрузки, ключи подписи APK и состояние DevLink. Неиспользуемые каталоги прежней конфигурации не удаляются.
+- Android SDK, JDK, настройки Android, Gradle и загрузки по умолчанию находятся в `dev/android/`
+  папки данных. Ключ подписи APK и состояние DevLink имеют отдельные пути.
 - Сборки и ресурсы кода: `node_modules`, `web/dist`, legacy generation DeepSeek,
   `third_party`, `bin/grigdesk-relay`, `desktop/release`.
   Обновлятель готовит копию Git в `update-work/<хэш рабочей копии>` рядом с файлом состояния

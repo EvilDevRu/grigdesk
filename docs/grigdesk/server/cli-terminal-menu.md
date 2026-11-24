@@ -33,6 +33,18 @@
 экран. NO_COLOR и TERM=dumb отключают цвет, dumb также отключает позиционирование курсора.
 Внешние управляющие последовательности очищаются на экране.
 
+В «Дистрибутиве» на Linux x64 доступны Linux x64, Windows x64 и Android APK.
+macOS Apple Silicon, Linux ARM64 и Windows ARM64 выделены приглушённым цветом и подписью
+«недоступно». Enter на такой строке оставляет меню открытым и сохраняет выделение.
+Linux запускает [релизный рецепт](lightweight-installer.md#локальная-сборка-и-официальный-кандидат),
+Windows — [сборку офлайн-ZIP](windows-offline-installation.md#локальная-сборка-из-linux),
+Android — [debug-сборку APK](ctl-build-apk.md).
+
+По умолчанию все три цели сохраняют результат под `~/.grigdesk/dists/`. Linux использует
+`dist-build-*/release-artifacts/`, Windows — `dist-windows-*/`, Android кладёт
+`grigdesk-mobile-debug.apk` в корень `dists/`. Каталог `dists/` находится в папке данных
+GrigDesk (`GRIGDESK_HOME`), а рабочие файлы и журналы CLI хранятся в папке артефактов.
+
 ## Уборка артефактов
 
 `grigdesk-ctl artifacts-cleanup [--dry-run] [--older-than 7d] [--keep-generations 3] [--json]`

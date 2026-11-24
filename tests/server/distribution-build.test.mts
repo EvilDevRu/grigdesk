@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { execFile } from 'node:child_process';
@@ -8,6 +9,7 @@ import { promisify } from 'node:util';
 import { sha256File } from '../../shared/node/hash.ts';
 import { assertRestored, startPty } from '../cli/helpers/pty.mts';
 import { createSandbox } from '../cli/helpers/sandbox.mts';
+import { publishDistributionOutput } from '../../tools/distributionOutput.mts';
 
 const execute = promisify(execFile);
 const repository = path.resolve(import.meta.dirname, '../..');
@@ -27,10 +29,14 @@ test('DIST-BUILD-FAIL-GATE: настоящий source dist выполняет т
   const cleanupRecord = path.join(box.home, 'cleanup-record.json');
   const marker = path.join(box.home, 'bundle-marker');
   const artifacts = path.join(box.home, 'artifacts-with-a-deliberately-long-socket-test-path');
+  const tools = path.join(repository, 'tools');
+  const probe = path.join(tools, 'android/probe-apk');
+  const generated = [path.join(probe, 'assets'), path.join(probe, 'jniLibs')];
 
-  await fs.cp(path.join(repository, 'tools'), path.join(box.root, 'tools'), {
+  // Локальные результаты Android могут занимать сотни мегабайт и не входят в рецепт фикстуры.
+  await fs.cp(tools, path.join(box.root, 'tools'), {
     recursive: true,
-    filter: (source) => !source.split(path.sep).includes('node_modules'),
+    filter: (source) => !generated.includes(source) && !source.split(path.sep).includes('node_modules'),
   });
 
   // Отпечаток рецепта читает Go-окружение и скрипты утилит из снимка источника.
@@ -160,9 +166,12 @@ test('DIST-BUILD-FAIL-GATE: настоящий source dist выполняет т
 
   const [id] = await fs.readdir(path.join(box.home, 'runs'));
   const record = JSON.parse(await fs.readFile(path.join(box.home, 'runs', id!, 'run.json'), 'utf8'));
+  const dists = path.join(box.home, '.grigdesk', 'dists');
 
   assert.equal(record.stage, 'failed');
   assert.equal(record.artifacts.length, 0);
+  assert.equal(record.realArtifactsRoot, path.join(dists, runDir!, 'release-artifacts'));
+  assert.deepEqual(await fs.readdir(dists), []);
 
   const cleanup = JSON.parse(await fs.readFile(cleanupRecord, 'utf8'));
 
@@ -225,4 +234,40 @@ test('DIST-BUILD-FAIL-GATE: настоящий source dist выполняет т
   assert.equal(stale.code, 2);
   assert.match(stale.stderr, /dist_source_api_fingerprint_mismatch/u);
   assert.deepEqual(await fs.readdir(path.join(box.home, 'runs')), [id]);
+});
+
+test('Готовые комплект и ZIP публикуются отдельно, включая смену файловой системы', async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-dist-output-'));
+  const dists = path.join(root, 'dists');
+  const bundle = path.join(root, 'bundle');
+  const archive = path.join(root, 'build.zip');
+  const linux = path.join(dists, 'dist-build-test', 'release-artifacts');
+  const windows = path.join(dists, 'dist-windows-test', 'build.zip');
+
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  await fs.mkdir(dists);
+  await fs.mkdir(bundle);
+  await fs.writeFile(path.join(bundle, 'dev.json'), 'bundle');
+  await fs.writeFile(archive, 'zip');
+
+  await publishDistributionOutput(bundle, linux);
+  assert.equal(await fs.readFile(path.join(linux, 'dev.json'), 'utf8'), 'bundle');
+  await assert.rejects(fs.stat(bundle), { code: 'ENOENT' });
+
+  const rename = fs.rename;
+
+  t.mock.method(fs, 'rename', async (...args: Parameters<typeof fs.rename>) => {
+    if (args[0] === archive) {
+      throw Object.assign(new Error('Разные тома'), { code: 'EXDEV' });
+    }
+
+    return rename(...args);
+  });
+
+  await publishDistributionOutput(archive, windows);
+  assert.equal(await fs.readFile(windows, 'utf8'), 'zip');
+  assert.deepEqual(await fs.readdir(path.dirname(windows)), ['build.zip']);
+  await assert.rejects(fs.stat(archive), { code: 'ENOENT' });
+  await assert.rejects(publishDistributionOutput(archive, windows), { code: 'EEXIST' });
+  assert.equal(await fs.readFile(windows, 'utf8'), 'zip');
 });

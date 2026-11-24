@@ -125,22 +125,31 @@ With `TERM=dumb`, progress stages appear on separate lines.
 
 ## Checking a candidate from source
 
-Open “Distribution” in the `grigdesk-ctl` menu. Choose an Actions artifact directory for official files,
-or the UUID printed by a successful `dist build` for your own local build:
+On Linux x64, open **Distribution** in the `grigdesk-ctl` menu and select a target.
+
+- **Linux x64** runs the full release recipe in a source snapshot and prints a UUID.
+- **Windows x64** builds a local offline ZIP and prints its path. The build machine needs
+  Wine with support for 32-bit NSIS programs. Run the installer from the ZIP on Windows.
+- **Android APK** runs the same debug build as `grigdesk-ctl build apk`.
+
+Builds are saved under `~/.grigdesk/dists/` by default. The Linux bundle is in
+`dist-build-*/release-artifacts/`, the Windows ZIP is in `dist-windows-*/`, and the
+Android build writes `grigdesk-mobile-debug.apk` directly in `dists/`.
+
+**macOS Apple Silicon**, **Linux ARM64** and **Windows ARM64** are marked unavailable.
+The terminal command and the **Linux x64** menu item show the share of completed stages, the current stage and its
+latest output line. The log directory appears after the snapshot is prepared, and the bar
+reaches 100% once the verified candidate is recorded. On Linux the native server tests
+use a dedicated scope in the user systemd manager. Building the AppImage requires curl, unzip, and 7z.
+
+For Linux and macOS, `dist check` installs all three modes in temporary profiles.
+`--from` accepts an Actions artifact directory and uses the official product key.
+`--local-run` accepts a UUID printed by a native build and uses its private run record.
 
 ```sh
 grigdesk-ctl dist check --from /artifact/directory
 grigdesk-ctl dist check --local-run <UUID>
 ```
-
-Checks install all three modes into temporary profiles. “Install for testing” asks for the mode,
-separate paths and confirmation. A local candidate trusts only its own private run record and cannot
-be published; `--from` uses the official product key.
-`dist build` runs the full release recipe in a source snapshot. The terminal command and the
-“Build distribution” menu item show the share of completed stages, the current stage and its
-latest output line. The log directory appears after the snapshot is prepared, and the bar
-reaches 100% once the verified candidate is recorded. On Linux the native server tests
-use a dedicated scope in the user systemd manager. Building the AppImage requires curl, unzip, and 7z.
 
 On Apple Silicon, **Build → All** and `grigdesk-ctl build all` run
 `dist build --channel dev`. This requires macOS 15 or later, the Xcode tools,

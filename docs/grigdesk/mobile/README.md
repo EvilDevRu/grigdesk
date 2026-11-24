@@ -37,7 +37,7 @@ v1 сохранено отдельно. Основной HTTP и прежний 
 - [Привязка в настройках: карточки посредников, телефоны и диалог QR](pairing-settings.md)
 - [Нативное развёртывание, выбор задания, перенос посредника и возобновление установки](relay-deploy.md)
 - [Go-посредник одним файлом: сборка, выпуск и TLS-пробы Go-кандидата](relay-binary.md)
-- [Сборка Android, версии и ключ подписи](android-build.md)
+- [Сборка Android, инструменты в папке данных, debug APK в dists и ключ подписи](android-build.md)
 - [Пробный APK: заставка при запуске и возврате из фона, каталог Harness и установка речи](android-runtime.md)
 - [Упаковка Linux в APK: rootfs, PRoot и target SDK в DroidDeck](android-linux-packaging.md)
 - [Gradle Wrapper в git: зачем хранится, сверка jar и `cap migrate`](gradle-wrapper.md)

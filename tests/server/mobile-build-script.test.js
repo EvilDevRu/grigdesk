@@ -29,8 +29,8 @@ async function fixture(t) {
     '0x' + createHash('md5').update(lock.gradleDistribution.url).digest('hex'),
   ).toString(36);
   const cachedGradle = path.join(
-    project,
-    '.state/android-gradle/wrapper/dists/gradle-8.14.3-bin',
+    dataHome,
+    'dev/android/gradle/wrapper/dists/gradle-8.14.3-bin',
     distribution,
     'gradle-8.14.3/bin/gradle',
   );
@@ -294,15 +294,36 @@ test('MB-24: подменённый gradle-wrapper.jar останавливае�
 });
 
 
-test('MB-DH успешная сборка публикует APK только в общей папке', async (t) => {
+test('MB-DH debug APK использует dists с приоритетом явного каталога APK', async (t) => {
   const fx = await fixture(t);
+  const dists = path.join(fx.env.GRIGDESK_HOME, 'dists');
+  const customArtifacts = path.join(fx.env.HOME, 'custom artifacts');
+  const customApk = path.join(fx.env.HOME, 'custom apk');
 
-  await execute('bash', ['tools/mobile', 'build'], {
-    cwd: fx.project,
-    env: { ...fx.env, GRIGDESK_FAKE_FAIL: 'success' },
-  });
-  assert.equal(await readFile(path.join(fx.env.GRIGDESK_HOME, 'state/mobile-apk/grigdesk-mobile-debug.apk'),
-    'utf8'), 'debug-apk');
+  for (const [directory, overrides] of [
+    [dists, {}],
+    [dists, { GRIGDESK_ARTIFACTS_DIR: customArtifacts }],
+    [customApk, { GRIGDESK_ARTIFACTS_DIR: customArtifacts, GRIGDESK_MOBILE_APK_DIR: customApk }],
+  ]) {
+    const result = path.join(directory, 'grigdesk-mobile-debug.apk');
+    const { stdout } = await execute('bash', ['tools/mobile', 'build'], {
+      cwd: fx.project,
+      env: {
+        ...fx.env,
+        ...overrides,
+        GRIGDESK_FAKE_FAIL: 'success',
+      },
+    });
+
+    assert.equal(stdout.trimEnd().split('\n').at(-1), result);
+    assert.equal(await readFile(result, 'utf8'), 'debug-apk');
+  }
+
+  assert.equal(
+    await readFile(path.join(fx.env.GRIGDESK_HOME, 'state/mobile-apk/grigdesk-mobile-debug.apk'), 'utf8'),
+    'previous-debug',
+  );
+  await assert.rejects(readFile(path.join(customArtifacts, 'grigdesk-mobile-debug.apk')), { code: 'ENOENT' });
   await assert.rejects(readFile(path.join(fx.project, '.state/mobile/grigdesk-mobile-debug.apk')),
     (error) => error.code === 'ENOENT');
 });

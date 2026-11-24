@@ -4,13 +4,14 @@ import os from 'node:os';
 import { pathToFileURL } from 'node:url';
 import { createPrivateKey, sign } from 'node:crypto';
 
-import { artifactsPath } from '../shared/runtime/dataHome.ts';
+import { artifactsPath, dataHome, dataPath } from '../shared/runtime/dataHome.ts';
 import type { createDistributionProgress } from '../cli/distributionProgress.ts';
 import { buildReleaseIdentity } from '../shared/runtime/productReleaseVersion.ts';
 import { sha256, sha256File } from '../shared/node/hash.ts';
 import { releaseSignedBytes } from '../shared/node/releaseTrust.ts';
 import { createSourceSnapshot } from './distributionSnapshot.mts';
 import { createRunRecord, completeRunRecord } from './distributionRuns.mts';
+import { publishDistributionOutput } from './distributionOutput.mts';
 import {
   runStages, decodeRecipe, recipeDigest, recipeImplementationBytes, requireBuildOutcomes,
 } from './releasePipeline.mts';
@@ -70,7 +71,7 @@ async function stageEnvironment(scope: string, toolchain: string, version: strin
 
 /**
  * Исходный снимок остаётся неизменным; временный ключ подставляется только в копии scope.
- * Вся сборка живёт в artifacts, а verified появляется лишь после реальной установки.
+ * Рабочие копии живут в artifacts, а Linux-кандидат публикуется после реальной установки.
  */
 export async function runDistributionBuild(
   root: string, channel: string, runsDir: string, progress?: ReturnType<typeof createDistributionProgress>,
@@ -109,7 +110,8 @@ export async function runDistributionBuild(
  */
 async function buildDistribution(root: string, channel: string, runsDir: string, darwin: boolean,
   signal: AbortSignal, progress?: ReturnType<typeof createDistributionProgress>): Promise<number> {
-  const artifacts = artifactsPath({ env: process.env, home: os.homedir() });
+  const home = { env: process.env, home: os.homedir() };
+  const artifacts = artifactsPath(home);
   const ancestor = await fs.stat(artifacts).then(() => artifacts, () => root);
 
   if (darwin) {
@@ -144,8 +146,17 @@ async function buildDistribution(root: string, channel: string, runsDir: string,
     path.join(snapshot.cloneRoot, 'tools/releaseRecipe.json'), 'utf8')));
   const digest = recipeDigest(recipe, await recipeImplementationBytes(snapshot.cloneRoot, darwin));
   const artifactsRoot = path.join(runDir, 'release-artifacts');
+  let candidate = artifactsRoot;
+
+  if (!darwin) {
+    const dists = dataPath(dataHome(home), 'dists');
+
+    await fs.mkdir(dists, { recursive: true, mode: 0o700 });
+    candidate = path.join(await fs.realpath(dists), path.basename(runDir), path.basename(artifactsRoot));
+  }
+
   const created = await createRunRecord(runsDir, {
-    realArtifactsRoot: artifactsRoot,
+    realArtifactsRoot: candidate,
     sourceCommit: snapshot.commit,
     sourceDigest: snapshot.sourceDigest,
     recipeDigest: digest,
@@ -444,6 +455,12 @@ async function buildDistribution(root: string, channel: string, runsDir: string,
 
     signal.throwIfAborted();
     await removeScratchDirectories();
+
+    if (!darwin) {
+      signal.throwIfAborted();
+      await publishDistributionOutput(artifactsRoot, candidate);
+    }
+
     await completeRunRecord(runsDir, created.runId, 'verified', inventory, {
       manifestDigest,
       signal,
@@ -454,7 +471,7 @@ async function buildDistribution(root: string, channel: string, runsDir: string,
     });
     verified = true;
     progress?.success();
-    process.stdout.write(`Кандидат: ${artifactsRoot}\nТолько локальное тестовое доверие.\n`
+    process.stdout.write(`Кандидат: ${candidate}\nТолько локальное тестовое доверие.\n`
       + `Проверка: dist check --local-run ${created.runId}\n`);
 
     return 0;

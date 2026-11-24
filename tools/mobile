@@ -11,16 +11,21 @@ if [[ "$MOBILE_COMMAND" == build || "$MOBILE_COMMAND" == release
   || ( "$MOBILE_COMMAND" == devlink && "${2:-status}" == start ) ]]; then
   grigdesk_require_migrated "$MOBILE_ROOT"
 fi
+MOBILE_DATA_HOME=$(grigdesk_data_home) || exit 1
+MOBILE_TOOLCHAIN="$MOBILE_DATA_HOME/dev/android"
 if [[ "$MOBILE_COMMAND" == build || "$MOBILE_COMMAND" == release || "$MOBILE_COMMAND" == devlink ]]; then
-  MOBILE_DATA_HOME=$(grigdesk_data_home) || exit 1
-  MOBILE_APK_DIR="${GRIGDESK_MOBILE_APK_DIR:-$MOBILE_DATA_HOME/state/mobile-apk}"
+  if [[ "$MOBILE_COMMAND" == build ]]; then
+    MOBILE_APK_DIR="${GRIGDESK_MOBILE_APK_DIR:-$MOBILE_DATA_HOME/dists}"
+  else
+    MOBILE_APK_DIR="${GRIGDESK_MOBILE_APK_DIR:-$MOBILE_DATA_HOME/state/mobile-apk}"
+  fi
 fi
 MOBILE_LOCK="$MOBILE_ROOT/mobile/toolchain.lock.json"
-MOBILE_DOWNLOADS="${GRIGDESK_MOBILE_DOWNLOADS:-$MOBILE_ROOT/.state/mobile-downloads}"
-export JAVA_HOME="${GRIGDESK_ANDROID_JDK:-$MOBILE_ROOT/.state/android-jdk-21}"
-export ANDROID_HOME="${GRIGDESK_ANDROID_HOME:-$MOBILE_ROOT/.state/android-sdk}"
-export ANDROID_USER_HOME="${GRIGDESK_ANDROID_USER_HOME:-$MOBILE_ROOT/.state/android-user}"
-export GRADLE_USER_HOME="${GRIGDESK_ANDROID_GRADLE_HOME:-$MOBILE_ROOT/.state/android-gradle}"
+MOBILE_DOWNLOADS="${GRIGDESK_MOBILE_DOWNLOADS:-$MOBILE_TOOLCHAIN/downloads}"
+export JAVA_HOME="${GRIGDESK_ANDROID_JDK:-$MOBILE_TOOLCHAIN/jdk-21}"
+export ANDROID_HOME="${GRIGDESK_ANDROID_HOME:-$MOBILE_TOOLCHAIN/sdk}"
+export ANDROID_USER_HOME="${GRIGDESK_ANDROID_USER_HOME:-$MOBILE_TOOLCHAIN/user}"
+export GRADLE_USER_HOME="${GRIGDESK_ANDROID_GRADLE_HOME:-$MOBILE_TOOLCHAIN/gradle}"
 export PATH="$JAVA_HOME/bin:$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$PATH"
 
 # JSON читается как данные: содержимое lock не исполняется shell-ом.

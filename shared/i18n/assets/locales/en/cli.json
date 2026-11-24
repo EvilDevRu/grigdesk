@@ -395,10 +395,22 @@
   "distDescription": "build and test installation before release",
   "distribution": {
     "build": "Build distribution",
+    "linuxX64": "Linux x64",
+    "linuxX64Description": "full release build in an isolated copy",
+    "windowsX64": "Windows x64",
+    "windowsX64Description": "local offline ZIP with the app and server, requires Wine for packaging",
+    "android": "Android APK",
+    "androidDescription": "debug build with the bundled interface",
+    "macos": "macOS Apple Silicon",
+    "linuxArm64": "Linux ARM64",
+    "windowsArm64": "Windows ARM64",
+    "unavailable": "unavailable",
+    "unavailableDescription": "This build target is unavailable from the menu.",
     "buildDescription": "full release checks in an isolated copy",
     "progress": {
       "snapshot": "Snapshotting sources",
       "setup": "Preparing Node.js and working copies",
+      "windows": "Packaging Windows x64",
       "acceptance": "Verifying installation",
       "record": "Recording verified candidate",
       "scope": {

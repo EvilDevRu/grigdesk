@@ -31,8 +31,9 @@ grigdesk-ctl build [all|server|web|window|factory|deepseek|apk]
                                 Без аргументов: сервер, окно, tasks и voice (all)
                                 factory: автономный движок в bin/factory
                                 apk: Android-приложение со встроенным вебом
-grigdesk-ctl dist build | doctor
-                                Релизный прогон в снимке исходников или диагностика среды
+grigdesk-ctl dist build [--target linux-x64|windows-x64] [--channel release|dev]
+                                Прогон в снимке исходников; Windows x64 — локальный ZIP канала dev
+grigdesk-ctl dist doctor        Диагностика среды
 grigdesk-ctl dist check --from <каталог> | --local-run <UUID>
 grigdesk-ctl dist install --from <каталог> | --local-run <UUID> --mode local|remote|server
                                 Отдельные пути и подтверждение установки обязательны

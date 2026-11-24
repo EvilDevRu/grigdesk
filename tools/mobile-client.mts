@@ -22,7 +22,7 @@ export async function buildClient(options: {
   release?: boolean;
   run?: Runner;
   env?: NodeJS.ProcessEnv;
-}): Promise<void> {
+}): Promise<string> {
   const run = options.run || promisify(execFile);
   const env = options.env || process.env;
   const root = path.resolve(options.root);
@@ -30,6 +30,7 @@ export async function buildClient(options: {
   const android = path.join(root, 'mobile/android');
   const mode = options.release ? 'release' : 'debug';
   const name = `grigdesk-mobile-${mode}`;
+  const result = path.join(destination, name + '.apk');
 
   if (options.release) {
     for (const key of ['GRIGDESK_ANDROID_STORE_FILE', 'GRIGDESK_ANDROID_STORE_PASSWORD',
@@ -78,7 +79,7 @@ export async function buildClient(options: {
       });
     }
 
-    await rename(apk, path.join(destination, name + '.apk'));
+    await rename(apk, result);
 
     if (options.release) {
       await rename(path.join(staging, 'metadata.json'), path.join(destination, name + '.json'));
@@ -86,6 +87,8 @@ export async function buildClient(options: {
   } finally {
     await rm(staging, { recursive: true, force: true });
   }
+
+  return result;
 }
 
 /**
@@ -147,9 +150,14 @@ if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === imp
     throw new Error('Нужны mobile-client.mts build|release и GRIGDESK_MOBILE_APK_DIR.');
   }
 
-  await buildClient({
+  const release = process.argv[2] === 'release';
+  const result = await buildClient({
     root: fileURLToPath(new URL('..', import.meta.url)),
     destination: process.env.GRIGDESK_MOBILE_APK_DIR,
-    release: process.argv[2] === 'release',
+    release,
   });
+
+  if (!release) {
+    process.stdout.write(result + '\n');
+  }
 }

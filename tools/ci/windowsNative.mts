@@ -23,6 +23,7 @@ const windowsFiles = [script, `${script}.sha256`, `${script}.sig`, archiveNames[
 
 export type WindowsTarget = 'windows-x64' | 'windows-arm64';
 type Plan = Awaited<ReturnType<typeof readStableReleasePlan>>;
+type PackageIdentity = Pick<Plan, 'current' | 'runId'>;
 
 interface WindowsInputs {
   target: WindowsTarget;
@@ -135,7 +136,9 @@ export async function assertWindowsMachine(file: string, target: WindowsTarget):
  * Сервер получает ровно ресурсы исходного Node-входа и production-зависимости.
  * Runtime распространяется внутри ZIP, системный Node при установке не нужен.
  */
-async function stageServer(root: string, target: WindowsTarget, plan: Plan, env: NodeJS.ProcessEnv): Promise<void> {
+async function stageServer(
+  root: string, target: WindowsTarget, plan: PackageIdentity, env: NodeJS.ProcessEnv, crossNode?: string,
+): Promise<void> {
   const files = ['server/src', 'server/seed', 'server/build',
     'server/deepseek-runtime-contract.json', 'server/deepseek-host-contract.json',
     'server/package.json', 'server/package-lock.json', 'shared', 'cli/darwinBuildProcesses.ts',
@@ -157,13 +160,22 @@ async function stageServer(root: string, target: WindowsTarget, plan: Plan, env:
   const factory = path.join(root, 'bin', 'factory.exe');
   const pin = JSON.parse(await fs.readFile(path.join(root, 'server/build/node-runtime.json'), 'utf8'));
 
-  if (pin.version !== process.versions.node) {
+  if (!crossNode && pin.version !== process.versions.node) {
     throw new Error('windows_node_version_mismatch');
   }
 
-  await fs.copyFile(process.execPath, node);
+  await fs.copyFile(crossNode ?? process.execPath, node);
   await assertWindowsMachine(node, target);
-  await execute(process.execPath, [npm, 'ci', '--omit=dev', '--ignore-scripts', '--no-audit', '--no-fund'], {
+
+  const npmFlags = ['ci', '--omit=dev', '--ignore-scripts', '--no-audit', '--no-fund'];
+
+  // npm на Linux создаёт ссылки в .bin, а серверный ZIP принимает только обычные файлы.
+  // В этом комплекте entry и необходимые CLI вызываются по их физическим путям.
+  if (crossNode) {
+    npmFlags.push('--os=win32', '--cpu=x64', '--bin-links=false');
+  }
+
+  await execute(crossNode ? 'npm' : process.execPath, crossNode ? npmFlags : [npm, ...npmFlags], {
     cwd: path.join(root, 'server'),
     env,
     timeout: 300_000,
@@ -212,7 +224,9 @@ async function archiveServer(root: string, output: string): Promise<void> {
  * Сборщик берёт Electron и npm из закреплённых зависимостей checkout.
  * NSIS устанавливает только окно, поэтому сам не открывает его до готовности сервера.
  */
-async function buildWindow(output: string, target: WindowsTarget, plan: Plan, env: NodeJS.ProcessEnv) {
+async function buildWindow(
+  output: string, target: WindowsTarget, plan: PackageIdentity, env: NodeJS.ProcessEnv,
+) {
   const desktop = path.join(repository, 'desktop');
   const desktopEnv = {
     ...env,
@@ -222,6 +236,9 @@ async function buildWindow(output: string, target: WindowsTarget, plan: Plan, en
     GRIGDESK_RELEASE_ID: plan.current.releaseId,
     CSC_IDENTITY_AUTO_DISCOVERY: 'false',
   };
+  const crossOptions = process.platform === 'linux'
+    ? ['--config.npmRebuild=false', '--config.win.signExecutable=false']
+    : [];
 
   await execute(process.execPath, [path.join(desktop, 'scripts/build.mts')], {
     cwd: desktop,
@@ -235,6 +252,7 @@ async function buildWindow(output: string, target: WindowsTarget, plan: Plan, en
     `--config.directories.output=${output}`, '--config.artifactName=desktop.exe',
     `--config.extraMetadata.version=${plan.current.version}`, '--config.nsis.runAfterFinish=false',
     '--config.nsis.guid=73fd52cc-055b-5e49-89e0-9706aab795e4',
+    ...crossOptions,
     // 7z-ветка NSIS оставляла поставку ARM64 без EXE и DLL. ZIP распаковывается сразу в каталог программы.
     ...(target === 'windows-arm64' ? ['--config.nsis.useZip=true', '--config.nsis.differentialPackage=false'] : []),
   ], {
@@ -243,6 +261,10 @@ async function buildWindow(output: string, target: WindowsTarget, plan: Plan, en
     timeout: 600_000,
     maxBuffer: 16 * 1024 * 1024,
   });
+
+  if (process.platform === 'linux') {
+    await assertWindowsMachine(path.join(output, 'win-unpacked/grigdesk.exe'), target);
+  }
 }
 
 /**
@@ -250,7 +272,7 @@ async function buildWindow(output: string, target: WindowsTarget, plan: Plan, en
  * Bootstrap закрепляет SHA помощника перед запуском, помощник проверяет подпись описи.
  */
 export async function buildWindowsNative(
-  target: WindowsTarget, plan: Plan, output: string, key: KeyObject,
+  target: WindowsTarget, plan: PackageIdentity, output: string, key: KeyObject, crossNode?: string,
 ): Promise<void> {
   const env: NodeJS.ProcessEnv = {
     ...buildEnv(),
@@ -277,7 +299,21 @@ export async function buildWindowsNative(
     const helper = path.join(output, archiveNames[0]);
     const trust = publicDer(createPublicKey(key)).toString('base64');
 
-    await stageServer(server, target, plan, env);
+    if (crossNode) {
+      env.USE_SYSTEM_WINE = 'true';
+      env.WINEPREFIX = path.join(work, 'wine-prefix');
+      delete env.WINEARCH;
+      delete env.ELECTRON_BUILDER_WINE_TOOLSET_DIR;
+
+      // electron-builder заменяет WINEDLLOVERRIDES при запуске NSIS.
+      // Сначала создаём свой префикс без установки Mono и Gecko.
+      await execute('wine', ['wineboot', '--init'], {
+        env: { ...env, WINEDLLOVERRIDES: 'winemenubuilder.exe=d;mscoree,mshtml=' },
+        timeout: 90_000,
+      });
+    }
+
+    await stageServer(server, target, plan, env, crossNode);
     await archiveServer(server, path.join(output, 'server.zip'));
     await buildWindow(window, target, plan, env);
     await fs.copyFile(path.join(window, 'desktop.exe'), path.join(output, 'desktop.exe'));
@@ -325,7 +361,7 @@ export async function buildWindowsNative(
  * Проверяющий job сравнивает байты скрипта и всех компонентов до установки.
  */
 export async function verifyWindowsPackage(
-  directory: string, target: WindowsTarget, plan: Plan, key: KeyObject,
+  directory: string, target: WindowsTarget, plan: PackageIdentity, key: KeyObject,
 ) {
   const entries = (await fs.readdir(directory)).sort();
 
