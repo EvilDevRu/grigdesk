@@ -72,6 +72,9 @@ The toggle affects only the manual launch from the task card: Telegram rule
 auto-launches and bulk start work as before. The enabled toggle (default) keeps the
 ordinary immediate launch.
 
+After a confirmed stop of a stage that reads code and writes only pipeline documents,
+Resume retries that stage from the current cursor.
+
 ## Stage executor, model and effort
 
 The editor is available when the runtime pinned to the attempt supports stage settings.

@@ -180,7 +180,15 @@ const route = {
   sequence:{main:['verify','gate_accept'],tail:[]}, nodes:[verify, gate],
 };
 const prompts = {};
-if (transaction) {
+if (transaction === 'read-agent') {
+  const plan = structuredClone(base.ROUTE_DEFINITIONS.feature.route.nodes.find((node) => node.id === 'plan'));
+  plan.on = {done:{next:'gate_accept'}, skipped:stop, failed:stop, exhausted:stop};
+  delete plan.onFailure;
+  route.entry = 'plan';
+  route.nodes = [plan, gate];
+  route.sequence.main = ['plan', 'gate_accept'];
+  for (const block of plan.prompt.blocks) prompts[block.file] = 'Фикстура плана.';
+} else if (transaction) {
   const reference = base.ROUTE_DEFINITIONS.debug.route.nodes.find((item) => item.id === 'instrument');
   const agent = (id, runKey, done) => ({
     ...structuredClone(reference), id, runKey, phase:'main',

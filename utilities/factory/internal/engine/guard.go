@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"grigdesk.local/tools/utilities/factory/internal/runner"
 )
@@ -25,10 +26,13 @@ func (e execution) workspaceGuard(
 		return prompt, err
 	}
 	after := func(result runner.DispatchResult) error {
-		if err := ctx.Err(); err != nil {
-			return err
+		verify := ctx
+		if ctx.Err() != nil {
+			cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+			defer cancel()
+			verify = cleanup
 		}
-		current, err := e.snapshotWorkspace(ctx)
+		current, err := e.snapshotWorkspace(verify)
 		if err != nil || !bytes.Equal(baseline, current) {
 			return fmt.Errorf("workspace guard: агент изменил checkout или снимок недоступен")
 		}

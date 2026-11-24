@@ -30,6 +30,7 @@ type usage struct {
 type Outcome struct {
 	Classification, LimitUntil string
 	RC                         int
+	OwnedTreeClosed            bool
 	Usage                      usage
 	Terminal                   state.RunSnapshot
 }
@@ -382,7 +383,7 @@ func adapterError(code int, detail string) *AdapterError {
 }
 
 func (run Run) terminal(result host.ProcessResult, class string) (Outcome, *AdapterError) {
-	outcome := Outcome{Classification: class, RC: result.RC}
+	outcome := Outcome{Classification: class, RC: result.RC, OwnedTreeClosed: result.OwnedTreeClosed}
 	if result.RC != 0 {
 		return outcome, adapterError(result.RC, "CLI вернул ошибку")
 	}

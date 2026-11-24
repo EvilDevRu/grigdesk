@@ -17,6 +17,7 @@ const lifecycleTime = "2006-01-02T15:04:05.000Z"
 type commandVisit struct {
 	boot, session, visit, execution string
 	visitSpan, commandSpan          string
+	executionSpan                   string
 	node, key                       string
 	ordinal                         int64
 }
@@ -149,7 +150,8 @@ func (e execution) lifeDraft(visit commandVisit, kind, span string, details map[
 	if span != "" {
 		event["spanId"] = span
 	}
-	if kind == "command_started" || kind == "command_finished" || kind == "node_execution_started" {
+	switch kind {
+	case "command_started", "command_finished", "node_execution_started", "node_execution_finished":
 		event["nodeExecutionId"] = visit.execution
 	}
 	return event

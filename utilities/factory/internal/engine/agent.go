@@ -36,15 +36,32 @@ func (e execution) runAgent(
 	if err != nil {
 		return cursor, 78, err
 	}
+	var guardErr error
 	if filesystem == "state-only" {
-		request.BeforeInvoke, request.AfterInvoke = e.workspaceGuard(ctx, nil)
+		before, after := e.workspaceGuard(ctx, nil)
+		request.BeforeInvoke = before
+		request.AfterInvoke = func(result runner.DispatchResult) error {
+			guardErr = after(result)
+			return guardErr
+		}
 	}
 	visit, rc, err := e.beginAgentVisit(cursor, key)
 	if err != nil {
 		return cursor, rc, err
 	}
 	request.RecordRestart = e.restartLifecycle(visit)
+	startedAt := time.Now()
 	result, err := e.dispatchAgent(ctx, request)
+	if err != nil && filesystem == "state-only" && guardErr == nil && result.OwnedTreeClosed {
+		if ctx.Err() != nil {
+			if guardErr := request.AfterInvoke(result); guardErr != nil {
+				return cursor, 75, guardErr
+			}
+		}
+		if closeErr := e.recordClosedAgent(visit, result, err, startedAt); closeErr != nil {
+			return cursor, 75, errors.Join(err, closeErr)
+		}
+	}
 	if errors.Is(err, context.Canceled) {
 		return cursor, 130, err
 	}
@@ -89,6 +106,7 @@ func (e execution) dispatchAgent(
 		rc = 75
 	}
 	if err := control.Close(rc); err != nil {
+		result.OwnedTreeClosed = false
 		if dispatchErr != nil {
 			return result, fmt.Errorf("%v: %w", dispatchErr, err)
 		}
@@ -218,6 +236,33 @@ func environmentValue(env []string, name string) string {
 	return ""
 }
 
+// recordClosedAgent фиксирует завершение проверенного хостом запуска без результата этапа.
+// Завершённый stage-result требует отдельного перехода и не даёт разрешения запустить узел снова.
+func (e execution) recordClosedAgent(
+	visit commandVisit, result runner.DispatchResult, failure error, startedAt time.Time,
+) error {
+	run, _, err := e.request.Store.ReadRun(result.Run)
+	if err != nil {
+		return err
+	}
+	if run.State != "active" {
+		return nil
+	}
+	status, reason := "failed", "process_exit"
+	if errors.Is(failure, context.Canceled) {
+		status, reason = "interrupted", "signal"
+	}
+	details := map[string]any{
+		"status": status, "reasonCode": reason, "reasonTextSha256": lifecycleDigest(failure.Error()),
+		"durationMs": time.Since(startedAt).Milliseconds(), "durationFidelity": "monotonic",
+		"evidenceSha256": nil, "retryBudgetAfter": 0, "productOutcome": nil,
+		"productOutcomeSource": "none", "productVerdictHash": nil, "finalRunId": result.Run.ID,
+	}
+	return e.appendLife(visit, "node_execution_finished", visit.executionSpan, details)
+}
+
+// beginAgentVisit защищает текущий узел от повтора поверх незавершённого выполнения.
+// Повтор с тем же cursor допустим после подтверждённого закрытия процессом хоста.
 func (e execution) beginAgentVisit(cursor state.StageSnapshot, key string) (commandVisit, int, error) {
 	a := e.attempt
 	visit := commandVisit{node: cursor.CurrentNode, key: key, ordinal: cursor.Sequence}
@@ -227,6 +272,8 @@ func (e execution) beginAgentVisit(cursor state.StageSnapshot, key string) (comm
 	}
 	pin := false
 	prior := make(map[string]bool)
+	open := make(map[string]bool)
+	resumed := false
 	for _, event := range history {
 		row := event.Data
 		if row["kind"] == "route_selected" {
@@ -239,16 +286,28 @@ func (e execution) beginAgentVisit(cursor state.StageSnapshot, key string) (comm
 				prior[id] = true
 			}
 		}
-		if row["kind"] == "node_execution_started" && prior[id] {
-			return visit, 75, fmt.Errorf("исход предыдущего запуска не подтверждён")
+		if !prior[id] {
+			continue
 		}
+		execution, _ := row["nodeExecutionId"].(string)
+		switch row["kind"] {
+		case "node_execution_started":
+			open[execution] = true
+			resumed = true
+		case "node_execution_finished":
+			delete(open, execution)
+		}
+	}
+	if len(open) != 0 {
+		return visit, 75, fmt.Errorf("исход предыдущего запуска не подтверждён")
 	}
 	id, err := host.CurrentIdentity()
 	if err != nil {
 		return visit, 78, err
 	}
 	visit.boot, visit.session, visit.visit = id.Boot, lifeID("os"), lifeID("nv")
-	visit.visitSpan, visit.execution = lifeID("sp"), lifeID("ne")
+	visit.visitSpan, visit.executionSpan = lifeID("sp"), lifeID("sp")
+	visit.execution = lifeID("ne")
 	if !pin {
 		if err := e.recordRouteSelected(visit); err != nil {
 			return visit, 78, err
@@ -257,10 +316,14 @@ func (e execution) beginAgentVisit(cursor state.StageSnapshot, key string) (comm
 	if err := e.recordNodeVisit(visit, cursor); err != nil {
 		return visit, 78, err
 	}
-	details := map[string]any{
-		"executionReason": "initial", "retryOrdinal": 0, "retryBudgetBefore": 0, "executorKind": "agent",
+	reason := "initial"
+	if resumed {
+		reason = "manual_resume"
 	}
-	if err := e.appendLife(visit, "node_execution_started", lifeID("sp"), details); err != nil {
+	details := map[string]any{
+		"executionReason": reason, "retryOrdinal": 0, "retryBudgetBefore": 0, "executorKind": "agent",
+	}
+	if err := e.appendLife(visit, "node_execution_started", visit.executionSpan, details); err != nil {
 		return visit, 78, err
 	}
 	return visit, 0, nil
