@@ -72,6 +72,8 @@ Triage reads code without starting an environment, running tests or changing sou
 During a temporary connection failure, the board and timers keep the last received data with
 an age warning. Age belongs to the failed source; another tracker's success does not refresh it.
 If no data has been received, an error appears rather than a loaded empty board.
+For a transient network failure, the Discript CRM driver retries the failed board request once
+within the current refresh.
 Reading resumes automatically after recovery. Use Retry on the board, in the timer panel or
 in the card's error message for a manual refresh; it is unavailable while reading.
 

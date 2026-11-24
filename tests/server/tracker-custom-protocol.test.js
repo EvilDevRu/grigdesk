@@ -32,8 +32,9 @@ bitrix:forum.comments {"params":"signed.fixture","EXEMPLAR_ID":"fixture_7"}
  * Новый API-токенный пакет получает настоящий loopback HTTP через свой transport seam.
  * Старая сессионная версия сохраняет отдельную проверку, а ядро не копирует ни один клиент.
  */
-async function apiPortal(t) {
+async function apiPortal(t, { dropDoingOnce = false } = {}) {
   let version = 1;
+  let dropDoing = dropDoingOnce;
   const task = () => ({
     id: 42,
     title: 'Фикстура CRM',
@@ -52,7 +53,16 @@ async function apiPortal(t) {
     if (route === '/auth/token') {
       data = { user: { id: 7 } };
     } else if (route === '/tasks' && request.method === 'GET') {
-      data = url.searchParams.get('role') === 'doing' ? [task()] : [];
+      const doing = url.searchParams.get('role') === 'doing';
+
+      if (doing && dropDoing) {
+        dropDoing = false;
+        response.destroy();
+
+        return;
+      }
+
+      data = doing ? [task()] : [];
     } else if (route === '/tasks' && request.method === 'POST') {
       data = { ...task(), id: 43 };
     } else if (route === '/tasks/42' || route === '/tasks/42/transition') {
@@ -273,7 +283,7 @@ for (const emptyChart of [false, true]) {
     }
 
     if (typeof clientModule.createDiscriptTracker === 'function') {
-      const portal = await apiPortal(t);
+      const portal = await apiPortal(t, { dropDoingOnce: emptyChart });
       const fixture = await trackerFixture(t, {
         fetch: portal.fetch,
         setup: async (config, context) => {
@@ -292,11 +302,18 @@ for (const emptyChart of [false, true]) {
           }));
         },
       });
-      const snapshot = await fixture.tracker.getDashboard();
+      const response = await fixture.request('GET', '/api/tracker/grigdesk-b24-discript/dashboard');
+
+      assert.equal(response.statusCode, 200, response.body);
+
+      const snapshot = response.json();
+      const doingRequests = portal.requests.filter(({ url }) => url.includes('role=doing'));
 
       assert.equal(snapshot.tasks.length, 1);
       assert.equal(snapshot.tasks[0].id, 42);
       assert.deepEqual(snapshot.widgets, []);
+      assert.equal(doingRequests.length, emptyChart ? 2 : 1);
+      assert.equal(portal.requests.filter(({ url }) => url.endsWith('/auth/token')).length, 1);
 
       return;
     }

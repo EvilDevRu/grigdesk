@@ -124,6 +124,21 @@ test('MD-HEALTH: ошибка dashboard видна в каталоге, повт
   assert.equal(fixture.events.length, events + 1);
 });
 
+test('MD-HEALTH: отменённое чтение доски не меняет статус подключения', async (t) => {
+  const fixture = await multiFixture(t);
+  const tracker = fixture.tracker.forDriver('fixture-b');
+  const events = fixture.events.length;
+  const signal = AbortSignal.abort();
+  const status = () => fixture.runtime.catalog().drivers.find((entry) => entry.id === 'fixture-b').status;
+  const initialStatus = status();
+
+  await controlDriver(fixture, 'fixture-b', { dashboardError: 'Чтение отменено' });
+  await assert.rejects(tracker.getDashboard({ signal }), /Чтение отменено/u);
+
+  assert.equal(status(), initialStatus);
+  assert.equal(fixture.events.length, events);
+});
+
 test('MD-HEALTH: исключение isConfigured одного пакета не ломает каталог', async (t) => {
   const fixture = await multiFixture(t);
 

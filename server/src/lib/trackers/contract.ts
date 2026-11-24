@@ -35,6 +35,10 @@ export interface TrackerReadTrace {
   waitMs?: number;
   attempt?: number;
   status?: number;
+  transport?: {
+    resource: 'identity' | 'tasks' | 'timers';
+    code: string;
+  };
 }
 
 export interface TrackerHost {

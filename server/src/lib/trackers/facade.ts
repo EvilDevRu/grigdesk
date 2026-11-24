@@ -246,13 +246,13 @@ export class TrackerFacade {
         };
       });
 
-      if (context.trackerId && this.registry.reportHealth(context.trackerId)) {
+      if (!options.signal?.aborted && context.trackerId && this.registry.reportHealth(context.trackerId)) {
         await this.onChanged?.();
       }
 
       return result;
     } catch (error) {
-      if (context.trackerId && this.registry.reportHealth(context.trackerId,
+      if (!options.signal?.aborted && context.trackerId && this.registry.reportHealth(context.trackerId,
         'Драйвер временно недоступен')) {
         await this.onChanged?.();
       }
