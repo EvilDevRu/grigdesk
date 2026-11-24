@@ -222,6 +222,90 @@ test('переключение вкладки держит только один
   });
 });
 
+test('терминал разрешает ввод после открытия канала и упорядоченного сброса экрана', async (t) => {
+  const sockets = [];
+  const { module, store } = await sshSection(t, {
+    wsUrl: (path) => `ws://grigdesk.test${path}`,
+  }, sockets);
+  const reset = Promise.withResolvers();
+
+  module.bindSshTerminal({ reset: (done) => reset.promise.then(done) });
+  module.activateSshSession('session-a');
+  sockets[0].onopen();
+  module.sendSshInput('ранний ввод');
+
+  assert.equal(store.terminalStatus, 'connecting');
+  assert.deepEqual(sockets[0].sent, []);
+
+  reset.resolve();
+  await new Promise((resolve) => setImmediate(resolve));
+  module.sendSshInput('ввод для session-a');
+
+  assert.equal(store.terminalStatus, 'ready');
+  assert.deepEqual(sockets[0].sent, [JSON.stringify({ t: 'in', d: 'ввод для session-a' })]);
+  sockets[0].onclose();
+  assert.equal(store.activeId, 'session-a');
+  assert.equal(store.terminalStatus, 'detached');
+});
+
+test('поздний ответ файлов A не заменяет каталог B, ссылки используют открытый путь', async (t) => {
+  const first = Promise.withResolvers();
+  const file = (name) => ({ name, type: 'file', size: 7, mtime: 0 });
+  const { module, store } = await sshSection(t, {
+    async get(path) {
+      return path.includes('/session-a/') ? first.promise : { files: [file('b.txt')] };
+    },
+    url: (path) => path,
+  });
+
+  store.setActive('session-a');
+  const loadingA = module.listSshFiles('/alpha');
+
+  store.setActive('session-b');
+  assert.equal(store.filesStatus, 'idle');
+  await module.listSshFiles('/beta');
+
+  first.resolve({ files: [file('a.txt')] });
+  await loadingA;
+
+  assert.deepEqual(store.files.map((entry) => entry.name), ['b.txt']);
+  assert.equal(store.remotePath, '/beta');
+  assert.equal(
+    module.sshDownloadUrl('b.txt'),
+    '/api/ssh/sessions/session-b/files/download?path=%2Fbeta%2Fb.txt',
+  );
+});
+
+test('завершение загрузки A не перечитывает файлы выбранной сессии B', async (t) => {
+  const pending = Promise.withResolvers();
+  const uploads = [];
+  let reads = 0;
+  const { module, store } = await sshSection(t, {
+    async get() {
+      reads += 1;
+
+      return { files: [] };
+    },
+    async upload(path, form) {
+      uploads.push([path, form.get('path')]);
+
+      return pending.promise;
+    },
+  });
+
+  store.setActive('session-a');
+  await module.listSshFiles('/alpha');
+  const upload = module.uploadSshFile(new File(['fixture'], 'note.txt'));
+
+  store.setActive('session-b');
+  pending.resolve({ ok: true });
+  await upload;
+
+  assert.deepEqual(uploads, [['/api/ssh/sessions/session-a/files/upload', '/alpha/note.txt']]);
+  assert.equal(reads, 1);
+  assert.equal(store.filesStatus, 'idle');
+});
+
 test('последний размер PTY отправляется после открытия WebSocket', async (t) => {
   const sockets = [];
   const { module } = await sshSection(t, {

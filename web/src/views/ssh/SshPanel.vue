@@ -5,7 +5,6 @@
     :class="{
       'is-compact': props.compact,
       'is-dock': props.presentation === 'dock',
-      'has-session': Boolean(activeSession),
       'show-connections': showConnections,
     }"
     aria-labelledby="ssh-panel-title"
@@ -23,8 +22,10 @@
           <template #meta>
             <span class="ssh-panel__summary" :aria-label="t('core.sshSvodkaSsh')"> {{ t('core.sshServerov') }} {{ store.connections?.length || 0 }} {{ t('core.sshSessiy') }} {{ store.sessions?.length || 0 }}
             </span>
-            <span v-if="sshApprovals.length" class="ssh-waiting">
-              {{ sshApprovals.length }} {{ t('core.sshZhdetResheniya') }} </span>
+            <UiButton v-if="sshApprovals.length" variant="text" size="compact" class="ssh-waiting"
+                      @click="showApprovals">
+              {{ sshApprovals.length }} {{ t('core.sshZhdetResheniya') }}
+            </UiButton>
           </template>
           <template #actions>
             <UiIconButton class="ssh-refresh" role="embedded" data-context="workspace-toolbar"
@@ -157,62 +158,12 @@
 
 
         <section
-          v-if="sshApprovals.length"
-          class="ssh-approvals"
-          :aria-label="t('core.sshPodtverzhdeniyaKomand')"
-        >
-          <header class="ssh-approvals__heading">
-            <span class="ssh-approvals__icon" aria-hidden="true">!</span>
-            <div>
-              <h3>{{ t('core.sshAgentZhdetResheniya') }}</h3>
-              <small>{{ t('core.sshKomandaNeVypolnitsyaBez') }}</small>
-            </div>
-            <span class="ssh-count is-waiting">{{ sshApprovals.length }}</span>
-          </header>
-
-          <div class="ssh-approval-list">
-            <article
-              v-for="approval in sshApprovals"
-              :key="approval.pid"
-              class="ssh-approval"
-              data-ssh-approval
-            >
-              <div class="ssh-approval__server" data-ssh-server>
-                <strong>{{ approval.server?.label }}</strong>
-                <span aria-hidden="true"> — </span>
-                <code>{{ approval.server?.host }}:{{ approval.server?.port }}</code>
-              </div>
-              <div class="ssh-approval__identity"> {{ t('core.sshPolzovatel') }} <strong>{{ approval.user }}</strong>
-                <span v-if="approval.isRoot" class="ssh-badge">{{ 'root' }}</span>
-                <span v-if="approval.usesSudo" class="ssh-badge">{{ 'sudo' }}</span>
-              </div>
-              <pre data-ssh-command>{{ approval.command }}</pre>
-              <UiInput
-                v-model="comments[approval.pid]"
-                :placeholder="t('core.sshPoyasnenieKOtkazuNeobyazatelno')"
-                :aria-label="t('core.sshPoyasnenieKKomandePid', { pid: approval.pid })"
-              />
-              <div class="ssh-approval__actions">
-                <UiButton tone="danger" @click="deny(approval)">{{ t('core.sshOtkazat') }}</UiButton>
-                <UiButton
-                  variant="solid"
-                  tone="accent"
-                  @click="allow(approval)"
-                > {{ t('core.allow') }} </UiButton>
-              </div>
-            </article>
-          </div>
-        </section>
-
-        <section
           v-show="!showCreate"
           class="ssh-console"
-          :class="{ 'has-session': activeSession }"
           :aria-label="t('core.sshSshTerminal')"
         >
-          <header class="ssh-console__header">
+          <header v-if="store.sessions?.length || !workspaceSession" class="ssh-console__header">
             <div v-if="store.sessions?.length" class="ssh-session-switcher">
-              <span class="ssh-session-switcher__label">{{ t('core.dbSessii') }}</span>
               <UiTabs
                 ref="sessionTabs"
                 v-model="selectedSessionId"
@@ -262,18 +213,33 @@
               ×
             </UiIconButton>
 
-            <div v-else class="ssh-console__title">
+            <div v-if="!workspaceSession" class="ssh-console__title">
               <span aria-hidden="true">›_</span> {{ t('core.terminal') }} </div>
-
-            <div v-if="activeSession" class="ssh-console__context">
-              <span class="ssh-role-badge">{{ activeSession.role }}</span>
-              <span class="ssh-live-label">
-                <i aria-hidden="true"></i> {{ t('core.machineConnected') }} </span>
-              <code>
-                {{ activeSession.user }}@{{ activeSession.host }}:{{ activeSession.port }}
-              </code>
-            </div>
           </header>
+
+          <div v-if="workspaceSession" class="ssh-active-session" role="group" :aria-label="t('core.sshActiveSession')">
+            <div class="ssh-active-session__identity" aria-live="polite">
+              <div class="ssh-active-session__name">
+                <span>{{ sessionProjectLabel(workspaceSession) }}</span>
+                <span aria-hidden="true">/</span>
+                <strong>{{ sessionTargetLabel(workspaceSession) }}</strong>
+              </div>
+              <code>{{ sessionAddress(workspaceSession) }}</code>
+            </div>
+            <div class="ssh-active-session__status">
+              <span class="ssh-live-label" :data-state="workspaceStatus" role="status">
+                <i aria-hidden="true"></i>{{ workspaceStatusLabel }}
+              </span>
+              <UiButton v-if="workspaceStatus === 'detached'" variant="outline" size="compact"
+                        @click="restoreTerminal">
+                {{ t('core.sshRestoreTerminal') }}
+              </UiButton>
+              <UiButton v-if="workspaceStatus === 'lost' && lostConnection" variant="outline" size="compact"
+                        aria-haspopup="dialog" @click="openLogin(lostConnection.id)">
+                {{ t('core.sshReconnect') }}
+              </UiButton>
+            </div>
+          </div>
 
           <div
             id="ssh-terminal-panel"
@@ -286,11 +252,15 @@
               v-show="activeSession"
               ref="terminalHost"
               class="ssh-terminal"
+              :data-connecting="workspaceStatus === 'connecting' || undefined"
               data-ssh-terminal-host
               data-escape-owner="terminal"
             ></div>
 
-            <div v-if="!activeSession" class="ssh-console__empty" role="status">
+            <div v-if="lostSession" class="ssh-console__empty">
+              <p>{{ t('core.sshLostSessionHint') }}</p>
+            </div>
+            <div v-else-if="!activeSession" class="ssh-console__empty" role="status">
               <span class="ssh-console__empty-icon" aria-hidden="true">›_</span>
               <strong>{{ t('core.sshNetAktivnoySshSessii') }}</strong>
               <span>{{ t('core.sshVyberiteSohranennyyServerTerminal') }}</span>
@@ -308,7 +278,57 @@
           </footer>
         </section>
 
-        <details v-if="activeSession" v-show="!showCreate"
+        <section
+          v-if="sshApprovals.length"
+          ref="approvalsRegion"
+          tabindex="-1"
+          class="ssh-approvals"
+          :aria-label="t('core.sshPodtverzhdeniyaKomand')"
+        >
+          <header class="ssh-approvals__heading">
+            <span class="ssh-approvals__icon" aria-hidden="true">!</span>
+            <div>
+              <h3>{{ t('core.sshAgentZhdetResheniya') }}</h3>
+              <small>{{ t('core.sshKomandaNeVypolnitsyaBez') }}</small>
+            </div>
+            <span class="ssh-count is-waiting">{{ sshApprovals.length }}</span>
+          </header>
+
+          <div class="ssh-approval-list">
+            <article
+              v-for="approval in sshApprovals"
+              :key="approval.pid"
+              class="ssh-approval"
+              data-ssh-approval
+            >
+              <div class="ssh-approval__server" data-ssh-server>
+                <span v-if="approval.tab?.projectId">{{ approval.tab.projectId }}</span>
+                <strong>{{ approval.tab?.label || approval.server?.label }}</strong>
+                <code>{{ approval.server?.host }}:{{ approval.server?.port }}</code>
+              </div>
+              <div class="ssh-approval__identity"> {{ t('core.sshPolzovatel') }} <strong>{{ approval.user }}</strong>
+                <span v-if="approval.isRoot" class="ssh-badge">{{ 'root' }}</span>
+                <span v-if="approval.usesSudo" class="ssh-badge">{{ 'sudo' }}</span>
+              </div>
+              <pre data-ssh-command>{{ approval.command }}</pre>
+              <UiInput
+                v-model="comments[approval.pid]"
+                :placeholder="t('core.sshPoyasnenieKOtkazuNeobyazatelno')"
+                :aria-label="t('core.sshPoyasnenieKKomandePid', { pid: approval.pid })"
+              />
+              <div class="ssh-approval__actions">
+                <UiButton tone="danger" @click="deny(approval)">{{ t('core.sshOtkazat') }}</UiButton>
+                <UiButton
+                  variant="solid"
+                  tone="accent"
+                  @click="allow(approval)"
+                > {{ t('core.allow') }} </UiButton>
+              </div>
+            </article>
+          </div>
+        </section>
+
+        <details v-if="activeSession" v-show="!showCreate" :key="activeSession.id"
                  class="ssh-sftp ui-workspace-disclosure" data-context="workspace-inline">
           <summary>
             <svg
@@ -324,12 +344,28 @@
               <path d="M3 7V5h6l2 2" />
             </svg> {{ t('core.sshFaylySessii') }} </summary>
           <div class="ssh-sftp__body ui-workspace-section__body">
+            <p class="ssh-files-context">
+              <strong>{{ sessionTargetLabel(activeSession) }}</strong>
+              <code>{{ sessionAddress(activeSession) }}</code>
+            </p>
             <div class="ssh-files-bar">
               <UiInput v-model="remotePath" :aria-label="t('core.sshPutNaServere')" />
-              <UiButton @click="openRemotePath">{{ t('core.open') }}</UiButton>
-              <UiFilePicker :label="t('core.sshZagruzitFayl')" @change="uploadFiles" />
+              <UiButton :loading="store.filesStatus === 'loading'" @click="openRemotePath">
+                {{ t('core.open') }}
+              </UiButton>
+              <UiFilePicker
+                :label="t('core.sshZagruzitFayl')"
+                :disabled="store.filesStatus !== 'ready'"
+                @change="uploadFiles"
+              />
             </div>
-            <ul v-if="store.files?.length" class="ssh-files">
+            <UiInlineMessage v-if="store.filesStatus === 'error'" tone="danger">
+              {{ store.filesError }}
+            </UiInlineMessage>
+            <p v-if="store.filesStatus === 'ready'" class="ssh-files-context">
+              {{ t('core.sshOpenFolder', { path: store.remotePath }) }}
+            </p>
+            <ul v-if="store.filesStatus === 'ready' && store.files?.length" class="ssh-files">
               <li v-for="file in store.files" :key="file.name">
                 <span>
                   <i aria-hidden="true">{{ file.type === 'directory' ? '▸' : '·' }}</i>
@@ -341,7 +377,12 @@
                 > {{ t('core.mediaDownload') }} </a>
               </li>
             </ul>
-            <small v-else class="ssh-files__empty">{{ t('core.sshKatalogPokaNeOtkryt') }}</small>
+            <small v-else-if="store.filesStatus === 'ready'" class="ssh-files__empty">
+              {{ t('core.sshEmptyFolder') }}
+            </small>
+            <small v-else-if="!store.filesStatus || store.filesStatus === 'idle'" class="ssh-files__empty">
+              {{ t('core.sshKatalogPokaNeOtkryt') }}
+            </small>
           </div>
         </details>
 
@@ -397,6 +438,12 @@
             </span>
           </template>
         </UiPaneHeader>
+
+        <p v-if="workspaceSession" class="ssh-catalog-target">
+          <strong>{{ sessionProjectLabel(workspaceSession) }} / {{ sessionTargetLabel(workspaceSession) }}</strong>
+          <code>{{ sessionAddress(workspaceSession) }}</code>
+          <span>{{ workspaceStatusLabel }}</span>
+        </p>
 
         <div v-if="store.connections?.length" class="ssh-catalog-search">
           <UiSearchInput
@@ -457,36 +504,45 @@
                 :id="projectGroupId(group.projectId)"
                 class="ssh-connection-group__body"
               >
-                <UiButton
+                <div
                   v-for="connection in group.connections"
                   :key="connection.id"
-                  class="ssh-connection"
-                  variant="ghost"
-                  :class="{ 'is-current': connectionIsActive(connection.id) }"
-                  data-context="workspace-catalog-row"
-                  :data-connection-id="connection.id"
-                  :pressed="selectedConnectionId === connection.id"
-                  :disabled="Boolean(connectingId)"
-                  @click="selectConnection(connection)"
+                  class="ssh-connection-row"
                 >
-                  <span class="ssh-connection__top">
-                    <span class="ssh-connection__label">{{ connection.label }}</span>
-                    <span class="ssh-connection__separator" aria-hidden="true">·</span>
-                    <span class="ssh-connection__role">{{ connection.role }}</span>
-                    <span
-                      v-if="connectionSessionCount(connection.id)"
-                      class="ssh-session-pill"
-                      :aria-label="sessionCountLabel(connectionSessionCount(connection.id))"
-                      v-tooltip="sessionCountLabel(connectionSessionCount(connection.id))"
-                    >
-                      <span class="ssh-session-pill__dot" aria-hidden="true"></span>
-                      <span aria-hidden="true">{{ connectionSessionCount(connection.id) }}</span>
+                  <UiButton
+                    class="ssh-connection"
+                    variant="ghost"
+                    data-context="workspace-catalog-row"
+                    :data-connection-id="connection.id"
+                    :pressed="connectionIsActive(connection.id)"
+                    :aria-current="connectionIsActive(connection.id) ? 'true' : undefined"
+                    :aria-haspopup="connectionSessionCount(connection.id) === 1 ? undefined : 'dialog'"
+                    :disabled="Boolean(connectingId)"
+                    @click="selectConnection(connection)"
+                  >
+                    <span class="ssh-connection__top">
+                      <span class="ssh-connection__label">{{ connection.label }}</span>
+                      <span class="ssh-connection__separator" aria-hidden="true">·</span>
+                      <span class="ssh-connection__role">{{ connection.role }}</span>
                     </span>
-                  </span>
-                  <code class="ssh-connection__address">
-                    {{ connection.user }}@{{ connection.host }}:{{ connection.port }}
-                  </code>
-                </UiButton>
+                    <code class="ssh-connection__address">{{ sessionAddress(connection) }}</code>
+                    <span class="ssh-connection__action">
+                      <span v-if="connectionIsActive(connection.id)" class="ssh-current-label">
+                        {{ t('core.sshCurrentServer') }}
+                      </span>
+                      {{ connectionActionLabel(connection.id) }}
+                    </span>
+                  </UiButton>
+                  <UiIconButton
+                    v-if="connectionSessionCount(connection.id)"
+                    role="embedded"
+                    :label="t('core.sshNewSessionOnServer', { label: connection.label, role: connection.role })"
+                    aria-haspopup="dialog"
+                    :disabled="Boolean(connectingId)"
+                    v-tooltip="t('core.sshNewSessionOnServer', { label: connection.label, role: connection.role })"
+                    @click="openLogin(connection.id)"
+                  >＋</UiIconButton>
+                </div>
               </div>
             </section>
             <div v-if="!connectionGroups.length" class="ssh-catalog-empty" role="status">
@@ -514,89 +570,104 @@
             <span>{{ t('core.sshDobavtePervoeSshPodklyuchenie') }}</span>
             <UiButton variant="solid" tone="accent" @click="toggleCreate"> {{ t('core.sshDobavitServer') }} </UiButton>
           </div>
-
-          <div v-if="selectedConnection" class="ssh-connections__footer">
-            <section class="ssh-selected" :aria-label="t('core.sshVybrannyyServer')">
-              <p v-if="!selectedRowIsListed" class="ssh-selected__project">
-                {{ selectedConnection.projectId }}
-              </p>
-              <div class="ssh-selected__heading">
-                <strong>{{ selectedConnection.label }}</strong>
-                <span class="ssh-selected__separator" aria-hidden="true">·</span>
-                <span class="ssh-selected__role">{{ selectedConnection.role }}</span>
-              </div>
-              <code class="ssh-selected__address">
-                {{ selectedConnection.user }}@{{ selectedConnection.host }}:{{ selectedConnection.port }}
-              </code>
-
-              <div v-if="connectionSessionCount(selectedConnection.id)" class="ssh-selected__actions">
-                <UiButton
-                  variant="solid"
-                  tone="accent"
-                  data-context="workspace-form"
-                  :aria-label="t('core.sshOtkrytTerminalLabel', { label: selectedConnection.label })"
-                  @click="openConnectionSession(selectedConnection.id)"
-                >
-                  {{ connectionIsActive(selectedConnection.id) ? t('core.sshKTerminalu') : t('core.sshOtkrytTerminal') }}
-                </UiButton>
-                <UiButton
-                  variant="text"
-                  data-context="workspace-form"
-                  :aria-expanded="showNewLogin"
-                  aria-controls="ssh-login"
-                  @click="showNewLogin = !showNewLogin"
-                >
-                  {{ showNewLogin ? t('core.dbDesignHideLogin') : t('core.dbDesignNewSession') }}
-                </UiButton>
-              </div>
-
-              <form
-                v-if="!connectionSessionCount(selectedConnection.id) || showNewLogin"
-                id="ssh-login"
-                class="ssh-connection__login"
-                @submit.prevent="openConnection(selectedConnection)"
-              >
-                <UiField :label="t('core.dbParolNaOdinVhod')">
-                  <UiPasswordInput
-                    ref="passwordInput"
-                    v-model="passwords[selectedConnection.id]"
-                    :aria-label="t('core.dbParolDlyaLabel', { label: selectedConnection.label })"
-                    autocomplete="current-password"
-                    :disabled="Boolean(connectingId)"
-                  />
-                </UiField>
-                <UiButton
-                  type="submit"
-                  variant="solid"
-                  tone="accent"
-                  data-context="workspace-form"
-                  :loading="connectingId === selectedConnection.id"
-                  :loading-label="t('core.sshPodklyuchayu')"
-                  :disabled="Boolean(connectingId && connectingId !== selectedConnection.id)"
-                > {{ t('core.connect') }} </UiButton>
-              </form>
-            </section>
-
-            <p class="ssh-secret-note">
-              <svg
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="1.8"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                aria-hidden="true"
-              >
-                <path d="M7 11V8a5 5 0 0 1 10 0v3" />
-                <rect x="4" y="11" width="16" height="10" rx="2" />
-              </svg> {{ t('core.sshParoliNeSohranyayutsyaI') }} </p>
-          </div>
         </div>
       </section>
 
       </div>
     </div>
     </div>
+
+    <UiDialog
+      :open="Boolean(chooserConnection) && props.active"
+      :title="t('core.sshChooseSession')"
+      size="compact"
+      mobile-sheet
+      data-ssh-session-chooser
+      initial-focus="[data-ssh-session-choice]"
+      :return-focus="!chooserActivated"
+      :close-label="t('core.close')"
+      @update:open="chooserConnectionId = ''"
+    >
+      <div v-if="chooserConnection" class="ssh-chooser">
+        <div class="ssh-login__target">
+          <strong>{{ chooserConnection.projectId }} / {{ chooserConnection.label }} · {{ chooserConnection.role }}</strong>
+          <code>{{ sessionAddress(chooserConnection) }}</code>
+        </div>
+        <UiButton
+          v-for="session in connectionSessions(chooserConnection.id)"
+          :key="session.id"
+          variant="outline"
+          data-ssh-session-choice
+          :tone="session.id === activeSession?.id ? 'accent' : 'neutral'"
+          :pressed="session.id === activeSession?.id"
+          @click="openChosenSession(session.id)"
+        >
+          <span>{{ sessionTargetLabel(session) }}</span>
+          <span v-if="session.id === activeSession?.id" class="ssh-chooser__current">
+            {{ t('core.sshCurrentSession') }}
+          </span>
+        </UiButton>
+        <UiInlineMessage v-if="!connectionSessionCount(chooserConnection.id)">
+          {{ t('core.sshNetAktivnoySshSessii') }}
+        </UiInlineMessage>
+      </div>
+      <template #footer>
+        <UiButton @click="chooserConnectionId = ''">{{ t('core.cancel') }}</UiButton>
+        <UiButton v-if="chooserConnection" @click="openLoginFromChooser(chooserConnection.id)">
+          {{ t('core.sshNewSession') }}
+        </UiButton>
+      </template>
+    </UiDialog>
+
+    <UiDialog
+      :open="Boolean(loginConnection) && props.active"
+      :title="t('core.sshConnectToServer')"
+      size="compact"
+      data-ssh-login-dialog
+      mobile-sheet
+      initial-focus="[data-ssh-login-password]"
+      :return-focus="!loginSucceeded"
+      :busy="Boolean(connectingId)"
+      :dismissible="!connectingId"
+      :close-label="t('core.close')"
+      @update:open="closeLogin"
+    >
+      <form
+        v-if="loginConnection"
+        id="ssh-login"
+        class="ssh-login"
+        @submit.prevent="openConnection(loginConnection)"
+      >
+        <div class="ssh-login__target">
+          <strong>{{ loginConnection.projectId }} / {{ loginConnection.label }} · {{ loginConnection.role }}</strong>
+          <code>{{ loginConnection.user }}@{{ loginConnection.host }}:{{ loginConnection.port }}</code>
+        </div>
+        <UiField :label="t('core.dbParolNaOdinVhod')" :hint="t('core.sshParoliNeSohranyayutsyaI')">
+          <UiPasswordInput
+            v-model="loginPassword"
+            data-ssh-login-password
+            :aria-label="t('core.dbParolDlyaLabel', { label: loginConnection.label })"
+            autocomplete="current-password"
+            :readonly="Boolean(connectingId)"
+          />
+        </UiField>
+        <UiInlineMessage v-if="loginError" tone="danger">{{ loginError }}</UiInlineMessage>
+      </form>
+
+      <template #footer>
+        <UiButton :disabled="Boolean(connectingId)" @click="closeLogin">{{ t('core.cancel') }}</UiButton>
+        <UiButton
+          type="submit"
+          form="ssh-login"
+          variant="solid"
+          tone="accent"
+          :loading="Boolean(connectingId)"
+          :loading-label="t('core.sshPodklyuchayu')"
+        >
+          {{ t('core.connect') }}
+        </UiButton>
+      </template>
+    </UiDialog>
   </section>
 </template>
 
@@ -611,7 +682,7 @@ import { errorMessage } from '../../../../shared/lib/errors.ts';
 import { sshSessionTabLabel } from '../../../../shared/plugins/ssh/sessionLabels.ts';
 
 import {
-  UiRefreshIcon, UiButton, UiDisclosureButton, UiField, UiFilePicker, UiFormActions,
+  UiRefreshIcon, UiButton, UiDialog, UiDisclosureButton, UiField, UiFilePicker, UiFormActions,
   UiIconButton, UiCreateButton, UiInlineMessage, UiInput, UiNumberInput, UiPasswordInput,
   UiPaneHeader, UiSearchInput, UiSelect, UiSwitch, UiTab, UiTabs, alertDialog, confirmDialog,
   vTooltip, UiLoadingState, UiSkeletonLayout, t, messageRef, uiLocale
@@ -665,19 +736,25 @@ watchSsh();
 const terminalHost = ref<HTMLElement | null>(null);
 const sessionTabs = ref<{ $el?: HTMLElement } | HTMLElement | null>(null);
 const connectionsRegion = ref<HTMLElement | null>(null);
-const passwordInput = ref<{ focus?: (options?: FocusOptions) => void } | null>(null);
-const passwords = reactive<Record<string, string>>({});
+const approvalsRegion = ref<HTMLElement | null>(null);
 const comments = reactive<Record<string, string>>({});
 const remotePath = ref('.');
 const showConnections = ref(!store.sessions?.length);
 const showCreate = ref(false);
-const showNewLogin = ref(false);
+const createReturnToConnections = ref(false);
+const chooserConnectionId = ref('');
+const chooserActivated = ref(false);
+const lostSession = ref<SshSession | null>(null);
+const loginConnectionId = ref('');
+const loginPassword = ref('');
+const loginError = ref('');
+const loginSucceeded = ref(false);
 const search = ref('');
-const selectedConnectionId = ref('');
 const expandedProjectId = ref<string | null>(null);
 const savingConnection = ref(false);
 const connectingId = ref('');
 const closingSessionId = ref('');
+let terminalFocusId = '';
 const draft = reactive({
   projectId: '',
   label: '',
@@ -691,6 +768,22 @@ const sshApprovals = computed(() => Object.values(chat.pending || {})
   .filter((item) => item.origin === 'ssh'));
 const activeSession = computed(() => (store.sessions || [])
   .find((item) => item.id === store.activeId));
+const workspaceSession = computed(() => activeSession.value || lostSession.value);
+const workspaceStatus = computed(() => activeSession.value ? store.terminalStatus : 'lost');
+const workspaceStatusLabel = computed(() => {
+  switch (workspaceStatus.value) {
+    case 'ready':
+      return t('core.machineConnected');
+    case 'detached':
+      return t('core.sshTerminalDetached');
+    case 'lost':
+      return t('core.sshSessionLost');
+    default:
+      return t('core.sshTerminalOpening');
+  }
+});
+const lostConnection = computed(() => store.connections
+  .find((connection) => connection.id === lostSession.value?.connectionId));
 const mobileWorkspace = computed({
   get: () => showConnections.value ? 'connections' : 'workspace',
   set: (value: string) => {
@@ -698,7 +791,7 @@ const mobileWorkspace = computed({
   },
 });
 const selectedSessionId = computed({
-  get: () => store.activeId || store.sessions?.[0]?.id || '',
+  get: () => store.activeId,
   set: (sessionId: string) => {
     if (sessionId && sessionId !== store.activeId) {
       void activateSession(sessionId);
@@ -730,8 +823,10 @@ const sessionsByConnection = computed(() => {
   return groups;
 });
 
-const selectedConnection = computed(() => (store.connections || [])
-  .find((connection) => connection.id === selectedConnectionId.value));
+const chooserConnection = computed(() => (store.connections || [])
+  .find((connection) => connection.id === chooserConnectionId.value));
+const loginConnection = computed(() => (store.connections || [])
+  .find((connection) => connection.id === loginConnectionId.value));
 const connectionGroups = computed(() => {
   const query = search.value.trim().toLocaleLowerCase();
   const groups = new Map<string, SshConnection[]>();
@@ -767,88 +862,81 @@ function projectIsExpanded(projectId: string): boolean {
   return Boolean(search.value.trim()) || expandedProjectId.value === projectId;
 }
 
-// Имя проекта в подвале нужно, только когда строка выбранного сервера скрыта
-// свёрнутой группой или поиском: у раскрытого проекта оно дублировало заголовок.
-const selectedRowIsListed = computed(() => {
-  const selected = selectedConnection.value;
-
-  if (!selected) {
-    return false;
-  }
-
-  const listed = connectionGroups.value.some((group) => (
-    group.projectId === selected.projectId
-    && group.connections.some((connection) => connection.id === selected.id)
-  ));
-
-  return listed && projectIsExpanded(selected.projectId);
-});
-
 /**
- * Каталог сохраняет выбор при обновлении реестра; исчезнувшая запись заменяется
- * сервером активной сессии либо первой доступной записью без нового подключения.
+ * После обновления раскрытый проект сохраняется, пока в нём остались серверы.
+ * При первом наполнении открываем проект терминала или первую группу каталога.
  */
-watch(() => store.connections, (connections) => {
-  if (expandedProjectId.value && !connections?.some((connection) => (
-    connection.projectId === expandedProjectId.value
-  ))) {
-    expandedProjectId.value = selectedConnection.value?.projectId || connections?.[0]?.projectId || null;
+watch(() => store.connections, (connections, previous) => {
+  if (!expandedProjectId.value && previous?.length) {
+    return;
   }
-
-  if (connections?.some((connection) => connection.id === selectedConnectionId.value)) {
+  if (connections?.some((connection) => connection.projectId === expandedProjectId.value)) {
     return;
   }
 
   const active = connections?.find((connection) => connection.id === activeSession.value?.connectionId);
 
-  selectedConnectionId.value = active?.id || connections?.[0]?.id || '';
+  expandedProjectId.value = active?.projectId || connections?.[0]?.projectId || null;
 }, { immediate: true, deep: true });
 
-// Выбор другой связи раскрывает её проект. Замена объектов при обновлении
-// не раскрывает проект заново, если человек сам свернул его заголовком.
-watch(() => selectedConnection.value?.id, () => {
-  expandedProjectId.value = selectedConnection.value?.projectId ?? null;
-}, { immediate: true });
-
-watch(selectedConnectionId, (_id, previous) => {
-  if (previous && previous !== connectingId.value) {
-    delete passwords[previous];
+watch(loginConnection, (connection, previous) => {
+  if (!connection || (previous && sessionAddress(connection) !== sessionAddress(previous))) {
+    resetLogin();
   }
-
-  showNewLogin.value = false;
 });
 
-// Раскрытый вход забирает фокус: человек только что нажал «Новая сессия», и поле
-// пароля не должно прятаться внизу каталога без приглашения к вводу.
-watch(showNewLogin, async (open) => {
-  if (!open) {
-    return;
+watch(chooserConnection, (connection) => {
+  if (!connection) {
+    chooserConnectionId.value = '';
   }
-
-  await nextTick();
-  passwordInput.value?.focus?.();
 });
+
+function resetLogin(): void {
+  loginConnectionId.value = '';
+  loginPassword.value = '';
+  loginError.value = '';
+}
+
+function closeLogin(): void {
+  if (!connectingId.value) {
+    resetLogin();
+  }
+}
+
+function openLogin(connectionId: string): void {
+  loginSucceeded.value = false;
+  loginConnectionId.value = connectionId;
+}
 
 /**
- * Выбор строки раскрывает один вход, а для уже подключённого сервера возвращает
- * существующую сессию без проверки ключа и повторной передачи пароля.
+ * Строка сразу ведёт к действию: входу, единственной сессии или явному выбору
+ * вкладки одного сервера. Пока диалог открыт, цель текущей оболочки сохраняется.
  */
 function selectConnection(connection: SshConnection): void {
-  selectedConnectionId.value = connection.id;
-  showCreate.value = false;
+  const sessions = connectionSessions(connection.id);
+  const [firstSession] = sessions;
 
-  if (connectionSessionCount(connection.id)) {
-    void openConnectionSession(connection.id);
+  if (!firstSession) {
+    openLogin(connection.id);
+  } else if (sessions.length === 1) {
+    void openChosenSession(firstSession.id);
+  } else {
+    chooserActivated.value = false;
+    chooserConnectionId.value = connection.id;
   }
 }
 
 /**
- * Форма создаётся один раз и сохраняет черновик при скрытии. На узкой панели
- * открытие формы переводит человека в рабочую область, закрытие — к серверам.
+ * Форма сохраняет черновик и при закрытии возвращает ту часть узкой панели,
+ * из которой её открыли. Сохранение ведёт к строке созданного сервера.
  */
 function toggleCreate(): void {
+  if (!showCreate.value) {
+    createReturnToConnections.value = showConnections.value;
+  }
+
   showCreate.value = !showCreate.value;
-  showConnections.value = !showCreate.value && !activeSession.value;
+  showConnections.value = !showCreate.value && createReturnToConnections.value;
 }
 
 const connectionSessions = (connectionId: string) => (
@@ -858,6 +946,23 @@ const connectionSessionCount = (connectionId: string) => connectionSessions(conn
 const connectionIsActive = (connectionId: string) => (
   activeSession.value?.connectionId === connectionId
 );
+
+/**
+ * Подпись в строке объясняет следующий шаг. У активного сервера состояние уже
+ * выделено отдельно, поэтому для единственной активной сессии достаточно метки.
+ */
+function connectionActionLabel(connectionId: string): string {
+  const count = connectionSessionCount(connectionId);
+
+  if (count > 1) {
+    return sessionCountLabel(count);
+  }
+  if (count === 1) {
+    return connectionIsActive(connectionId) ? '' : t('core.open');
+  }
+
+  return t('core.connect');
+}
 
 /**
  * Русская форма счётчика по правилам 11–14 и младших цифр. Одна формула на все
@@ -964,6 +1069,7 @@ async function ensureTerminal(): Promise<boolean> {
   terminal = new Terminal({
     convertEol: true,
     cursorBlink: true,
+    disableStdin: store.terminalStatus !== 'ready',
     fontFamily: 'ui-monospace, "SF Mono", "Cascadia Mono", Consolas, monospace',
     fontSize: 13,
     lineHeight: 1.2,
@@ -987,7 +1093,14 @@ async function ensureTerminal(): Promise<boolean> {
   fit = new FitAddon();
   terminal.loadAddon?.(fit);
   terminal.open(terminalHost.value);
-  bindSshTerminal(terminal);
+
+  const openedTerminal = terminal;
+
+  bindSshTerminal({
+    // Сброс ставится в очередь xterm после уже полученных байтов прежней вкладки.
+    reset: (done) => openedTerminal.write('\u001bc', done),
+    write: (data) => openedTerminal.write(data),
+  });
   terminalInput = terminal.onData?.((data: string) => sendSshInput(data));
 
   if (typeof ResizeObserver !== 'undefined') {
@@ -1129,27 +1242,72 @@ async function focusSessionTab(sessionId: string): Promise<void> {
   (tab as HTMLElement | undefined)?.focus();
 }
 
-/**
- * Карточка сервера возвращает в живую сессию без нового probe и ввода пароля:
- * сессия уже открыта на сервере, и второй вход завёл бы рядом ещё одну.
- */
-async function openConnectionSession(connectionId: string): Promise<void> {
-  const sessions = connectionSessions(connectionId);
-  const session = sessions.find((item) => item.id === store.activeId) || sessions.at(-1);
+function sessionAddress(target: Pick<SshConnection, 'user' | 'host' | 'port'>): string {
+  return `${target.user}@${target.host}:${target.port}`;
+}
 
-  if (!session) {
+/**
+ * Возврат к живой сессии использует её вкладку. При выборе в диалоге фокус
+ * переходит в терминал и не возвращается к строке скрытого каталога.
+ */
+async function openChosenSession(sessionId: string): Promise<void> {
+  if (!store.sessions.some((session) => session.id === sessionId)) {
     return;
   }
 
-  if (store.activeId !== session.id) {
-    await activateSession(session.id);
+  chooserActivated.value = true;
+  chooserConnectionId.value = '';
+
+  if (store.activeId !== sessionId) {
+    await activateSession(sessionId);
   }
 
   showCreate.value = false;
   showConnections.value = false;
 
   await nextTick();
-  terminal?.focus?.();
+  focusTerminalWhenReady();
+}
+
+/**
+ * Второй вход открывается после закрытия выбора сессии, чтобы общее окно успело
+ * вернуть фокус строке каталога и использовало её для закрытия формы пароля.
+ */
+async function openLoginFromChooser(connectionId: string): Promise<void> {
+  chooserConnectionId.value = '';
+  await nextTick();
+  await nextTick();
+  openLogin(connectionId);
+}
+
+/**
+ * При возврате из каталога и восстановлении канала фокус ждёт готовности xterm.
+ * Обычное переключение вкладок сохраняет фокус на переключателе.
+ */
+function focusTerminalWhenReady(): void {
+  if (store.terminalStatus === 'ready') {
+    terminal?.focus?.();
+  } else if (store.terminalStatus === 'connecting') {
+    terminalFocusId = store.activeId;
+  }
+}
+
+async function restoreTerminal(): Promise<void> {
+  if (activeSession.value) {
+    await activateSession(activeSession.value.id);
+    focusTerminalWhenReady();
+  }
+}
+
+/**
+ * Счётчик подтверждений открывает очередь и на узком экране, пока человек
+ * просматривает каталог или заполняет черновик новой связи.
+ */
+async function showApprovals(): Promise<void> {
+  showConnections.value = false;
+  showCreate.value = false;
+  await nextTick();
+  approvalsRegion.value?.focus();
 }
 
 /**
@@ -1172,7 +1330,7 @@ async function closeActiveSession(): Promise<void> {
   try {
     await closeSshSession(sessionId);
 
-    if (disposed) {
+    if (disposed || (store.activeId && store.activeId !== sessionId)) {
       return;
     }
     if (!replacementId) {
@@ -1188,7 +1346,7 @@ async function closeActiveSession(): Promise<void> {
     await activateSession(replacementId);
     await focusSessionTab(replacementId);
   } catch (error) {
-    if (!disposed && (store.sessions || []).some((session) => session.id === sessionId)) {
+    if (!disposed && !store.activeId && store.sessions.some((session) => session.id === sessionId)) {
       await activateSession(sessionId);
       await focusSessionTab(sessionId);
     }
@@ -1216,29 +1374,53 @@ onMounted(async () => {
   }
 });
 
-watch(() => activeSession.value?.id, async () => {
-  const session = activeSession.value;
-
-  showConnections.value = !session;
-
-  if (session) {
-    showCreate.value = false;
-    selectedConnectionId.value = session.connectionId;
+watch(activeSession, async (session, previous) => {
+  if (session?.id === previous?.id) {
+    return;
   }
 
-  if (!session) {
-    lastTerminalSize = '';
+  remotePath.value = '.';
+
+  if (session) {
+    lostSession.value = null;
+    showCreate.value = false;
+    showConnections.value = false;
+    await ensureTerminal();
+    await nextTick();
+    scheduleTerminalFit();
 
     return;
   }
 
-  await ensureTerminal();
-  await nextTick();
-  scheduleTerminalFit();
+  if (previous && previous.id !== closingSessionId.value) {
+    lostSession.value = previous;
+  }
+
+  showConnections.value = !lostSession.value;
+  lastTerminalSize = '';
 });
 
+watch([() => store.terminalStatus, () => store.activeId], ([status, id]) => {
+  if (terminal?.options) {
+    terminal.options.disableStdin = status !== 'ready';
+  }
+  if (status === 'ready' && id && terminalFocusId === id
+    && props.active && !showConnections.value && !showCreate.value && !loginConnection.value) {
+    terminal?.focus?.();
+  }
+  if (status !== 'connecting' || terminalFocusId !== id) {
+    terminalFocusId = '';
+  }
+}, { flush: 'post' });
+
 watch(() => props.active, async (active) => {
-  if (!active || !activeSession.value) {
+  if (!active) {
+    resetLogin();
+    chooserConnectionId.value = '';
+
+    return;
+  }
+  if (!activeSession.value) {
     return;
   }
 
@@ -1269,13 +1451,14 @@ onBeforeUnmount(() => {
   terminalObserver?.disconnect?.();
   terminalInput?.dispose?.();
   detachSshTerminal();
+  bindSshTerminal(null);
   terminal?.dispose?.();
 });
 
 /**
  * Вход на сервер. Ключ хоста проверяется до пароля: молчаливое доверие первому
- * ответившему означало бы отдать пароль root тому, кто занял адрес. Пароль стирается
- * в любом исходе — и после успеха, и после отказа.
+ * ответившему означало бы отдать пароль root тому, кто занял адрес. Диалог держит
+ * свою цель до конца попытки, а одноразовый пароль очищается при любом исходе.
  */
 async function openConnection(connection: SshConnection): Promise<void> {
   if (connectingId.value) {
@@ -1283,9 +1466,16 @@ async function openConnection(connection: SshConnection): Promise<void> {
   }
 
   connectingId.value = connection.id;
+  loginError.value = '';
+
+  const isCurrentLogin = () => !disposed && props.active && loginConnection.value?.id === connection.id;
 
   try {
     const check = await probeSshHostKey(connection.id);
+
+    if (!isCurrentLogin()) {
+      return;
+    }
 
     if (check.status !== 'trusted') {
       const changed = check.status === 'changed';
@@ -1301,28 +1491,39 @@ async function openConnection(connection: SshConnection): Promise<void> {
         },
       );
 
-      if (!accepted) {
+      if (!accepted || !isCurrentLogin()) {
         return;
       }
 
       await decideSshHostKey(String(check.challengeId), changed ? 'replace' : 'trust');
     }
 
-    if (!await ensureTerminal()) {
+    const terminalReady = isCurrentLogin() && await ensureTerminal();
+
+    if (!terminalReady || !isCurrentLogin()) {
       return;
     }
 
-    await connectSshSession(connection.id, passwords[connection.id] || '');
+    await connectSshSession(connection.id, loginPassword.value);
+
+    if (!isCurrentLogin()) {
+      return;
+    }
+
+    loginSucceeded.value = true;
+    resetLogin();
     showCreate.value = false;
     showConnections.value = false;
-  } catch (error) {
-    await alertDialog(errorMessage(error, t('core.sshNeUdalosPodklyuchitsya')), { title: 'SSH' });
-  } finally {
-    passwords[connection.id] = '';
 
-    if (connectingId.value === connection.id) {
-      connectingId.value = '';
+    await nextTick();
+    focusTerminalWhenReady();
+  } catch (error) {
+    if (isCurrentLogin()) {
+      loginError.value = errorMessage(error, t('core.sshNeUdalosPodklyuchitsya'));
     }
+  } finally {
+    loginPassword.value = '';
+    connectingId.value = '';
   }
 }
 
@@ -1343,7 +1544,7 @@ async function saveConnection(): Promise<void> {
       port: Number(draft.port) || 22,
     });
 
-    selectedConnectionId.value = saved?.id || selectedConnectionId.value;
+    expandedProjectId.value = saved?.projectId || draft.projectId;
     showCreate.value = false;
     showConnections.value = true;
     search.value = '';
@@ -1362,15 +1563,11 @@ async function saveConnection(): Promise<void> {
   }
 }
 
-// Файл кладётся в открытый каталог под своим именем: путь собирается здесь, а не в
-// операции, потому что «куда» видно только на экране.
 async function uploadFiles(files: File[]): Promise<void> {
   const file = files?.[0];
 
   if (file) {
-    const destination = `${remotePath.value.replace(/\/$/, '')}/${file.name}`;
-
-    await uploadSshFile(file, destination);
+    await uploadSshFile(file);
   }
 }
 
@@ -1469,6 +1666,7 @@ defineExpose({ exportState, importState });
   display: grid;
   flex: 1;
   grid-template-columns: minmax(240px, 300px) minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
   min-width: 0;
   min-height: 0;
   overflow: hidden;
@@ -1526,6 +1724,7 @@ defineExpose({ exportState, importState });
 
 .ssh-connection-list {
   display: flex;
+  flex: none;
   flex-direction: column;
   gap: 10px;
   min-height: 0;
@@ -1600,6 +1799,17 @@ defineExpose({ exportState, importState });
   border-left: 1px solid var(--line-2);
 }
 
+.ssh-connection-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.ssh-connection-row .ssh-connection {
+  flex: 1;
+}
+
 .ssh-connection,
 .ssh-connection :deep(.ui-button__content),
 .ssh-connection :deep(.ui-button__label) {
@@ -1620,6 +1830,22 @@ defineExpose({ exportState, importState });
   min-width: 0;
 }
 
+.ssh-connection__action {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  color: var(--accent);
+  font-size: 11px;
+}
+
+.ssh-current-label {
+  flex: none;
+  color: var(--good);
+  font-size: 10.5px;
+  line-height: 15px;
+}
+
 .ssh-connection__label {
   flex: 0 1 auto;
   min-width: 0;
@@ -1632,16 +1858,14 @@ defineExpose({ exportState, importState });
   white-space: nowrap;
 }
 
-.ssh-connection__separator,
-.ssh-selected__separator {
+.ssh-connection__separator {
   flex: none;
   color: var(--ink-low);
   font-size: 11px;
   line-height: 15px;
 }
 
-.ssh-connection__role,
-.ssh-selected__role {
+.ssh-connection__role {
   flex: 0 1 auto;
   min-width: 0;
   max-width: 45%;
@@ -1722,101 +1946,107 @@ defineExpose({ exportState, importState });
   margin-top: 2px;
 }
 
-/* Подвал каталога всегда на виду: действия выбранного сервера не уезжают вниз
-   длинного списка. Липкая строка начинается сразу под списком и прижимается к низу,
-   только когда каталог прокручивается, — без пустого провала в короткой панели. */
-.ssh-connections__footer {
-  position: sticky;
-  bottom: 0;
-  z-index: 3;
+.ssh-chooser,
+.ssh-login,
+.ssh-login__target {
   display: grid;
-  flex: none;
+  min-width: 0;
+}
+
+.ssh-login {
+  gap: 16px;
+}
+
+.ssh-chooser {
   gap: 8px;
-  margin-inline: -10px;
-  padding: 10px;
-  border-top: 1px solid var(--line);
-  background: var(--sidebar);
 }
 
-.ssh-selected {
-  display: grid;
-  gap: 7px;
-  min-width: 0;
-  padding: 10px;
-  border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--line));
-  border-radius: var(--radius-sm);
-  background: color-mix(in srgb, var(--accent) 6%, var(--surface));
-}
-
-.ssh-selected__project {
-  margin: 0;
-  overflow: hidden;
-  color: var(--ink-low);
+.ssh-chooser__current {
+  margin-left: 8px;
+  color: var(--accent);
   font-size: 11px;
-  line-height: 14px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
-.ssh-selected__heading {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
-}
-
-.ssh-selected__heading strong {
-  flex: 0 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  color: var(--ink);
-  font-size: 13px;
-  line-height: 18px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.ssh-selected__address {
-  color: var(--ink-mid);
-  font-family: var(--mono);
-  font-size: 11px;
-  line-height: 15px;
+.ssh-login__target {
+  gap: 4px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--line);
   overflow-wrap: anywhere;
 }
 
-.ssh-selected__actions {
+.ssh-login__target strong {
+  color: var(--ink);
+}
+
+.ssh-login__target code {
+  color: var(--ink-mid);
+  font: 12px / 18px var(--mono);
+}
+
+.ssh-active-session {
+  display: flex;
+  flex: none;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  min-width: 0;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+  box-shadow: inset 3px 0 var(--accent);
+}
+
+.ssh-active-session__identity {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.ssh-active-session__status,
+.ssh-files-context {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+}
+
+.ssh-files-context {
+  margin: 0;
+  color: var(--ink-mid);
+  overflow-wrap: anywhere;
+}
+
+.ssh-approval__server code {
+  overflow-wrap: anywhere;
+}
+
+.ssh-catalog-target {
+  display: none;
+}
+
+.ssh-active-session__name {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  align-items: baseline;
+  gap: 2px 6px;
   min-width: 0;
+  color: var(--ink-mid);
+  font-size: 15px;
+  overflow-wrap: anywhere;
 }
 
-.ssh-selected__actions :deep(.ui-button:first-child) {
-  flex: 1 1 120px;
-}
-
-.ssh-connection__login {
-  display: grid;
-  gap: 8px;
+.ssh-active-session__name strong {
   min-width: 0;
+  color: var(--ink);
+  font-weight: 650;
 }
 
-.ssh-secret-note {
-  display: flex;
-  align-items: flex-start;
-  gap: 6px;
-  margin: 0;
-  padding-inline: 2px;
-  color: var(--ink-low);
-  font-size: 10.5px;
-  line-height: 14px;
-  text-wrap: pretty;
-}
-
-.ssh-secret-note svg {
-  flex: none;
-  width: 13px;
-  height: 14px;
+.ssh-active-session code {
+  min-width: 0;
+  color: var(--ink-mid);
+  font: 12px / 18px var(--mono);
+  overflow-wrap: anywhere;
 }
 
 .ssh-workspace {
@@ -1883,10 +2113,6 @@ defineExpose({ exportState, importState });
   min-width: 0;
 }
 
-.ssh-session-switcher__label {
-  display: none;
-}
-
 .ssh-tabs {
   gap: 4px;
   min-width: 0;
@@ -1899,7 +2125,6 @@ defineExpose({ exportState, importState });
 
 .ssh-tab__content,
 .ssh-tab__project-line,
-.ssh-console__context,
 .ssh-live-label {
   display: flex;
   align-items: center;
@@ -1937,27 +2162,22 @@ defineExpose({ exportState, importState });
   color: var(--ink-mid);
 }
 
-.ssh-console__context {
-  flex-wrap: wrap;
-  width: 100%;
-  padding-bottom: 2px;
-  color: var(--ink-mid);
-  font-size: 12px;
-}
-
-.ssh-console__context code {
-  overflow-wrap: anywhere;
-}
-
-.ssh-role-badge {
-  margin-right: auto;
-}
-
 .ssh-live-label {
   flex: none;
   color: var(--good);
-  font-size: 12px;
+  font-size: 11px;
+  font-weight: 600;
   white-space: nowrap;
+}
+
+.ssh-live-label[data-state='connecting'],
+.ssh-live-label[data-state='idle'] {
+  color: var(--ink-mid);
+}
+
+.ssh-live-label[data-state='detached'],
+.ssh-live-label[data-state='lost'] {
+  color: var(--warn);
 }
 
 .ssh-live-label i,
@@ -1966,7 +2186,15 @@ defineExpose({ exportState, importState });
   width: 5px;
   height: 5px;
   border-radius: 50%;
-  background: var(--good);
+  background: currentColor;
+}
+
+.ssh-tab__dot {
+  color: var(--ink-low);
+}
+
+.ssh-session-tab[aria-selected='true'] .ssh-tab__dot {
+  color: var(--accent);
 }
 
 .ssh-console__title {
@@ -1994,6 +2222,10 @@ defineExpose({ exportState, importState });
   width: 100%;
   height: 100%;
   overflow: hidden;
+}
+
+.ssh-terminal[data-connecting='true'] {
+  visibility: hidden;
 }
 
 .ssh-terminal :deep(.xterm) {
@@ -2217,6 +2449,22 @@ defineExpose({ exportState, importState });
 
   .ssh-connections {
     border-right: 0;
+  }
+
+  .ssh-catalog-target {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 10px;
+    margin: 0;
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--line);
+    color: var(--ink-mid);
+    font-size: 12px;
+    overflow-wrap: anywhere;
+  }
+
+  .ssh-catalog-target strong {
+    color: var(--ink);
   }
 
   /* В узкой панели «Серверы» уже названы переключателем с числом: отдельная

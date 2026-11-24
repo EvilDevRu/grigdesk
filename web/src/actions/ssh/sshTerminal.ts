@@ -36,42 +36,72 @@ export function activateSshSession(id: string): void {
   runtime.socket?.close?.();
   runtime.socket = null;
   store.setActive(sid);
+  store.setTerminalStatus(sid ? 'connecting' : 'idle');
 
-  if (!sid || !runtime.WebSocket) {
+  if (!sid) {
+    return;
+  }
+  if (!runtime.WebSocket) {
+    store.setTerminalStatus('detached');
+
     return;
   }
 
+  const sink = runtime.terminal;
+  const reset = new Promise<void>((resolve) => {
+    if (sink?.reset) {
+      sink.reset(resolve);
+    } else {
+      resolve();
+    }
+  });
   const socket = new runtime.WebSocket(sshApi.terminalUrl(sid));
 
+  socket.binaryType = 'arraybuffer';
   runtime.socket = socket;
 
   socket.onopen = () => {
-    if (runtime.generation !== generation || runtime.socket !== socket || !runtime.size) {
+    if (runtime.generation !== generation || runtime.socket !== socket) {
       return;
     }
 
-    socket.send?.(JSON.stringify(runtime.size));
+    if (runtime.size) {
+      socket.send?.(JSON.stringify(runtime.size));
+    }
+
+    void reset.then(() => {
+      if (runtime.generation === generation && runtime.socket === socket) {
+        store.setTerminalStatus('ready');
+      }
+    });
   };
 
   socket.onmessage = (event) => {
-    if (runtime.generation !== generation) {
+    if (runtime.generation !== generation || runtime.socket !== socket) {
       return;
     }
 
     const data = event?.data;
 
     if (data instanceof Blob) {
-      void data.arrayBuffer().then((value) => runtime.terminal?.write?.(new Uint8Array(value)));
+      void data.arrayBuffer().then((value) => {
+        if (runtime.generation === generation && runtime.socket === socket) {
+          runtime.terminal?.write?.(new Uint8Array(value));
+        }
+      });
 
       return;
     }
 
-    runtime.terminal?.write?.(data as string);
+    const output = data instanceof ArrayBuffer ? new Uint8Array(data) : data as string;
+
+    runtime.terminal?.write?.(output);
   };
 
   socket.onclose = () => {
     if (runtime.generation === generation) {
       runtime.socket = null;
+      store.setTerminalStatus('detached');
     }
   };
 }
@@ -89,9 +119,10 @@ export function bindSshTerminal(terminal: TerminalSink | null): void {
  * его в терминале и не отправить было бы хуже, чем не показать вовсе.
  */
 export function sendSshInput(data: string): void {
-  const socket = runtimeOf(useSshStore()).socket;
+  const store = useSshStore();
+  const socket = runtimeOf(store).socket;
 
-  if (ready(socket)) {
+  if (store.terminalStatus === 'ready' && ready(socket)) {
     socket?.send?.(JSON.stringify({ t: 'in', d: String(data) }));
   }
 }
@@ -128,5 +159,6 @@ export function detachSshTerminal(): void {
   runtime.generation += 1;
   runtime.socket?.close?.();
   runtime.socket = null;
+  store.setTerminalStatus('idle');
   store.setActive('');
 }

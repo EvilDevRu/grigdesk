@@ -36,6 +36,16 @@ Official and Community describe origin, rather than a security assessment.
   Check machine, file and working folder if unavailable; a link does not grant access to unrelated files.
 
 Narrow SSH panels switch Servers / Terminal; database panels switch profiles, console and queries.
+The SSH terminal header shows the current session's project, role and address.
+Select a server row to sign in or return to its single live session. If several sessions
+are open, choose a tab in the dialog. Use the plus next to a server or New session in the
+dialog to sign in again. Check the address before entering your password.
+
+If the terminal channel drops while the session is live, choose Restore terminal.
+If the session has ended, choose Reconnect or select another tab. Session files uses
+the open directory for uploads and downloads. To read an agent request in SSH, select
+the pending decision count in the header.
+
 Catalog searches resemble chat search. Before confirming SSH, check server address and connection tab:
 the card shows the project with its icon and same tab name as SSH. Repeated connections are numbered.
 Compound-command parts are separated visually; Allow approves the entire command.

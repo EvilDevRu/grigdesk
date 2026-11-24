@@ -17,6 +17,8 @@ const translateUi = localeTranslator(uiLocalePort);
  */
 export async function loadSsh(): Promise<void> {
   const store = useSshStore();
+  const runtime = runtimeOf(store);
+  const request = ++runtime.snapshotRequest;
 
   store.setLoading(true);
   store.setError('');
@@ -28,6 +30,10 @@ export async function loadSsh(): Promise<void> {
       sshApi.audit(),
     ]);
 
+    if (request !== runtime.snapshotRequest) {
+      return;
+    }
+
     store.setSnapshot({
       connections,
       sessions,
@@ -38,9 +44,13 @@ export async function loadSsh(): Promise<void> {
       detachSshTerminal();
     }
   } catch (error) {
-    store.setError(errorMessage(error, translateUi('core.loadSshCouldNotLoadSSH')));
+    if (request === runtime.snapshotRequest) {
+      store.setError(errorMessage(error, translateUi('core.loadSshCouldNotLoadSSH')));
+    }
   } finally {
-    store.setLoading(false);
+    if (request === runtime.snapshotRequest) {
+      store.setLoading(false);
+    }
   }
 }
 

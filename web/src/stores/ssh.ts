@@ -20,12 +20,19 @@ export interface SshProjectOption {
   archivedAt?: string | null;
 }
 
+type SshTerminalStatus = 'idle' | 'connecting' | 'ready' | 'detached';
+type SshFilesStatus = 'idle' | 'loading' | 'ready' | 'error';
+
 export interface SshStoreState {
   connections: SshConnection[];
   projects: SshProjectOption[];
   sessions: SshSession[];
   activeId: string;
+  terminalStatus: SshTerminalStatus;
   files: SshFile[];
+  filesStatus: SshFilesStatus;
+  filesError: string;
+  filesRevision: number;
   remotePath: string;
   audit: SshAuditEntry[];
   loading: boolean;
@@ -40,7 +47,11 @@ export const useSshStore = defineStore('ssh', {
     projects: [],
     sessions: [],
     activeId: '',
+    terminalStatus: 'idle',
     files: [],
+    filesStatus: 'idle',
+    filesError: '',
+    filesRevision: 0,
     remotePath: '.',
     audit: [],
     loading: false,
@@ -134,13 +145,48 @@ export const useSshStore = defineStore('ssh', {
       this.sessions = this.sessions.filter((item) => item.id !== id);
     },
 
+    /**
+     * Файловый список принадлежит выбранной сессии. Смена цели сразу инвалидирует
+     * видимые файлы и ответы, которые ещё идут от прежней сессии.
+     */
     setActive(id: string) {
+      if (id === this.activeId) {
+        return;
+      }
+
       this.activeId = id;
+      this.filesRevision += 1;
+      this.remotePath = '.';
+      this.files = [];
+      this.filesStatus = 'idle';
+      this.filesError = '';
+    },
+
+    setTerminalStatus(status: SshTerminalStatus) {
+      this.terminalStatus = status;
     },
 
     setFiles(remotePath: string, files: SshFile[]) {
       this.remotePath = remotePath;
       this.files = files;
+      this.filesStatus = 'ready';
+    },
+
+    /**
+     * Каждое чтение и загрузка получают новую ревизию. Действия могут завершаться
+     * в другом порядке, поэтому коммитить результат разрешено текущему запросу.
+     */
+    startFilesRequest() {
+      this.filesRevision += 1;
+      this.filesStatus = 'loading';
+      this.filesError = '';
+
+      return this.filesRevision;
+    },
+
+    setFilesError(message: string) {
+      this.filesStatus = 'error';
+      this.filesError = message;
     },
   },
 });

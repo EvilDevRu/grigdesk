@@ -7,10 +7,12 @@ import type { useSshStore } from '../../stores/ssh.ts';
 export type SshStore = ReturnType<typeof useSshStore>;
 
 export interface TerminalSink {
+  reset?: (done: () => void) => void;
   write?: (data: string | Uint8Array) => void;
 }
 
 export interface TerminalSocket {
+  binaryType?: 'arraybuffer' | 'blob';
   readyState?: number;
   close?: () => void;
   send?: (payload: string) => void;
@@ -33,6 +35,7 @@ export interface SshRuntime {
   generation: number;
   terminal: TerminalSink | null;
   size: TerminalSize | null;
+  snapshotRequest: number;
   projectsRequest: number;
   off: (() => void) | null;
 }
@@ -54,6 +57,7 @@ export function runtimeOf(store: SshStore): SshRuntime {
       generation: 0,
       terminal: null,
       size: null,
+      snapshotRequest: 0,
       off: null,
       projectsRequest: 0,
     };

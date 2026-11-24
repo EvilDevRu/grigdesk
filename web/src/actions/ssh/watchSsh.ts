@@ -20,7 +20,7 @@ export function watchSsh(): void {
       void loadSshProjects();
     }
 
-    if (name === 'ssh-sessions') {
+    if (name === 'ssh-sessions' || name === 'hello') {
       void loadSsh();
     }
 
