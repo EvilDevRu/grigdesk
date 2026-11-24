@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -88,6 +89,13 @@ func codexArgs(run Run, policy routePolicy) ([]string, string, *AdapterError) {
 		}
 		args = append(args, restricted...)
 		addDirs = nil
+	} else if policy.filesystem == "state-only" && runtime.GOOS == "linux" {
+		permissions, err := codexStateOnlyArgs(run)
+		if err != nil {
+			return nil, "", err
+		}
+		args = append(args, permissions...)
+		addDirs = nil
 	} else if policy.filesystem == "workspace-write" && sandbox == "workspace-write" {
 		args = append(args, "--approve-for-me")
 	} else {
@@ -116,6 +124,29 @@ func codexArgs(run Run, policy routePolicy) ([]string, string, *AdapterError) {
 		args = append(args, "--add-dir", dir)
 	}
 	return append(args, "-o", filepath.Join(run.Dir, "last.md"), "-"), cwd, nil
+}
+
+func codexStateOnlyArgs(run Run) ([]string, *AdapterError) {
+	stateDir, controlDir := run.Store.StateDir, run.Store.ControlDir
+	for _, dir := range []string{stateDir, controlDir, run.Worktree} {
+		if !physicalRunnerDirectory(dir) {
+			return nil, adapterError(4, "Codex state-only требует физические каталоги")
+		}
+	}
+	protected := []string{controlDir, run.Worktree}
+	if run.AgentControlDir != "" {
+		protected = append(protected, run.AgentControlDir)
+	}
+	if runnerRootSetsOverlap([]string{stateDir}, protected) {
+		return nil, adapterError(4, "каталог записи Codex state-only пересекает защищённый каталог")
+	}
+	permission := `{ filesystem = { ":root" = "read", ` + strconv.Quote(stateDir) +
+		` = "write", ` + strconv.Quote(controlDir) + ` = "none" }, network = { enabled = false } }`
+	return []string{
+		"-c", `approval_policy="never"`,
+		"-c", `default_permissions="factory-state-only"`,
+		"-c", "permissions.factory-state-only=" + permission,
+	}, nil
 }
 
 type codexEvent struct {
