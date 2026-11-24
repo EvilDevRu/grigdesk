@@ -104,9 +104,15 @@
         <span v-for="index in 3" :key="index" class="loading-rail-item"></span>
       </aside>
       <aside class="panel loading-panel" aria-hidden="true">
-        <div class="loading-tree">
-          <span v-for="index in 7" :key="index" class="loading-row"
-                :style="{ '--loading-row': `${48 + ((index * 17) % 38)}%` }"></span>
+        <div class="code-search">
+          <UiSkeleton shape="block" height="30px" />
+        </div>
+        <div class="search-flags">
+          <UiSkeleton width="min(130px, 100%)" height="18px" />
+          <UiSkeleton width="min(105px, 100%)" height="18px" />
+        </div>
+        <div class="scroll tree">
+          <CodeRowSkeletons kind="files" />
         </div>
       </aside>
       <div v-if="!navigatorCollapsed" class="code-split loading-split" aria-hidden="true">
@@ -161,8 +167,6 @@
       <!-- Панель — только содержимое: дерево файлов либо изменения. Проект и рабочая
            копия выбираются в шапке раздела. -->
       <aside id="code-navigator" class="panel">
-        <UiLoadingState v-if="contextLoading" :label="t('core.codeZagruzhayuRabochuyuKopiyu')" variant="inline" />
-
         <div v-if="error" class="perr">{{ error }}</div>
         <div v-if="!projectHasRepos" class="pnote"> {{ t('core.codePutiRepozitorievNeZadany') }} <router-link to="/projects">{{ t('core.codeProekty') }}</router-link>.
         </div>
@@ -428,7 +432,11 @@
              уровнем выше — лесенка читалась рваной. Каталог на тысячи файлов рисуется
              окном VirtualRows: целиком он замораживал панель. -->
         <div v-else-if="tab === 'files'" ref="fileTreeHost" class="scroll tree file-tree">
-          <p v-if="!rows.length && !contextLoading && !error" class="pnote">
+          <UiLoadingState v-if="contextLoading && !dirs.has('') && !error"
+                          data-code-loading="files" :label="t('core.codeZagruzhayuRabochuyuKopiyu')">
+            <CodeRowSkeletons kind="files" />
+          </UiLoadingState>
+          <p v-else-if="!rows.length && !error" class="pnote">
             {{ context ? t('core.codeVEtoyRabocheyKopii') : t('core.codeVyberiteRabochuyuKopiyuRepozitoriya') }}
           </p>
           <VirtualRows v-slot="{ item: row }" :items="rows" :item-key="fileRowKey" :ref="setFilesRows">
@@ -463,6 +471,58 @@
             </UiPressable>
           </VirtualRows>
         </div>
+
+        <UiLoadingState v-else-if="tab === 'git' && !git && (contextLoading || gitLoading) && !error"
+                        class="git-navigator-loading" :data-code-loading="gitPane"
+                        :label="t(contextLoading ? 'core.codeZagruzhayuRabochuyuKopiyu' : 'core.codeChitayuGit')">
+          <div v-if="gitPane === 'changes'" class="git-panel navigator-placeholder">
+            <div class="git-panel-toolbar">
+              <UiSkeleton width="96px" />
+              <span class="grow"></span>
+              <UiSkeleton shape="block" width="48px" height="24px" />
+            </div>
+            <div class="git-filter-bar">
+              <UiSkeleton class="grow" shape="block" width="auto" height="28px" />
+              <UiSkeleton v-for="index in 2" :key="index" shape="block" width="24px" height="24px" />
+            </div>
+            <div class="scroll tree git-tree">
+              <div class="git-group">
+                <div class="subhead">
+                  <UiSkeleton width="min(116px, 55%)" />
+                  <UiSkeleton shape="block" width="48px" height="22px" />
+                </div>
+                <CodeRowSkeletons kind="changes" />
+              </div>
+            </div>
+            <div class="git-footer">
+              <div class="git-compose">
+                <UiSkeleton width="min(150px, 100%)" height="26px" />
+                <UiSkeleton width="min(200px, 100%)" height="16px" />
+              </div>
+              <div class="git-sync-row">
+                <span class="grow"></span>
+                <UiSkeleton v-for="index in 3" :key="index" shape="block" width="24px" height="24px" />
+              </div>
+            </div>
+          </div>
+          <div v-else class="git-panel navigator-placeholder">
+            <div class="scroll tree git-tree commit-tree">
+              <section class="commit-log-section">
+                <div class="subhead commits-head">
+                  <UiSkeleton width="min(105px, 45%)" />
+                  <span class="grow"></span>
+                  <UiSkeleton shape="block" width="74px" height="26px" />
+                </div>
+                <div class="commit-search">
+                  <UiSkeleton shape="block" height="30px" />
+                </div>
+                <div class="commit-log">
+                  <CodeRowSkeletons kind="commits" />
+                </div>
+              </section>
+            </div>
+          </div>
+        </UiLoadingState>
 
         <!-- Git разделён на две вкладки: рабочие группы больше не выталкивают журнал
              коммитов за нижнюю границу навигатора. -->
@@ -574,9 +634,6 @@
             </p>
           </div>
           <div class="scroll tree git-tree" :class="{ 'commit-tree': gitPane === 'commits' }">
-            <UiLoadingState v-if="gitLoading && !git" :label="t('core.codeChitayuGit')" >
-              <UiSkeletonLayout layout="list" :header="false" />
-            </UiLoadingState>
             <template v-if="git">
               <div v-if="gitPane === 'changes' && !changeGroups.length"
                    class="git-clean" role="status">
@@ -618,7 +675,7 @@
                   <UiSkeletonLayout layout="list" :header="false" />
                 </UiLoadingState>
                 <div v-else-if="commitsError" class="perr commits-state">{{ commitsError }}</div>
-                                <div class="commit-search">
+                <div class="commit-search">
                   <UiSearchInput v-model="commitQuery" data-action="commit-search"
                                  :placeholder="t('core.codePoiskPoZhurnaluKommitov')"
                                  :aria-label="t('core.codePoiskPoZhurnaluKommitov')" />
@@ -1503,7 +1560,8 @@
 </template>
 
 <script setup lang="ts">
-import { UiSkeletonLayout, t, messageRef } from '../../ui';
+import { UiSkeleton, UiSkeletonLayout, t, messageRef } from '../../ui';
+import CodeRowSkeletons from './CodeRowSkeletons.vue';
 
 import { toolWindowText } from '../../shared/tools/toolWindowMessages.ts';
 import { sendCodeWindowAction } from '../../shared/tools/toolWindowActions.ts';
@@ -3758,6 +3816,7 @@ async function askConflict() {
 let gitActionId = 0;
 let fileLoadingRequestId = 0;
 let gitLoadingRequestId = 0;
+let initialGitLoad: Promise<void> | null = null;
 const dirRequestIds = new Map<string, number>();
 
 // Растровые картинки показываются предпросмотром вместо пустого Monaco: сырые байты
@@ -4257,7 +4316,8 @@ async function exportState(): Promise<ToolWindowState> {
     throw new Error(toolWindowText('toolCodeBusy'));
   }
 
-  while (loading.value || contextLoading.value || fileLoading.value || processingIntents) {
+  while (loading.value || contextLoading.value || fileLoading.value || processingIntents
+    || (tab.value === 'git' && initialGitLoad)) {
     await new Promise((resolve) => setTimeout(resolve, 20));
   }
 
@@ -4338,6 +4398,11 @@ async function importState(value: ToolWindowState): Promise<void> {
   } else if (state.tab === 'git') {
     const snapshot = captureContext();
 
+    await initialGitLoad;
+
+    if (!contextIsCurrent(snapshot)) {
+      return;
+    }
     if (!restoreCommitSelection(state, snapshot)) {
       return;
     }
@@ -4450,7 +4515,7 @@ async function setProject(target: CodeProject, { activation = null }: Activation
 
 /**
  * Открывает рабочую копию по точному id и сбрасывает принадлежащие прежней модели.
- * Корень и Git загружаются последовательно с проверкой поколения после ожиданий.
+ * Корневой каталог сразу открывает «Файлы», а Git-метки приходят отдельным ответом.
  */
 async function setContext(id: string, { activation = null }: ActivationOptions = {}) {
   if (!activationIsCurrent(activation)) {
@@ -4478,12 +4543,27 @@ async function setContext(id: string, { activation = null }: ActivationOptions =
 
   const rootLoaded = await loadDir('', snapshot, { activation });
 
-  if (rootLoaded && activationIsCurrent(activation) && contextIsCurrent(snapshot)) {
-    await loadGit(snapshot, { activation, metadataOnly: tab.value !== 'git' });
+  if (!activationIsCurrent(activation) || generation !== contextGeneration || !contextIsCurrent(snapshot)) {
+    return;
   }
-  if (activationIsCurrent(activation)
-    && generation === contextGeneration && contextIsCurrent(snapshot)) {
-    contextLoading.value = false;
+
+  contextLoading.value = false;
+
+  if (rootLoaded) {
+    // Снимок относится к копии и переживает скрытие той же панели. Смена копии
+    // инвалидирует запрос через contextGeneration; размонтирование — через gitRequestId.
+    const pending = loadGit(snapshot);
+
+    initialGitLoad = pending;
+    void pending.finally(() => {
+      if (initialGitLoad === pending) {
+        initialGitLoad = null;
+      }
+    });
+
+    if (tab.value === 'git') {
+      await pending;
+    }
   }
 }
 
@@ -4542,6 +4622,7 @@ function resetState() {
   gitDirsReady.value = false;
   fileLoading.value = false;
   gitLoading.value = false;
+  initialGitLoad = null;
   fileLoadingRequestId = 0;
   gitLoadingRequestId = 0;
   fileRequestId += 1;
@@ -4601,7 +4682,14 @@ async function setTab(t: CodeTab) {
 
   tab.value = t;
 
-  if (!treePath.value) {
+  if (!treePath.value || contextLoading.value) {
+    return;
+  }
+  if (initialGitLoad) {
+    if (t === 'git') {
+      await initialGitLoad;
+    }
+
     return;
   }
   if (t === 'files') {
@@ -6677,6 +6765,10 @@ async function loadGit(
     gitSelection.value = new Set([...gitSelection.value].filter((key) => gitEntries.value.has(key)));
     await review.revalidateViewed();
 
+    if (!activationIsCurrent(activation)
+      || !contextIsCurrent(snapshot) || gitRequestId !== requestId) {
+      return;
+    }
     if (gitSel.value && !gitEntries.value.has(gitSel.value)) {
       gitSel.value = '';
     }
@@ -6691,7 +6783,7 @@ async function loadGit(
       return;
     }
 
-    if (metadataOnly) {
+    if (metadataOnly || tab.value !== 'git') {
       return;
     }
 
@@ -7501,6 +7593,7 @@ onBeforeUnmount(() => {
 
   resetQuickOpen();
   activationId += 1;
+  gitRequestId += 1;
   gitActionId += 1;
   document.removeEventListener('visibilitychange', refreshWhenVisible);
 
@@ -7687,8 +7780,6 @@ onBeforeUnmount(() => {
 .code-loading { user-select: none; }
 .loading-rail-item { width: 34px; height: 34px; border-radius: 8px; background: var(--surface-2); }
 .loading-panel { gap: 0; }
-.loading-tree { display: flex; flex-direction: column; gap: 11px; padding: 15px 17px; }
-.loading-row { width: var(--loading-row); height: 8px; border-radius: 999px; background: var(--line); opacity: .78; }
 .loading-editor .ehead { min-height: var(--code-toolbar-height); }
 .loading-path { width: min(42%, 260px); height: 8px; border-radius: 999px; background: var(--line); }
 .loading-editor .ebody { display: grid; place-items: center; background: #0a0c10; }
@@ -7755,6 +7846,9 @@ onBeforeUnmount(() => {
 .git-tracking-note.err { color: var(--bad); }
 .git-panel { order: 10; display: flex; flex: 1; flex-direction: column; min-width: 0;
   min-height: 0; }
+.git-navigator-loading { flex: 1; min-height: 0; }
+.navigator-placeholder { height: 100%; }
+.navigator-placeholder .git-group > .subhead { justify-content: space-between; }
 .git-panel-toolbar {
   display: flex; flex: none; align-items: center; gap: 6px;
   min-height: var(--code-toolbar-height); box-sizing: border-box; padding: 4px var(--code-gutter);
@@ -7885,6 +7979,7 @@ onBeforeUnmount(() => {
   min-height: 0; overflow: hidden; border-bottom: 1px solid var(--line); }
 .commit-log-section:only-child { flex: 1; max-height: none; border-bottom: 0; }
 .commit-log-section .commits-head { flex: none; padding: 6px 8px 5px; }
+.navigator-placeholder .commit-search { display: flex; align-items: center; min-height: 30px; }
 .commit-log-section .commits-state { flex: none; }
 .commit-log { flex: 1; min-height: 0; overflow: auto; padding: 5px 8px; }
 .commit-tree .git-group { flex: 1; min-height: 0; overflow: auto; padding: 6px 8px; }

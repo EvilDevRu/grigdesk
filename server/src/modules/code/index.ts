@@ -847,7 +847,7 @@ const codeModule: FastifyPluginAsync<CodeModuleOptions> = async (fastify, opts) 
     } satisfies CodeGitResponse;
   });
 
-  // Стороны выбранного файла читаются отдельно от дешёвого списка `/git`.
+  // Стороны выбранного файла читаются отдельно от списка `/git` по метаданным свежей группы.
   fastify.get<CodeRoute>('/api/code/:project/file-diff', async (req, reply) => {
     if (gate(reply)) {
       return reply;

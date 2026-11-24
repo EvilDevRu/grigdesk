@@ -23,6 +23,9 @@ The picker shows active projects. A direct link can open a file from an archived
    Stage, revert and commit only within the displayed scope after reading warnings and confirmations.
 7. Ask agent creates a separate editable draft with files/changes without sending it. Link copies path and available position.
 
+When you open Code or switch working copies, the loading layout follows the active tab.
+In Files, you can use the tree while Git badges load. Changes and Commits appear once Git data is available.
+
 Search paths above the change tree; the funnel opens status filters.
 Tree actions collapses/expands directories or reveals the open file. Filtering shows results and clear controls.
 Ctrl/Meta, Shift or row-selection buttons select multiple files and reveal an action bar with count and clear selection.

@@ -11,7 +11,9 @@
 import { execFile, spawn } from 'node:child_process';
 import type { ExecFileOptions } from 'node:child_process';
 import { promisify } from 'node:util';
+import { constants } from 'node:fs';
 import fs from 'node:fs/promises';
+import type { FileHandle } from 'node:fs/promises';
 import path from 'node:path';
 
 import { rawComparison } from './codeGitReview.ts';
@@ -49,6 +51,7 @@ interface FileCounts {
 }
 
 interface FileCollection {
+  cwd: string;
   statuses: Record<string, string>;
   oldPathOf: Record<string, string>;
   counts: Record<string, FileCounts>;
@@ -250,6 +253,8 @@ function numstatPath(raw: string): string {
 
 // Столько первых символов git просматривает в поисках NUL, решая, бинарный ли файл.
 const BINARY_PROBE_CHARS = 8000;
+// Один символ UTF-16 занимает до трёх байтов UTF-8; этого хватает и для суррогатных пар.
+const BINARY_PROBE_BYTES = BINARY_PROBE_CHARS * 3;
 
 /**
  * Число строк текста по правилу git: строкой считается каждый перевод строки, а
@@ -368,6 +373,56 @@ function parseUnmerged(porcelain: string): string[] {
 }
 
 /**
+ * Собирает метаданные одной группы с теми же правилами для списка и отдельного diff.
+ * Неразрешённые пути принадлежат рабочей группе, а новые файлы видны и в отрезке с рабочим деревом.
+ */
+function diffMetadata(
+  group: FileDiffOptions['group'],
+  nameStatus: string,
+  numstat: string,
+  porcelain: string,
+) {
+  const { statuses, oldPathOf } = parseNameStatus(nameStatus);
+  const counts = parseNumstat(numstat);
+  const untracked = new Set<string>();
+
+  if (group === 'staged') {
+    for (const relPath of parseUnmerged(porcelain)) {
+      delete statuses[relPath];
+      delete oldPathOf[relPath];
+    }
+  } else {
+    for (const relPath of parseUntracked(porcelain)) {
+      untracked.add(relPath);
+      statuses[relPath] = 'A';
+      counts[relPath] ??= {
+        add: 0,
+        del: 0,
+        binary: false,
+        untracked: true,
+      };
+    }
+  }
+  if (group === 'work') {
+    for (const relPath of parseUnmerged(porcelain)) {
+      statuses[relPath] = 'U';
+      counts[relPath] = {
+        add: 0,
+        del: 0,
+        binary: false,
+      };
+    }
+  }
+
+  return {
+    statuses,
+    oldPathOf,
+    counts,
+    untracked,
+  };
+}
+
+/**
  * Читает сторону файла из HEAD. У нового файла либо до первого коммита этой
  * стороны нет, поэтому ошибку чтения представляет пустым содержимым.
  */
@@ -417,11 +472,77 @@ async function readWork(cwd: string, relPath: string): Promise<string> {
 }
 
 /**
- * Собирает метаданные группы и по явному флагу — содержимое сторон. Неотслеживаемый
- * файл всё равно читается ради бинарности и числа строк, но его текст в ленивый список
- * не копируется.
+ * Читает ограниченный префикс с заданной позиции, учитывая короткие чтения.
+ * Буфер содержит только фактически прочитанные байты, в том числе при усечении файла.
+ */
+async function readPrefix(file: FileHandle, limit: number, start = 0): Promise<Buffer> {
+  const buffer = Buffer.allocUnsafe(limit);
+  let size = 0;
+
+  while (size < limit) {
+    const { bytesRead } = await file.read(buffer, size, limit - size, start + size);
+
+    if (!bytesRead) {
+      break;
+    }
+
+    size += bytesRead;
+  }
+
+  return buffer.subarray(0, size);
+}
+
+/**
+ * Для нового файла достаточно префикса, если он бинарный или больше лимита превью.
+ * Небольшой текст дочитывается через тот же дескриптор с пределом даже при росте файла.
+ */
+async function readUntracked(cwd: string, relPath: string) {
+  const empty = {
+    text: '',
+    binary: false,
+    tooBig: false,
+  };
+
+  try {
+    const file = await fs.open(path.join(cwd, relPath), constants.O_RDONLY | constants.O_NONBLOCK);
+
+    try {
+      const info = await file.stat();
+
+      if (!info.isFile()) {
+        return empty;
+      }
+
+      const probe = await readPrefix(file, BINARY_PROBE_BYTES);
+
+      if (looksBinary(probe.toString('utf8'))) {
+        return { ...empty, binary: true };
+      }
+      if (probe.length === BINARY_PROBE_BYTES && info.size > MAX_BYTES) {
+        return { ...empty, tooBig: true };
+      }
+
+      const bytes = probe.length < BINARY_PROBE_BYTES ? probe : Buffer.concat([
+        probe,
+        await readPrefix(file, MAX_BYTES + 1 - probe.length, probe.length),
+      ]);
+      const text = bytes.toString('utf8');
+
+      return Buffer.byteLength(text) > MAX_BYTES ? { ...empty, tooBig: true } : { ...empty, text };
+    } finally {
+      await file.close();
+    }
+  } catch {
+    return empty;
+  }
+}
+
+/**
+ * Собирает метаданные группы или выбранного изменения и, по флагу, стороны дифа.
+ * Новый файл читается с ограничением ради бинарности и числа строк.
  */
 async function collectFiles({
+  cwd,
   statuses,
   oldPathOf,
   counts,
@@ -429,10 +550,15 @@ async function collectFiles({
   withContent,
   readOld,
   readNew,
-}: FileCollection): Promise<(CodeGitEntry | CodeGitFile)[]> {
+}: FileCollection, selectedPath?: string): Promise<(CodeGitEntry | CodeGitFile)[]> {
   const files: (CodeGitEntry | CodeGitFile)[] = [];
+  const entries: [string, string][] = selectedPath === undefined ? Object.entries(statuses) : [];
 
-  for (const [p, st] of Object.entries(statuses)) {
+  if (selectedPath !== undefined && Object.hasOwn(statuses, selectedPath)) {
+    entries.push([selectedPath, statuses[selectedPath]!]);
+  }
+
+  for (const [p, st] of entries) {
     const c = counts[p] || {
       add: 0,
       del: 0,
@@ -448,6 +574,19 @@ async function collectFiles({
       ...(st === 'R' && oldPathOf[p] ? { oldPath: oldPathOf[p] } : {}),
     };
 
+    if (c.untracked) {
+      const { text, binary, tooBig } = await readUntracked(cwd, p);
+
+      entry.binary = binary;
+      entry.add = countLines(text);
+      files.push(withContent ? {
+        ...entry,
+        tooBig,
+        oldContent: '',
+        newContent: text,
+      } : entry);
+      continue;
+    }
     if (c.binary) {
       files.push(withContent ? {
         ...entry,
@@ -458,43 +597,12 @@ async function collectFiles({
       continue;
     }
 
-    let oldContent = '';
-    let newContent = '';
-
-    if (withContent || c.untracked) {
-      [oldContent, newContent] = await Promise.all([
-        withContent ? readOld(p, st) : '',
-        readNew(p, st),
-      ]);
-    }
-
-    // Неотслеживаемого файла нет ни в одном diff, поэтому бинарность и число строк
-    // определяются по содержимому: иначе новый файл показывался как «+0».
-    if (c.untracked) {
-      if (looksBinary(newContent)) {
-        entry.binary = true;
-        files.push(withContent ? {
-          ...entry,
-          tooBig: false,
-          oldContent: '',
-          newContent: '',
-        } : entry);
-        continue;
-      }
-
-      if (Buffer.byteLength(newContent, 'utf8') <= MAX_BYTES) {
-        entry.add = countLines(newContent);
-      } else {
-        entry.add = 0;
-        entry.del = 0;
-      }
-    }
-
     if (!withContent) {
       files.push(entry);
       continue;
     }
 
+    const [oldContent, newContent] = await Promise.all([readOld(p, st), readNew(p, st)]);
     const tooBig = Buffer.byteLength(oldContent, 'utf8') > MAX_BYTES
       || Buffer.byteLength(newContent, 'utf8') > MAX_BYTES;
 
@@ -543,6 +651,7 @@ export async function taskDiff(cwd: string): Promise<CodeGitDiff> {
   }
 
   const files = await collectFiles({
+    cwd,
     statuses,
     oldPathOf,
     counts,
@@ -597,18 +706,12 @@ export async function worktreeChanges(
       git(cwd, ['status', '--porcelain', '--untracked-files=all']).catch(() => ''),
     ]);
 
-  const unmerged = new Set(parseUnmerged(porcelain));
-  const stagedStatus = parseNameStatus(stagedNameStatus);
-
-  for (const relPath of unmerged) {
-    delete stagedStatus.statuses[relPath];
-    delete stagedStatus.oldPathOf[relPath];
-  }
+  const stagedStatus = diffMetadata('staged', stagedNameStatus, stagedNumstat, porcelain);
+  const workStatus = diffMetadata('work', workNameStatus, workNumstat, porcelain);
 
   const staged = await collectFiles({
-    statuses: stagedStatus.statuses,
-    oldPathOf: stagedStatus.oldPathOf,
-    counts: parseNumstat(stagedNumstat),
+    cwd,
+    ...stagedStatus,
     group: 'staged',
     withContent,
     // ДО — HEAD (при переименовании по старому пути), ПОСЛЕ — индекс.
@@ -616,46 +719,13 @@ export async function worktreeChanges(
     readNew: (p, st) => (st === 'D' ? '' : showIndex(cwd, p)),
   });
 
-  const workStatus = parseNameStatus(workNameStatus);
-  const untracked = new Set(parseUntracked(porcelain));
-
-  for (const u of untracked) {
-    workStatus.statuses[u] = 'A';
-  }
-
-  for (const relPath of unmerged) {
-    workStatus.statuses[relPath] = 'U';
-  }
-
-  const workCounts = parseNumstat(workNumstat);
-
-  for (const relPath of unmerged) {
-    workCounts[relPath] = {
-      add: 0,
-      del: 0,
-      binary: false,
-    };
-  }
-
-  for (const u of untracked) {
-    if (!workCounts[u]) {
-      workCounts[u] = {
-        add: 0,
-        del: 0,
-        binary: false,
-        untracked: true,
-      };
-    }
-  }
-
   const files = await collectFiles({
-    statuses: workStatus.statuses,
-    oldPathOf: workStatus.oldPathOf,
-    counts: workCounts,
+    cwd,
+    ...workStatus,
     group: 'work',
     withContent,
     // ДО — индекс: у неотслеживаемого файла его там нет по определению.
-    readOld: (p, st) => (untracked.has(p)
+    readOld: (p, st) => (workStatus.untracked.has(p)
       ? ''
       : st === 'U'
         ? showIndexStage(cwd, 2, p)
@@ -739,26 +809,9 @@ export async function rangeDiff(cwd: string, base: string, to: string) {
     git(cwd, ['diff', '--find-renames', '--name-status', ...sides]),
     to ? '' : git(cwd, ['status', '--porcelain', '--untracked-files=all']).catch(() => ''),
   ]);
-  const parsed = parseNameStatus(nameStatus);
-  const counts = parseNumstat(numstat);
-
-  for (const untracked of parseUntracked(porcelain)) {
-    parsed.statuses[untracked] = 'A';
-
-    if (!counts[untracked]) {
-      counts[untracked] = {
-        add: 0,
-        del: 0,
-        binary: false,
-        untracked: true,
-      };
-    }
-  }
-
   const files = await collectFiles({
-    statuses: parsed.statuses,
-    oldPathOf: parsed.oldPathOf,
-    counts,
+    cwd,
+    ...diffMetadata('commits', nameStatus, numstat, porcelain),
     group: 'commits',
     withContent: false,
     readOld: () => '',
@@ -923,6 +976,57 @@ export async function branchDiff(
 }
 
 /**
+ * Подтверждает выбранный путь по свежему статусу группы и собирает только его запись.
+ * Name-status видит группу целиком, чтобы Git сохранил обе стороны переименования.
+ */
+async function findDiffEntry(
+  cwd: string,
+  group: FileDiffOptions['group'],
+  relPath: string,
+  base = '',
+  to = '',
+): Promise<CodeGitEntry | undefined> {
+  const commitRange = group === 'commits';
+  const args = commitRange ? ['--find-renames', base, ...(to ? [to] : [])]
+    : group === 'staged' ? ['--cached'] : [];
+  const readMetadata = (command: string[]) => git(cwd, command).catch((error: unknown) => {
+    if (commitRange) {
+      throw error;
+    }
+
+    return '';
+  });
+  const statusArgs = group === 'staged' ? '--untracked-files=no' : '--untracked-files=all';
+  const [nameStatus, porcelain] = await Promise.all([
+    readMetadata(['diff', '--name-status', ...args]),
+    to ? '' : git(cwd, ['status', '--porcelain', statusArgs]).catch(() => ''),
+  ]);
+  const metadata = diffMetadata(group, nameStatus, '', porcelain);
+
+  if (!Object.hasOwn(metadata.statuses, relPath)) {
+    return;
+  }
+  if (!Object.hasOwn(metadata.counts, relPath)) {
+    const oldPath = metadata.oldPathOf[relPath];
+    const paths = oldPath ? [oldPath, relPath] : [relPath];
+    const numstat = await readMetadata(['--literal-pathspecs', 'diff', '--numstat', ...args, '--', ...paths]);
+
+    Object.assign(metadata.counts, parseNumstat(numstat));
+  }
+
+  const [entry] = await collectFiles({
+    cwd,
+    ...metadata,
+    group,
+    withContent: false,
+    readOld: () => '',
+    readNew: () => '',
+  }, relPath);
+
+  return entry;
+}
+
+/**
  * Читает стороны только выбранного файла. Путь сначала сверяется со свежим списком,
  * поэтому клиент не превращает endpoint в произвольный `git show`.
  */
@@ -938,9 +1042,8 @@ export async function fileDiffSides(
     const checkedBase = await verifyDiffBase(cwd, base);
     // В режиме «с текущими изменениями» правая сторона — файл на диске, коммит не нужен.
     const checkedTo = work ? '' : await resolveCommit(cwd, to);
-    const diff = await rangeDiff(cwd, checkedBase, checkedTo);
 
-    entry = diff.files.find((file) => file.path === relPath);
+    entry = await findDiffEntry(cwd, group, relPath, checkedBase, checkedTo);
 
     if (entry) {
       const oldPath = entry.status === 'R' ? (entry.oldPath || entry.path) : entry.path;
@@ -953,10 +1056,7 @@ export async function fileDiffSides(
       ]);
     }
   } else {
-    const changes = await worktreeChanges(cwd, { withContent: false });
-    const files = group === 'staged' ? changes.staged : changes.files;
-
-    entry = files.find((file) => file.path === relPath);
+    entry = await findDiffEntry(cwd, group, relPath);
 
     if (entry) {
       const oldPath = entry.status === 'R' ? (entry.oldPath || entry.path) : entry.path;

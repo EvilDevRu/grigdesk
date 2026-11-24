@@ -10,6 +10,7 @@
 // фабрика индекс не трогает, и делить ей нечего.
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
+import fs from 'node:fs/promises';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import os from 'node:os';
@@ -302,6 +303,69 @@ test('CODE-LAZY-03: стороны одного файла читаются от
     fileDiffSides(root, { group: 'work', path: 'missing.js' }),
     (error) => error?.code === 'no_file' && error?.status === 404,
   );
+});
+
+test('CODE-LAZY-04: список читает префиксы больших файлов, отдельный diff их пропускает', async (t) => {
+  const { root, write } = await repo(t);
+  const largeFiles = ['large-binary.dat', 'large-text.txt'];
+  const largeBinary = Buffer.alloc(1_600_000, 'a');
+  const binaryPrefix = Buffer.from('я'.repeat(7000) + '\0');
+
+  binaryPrefix.copy(largeBinary);
+  await write(largeFiles[0], largeBinary);
+  await write(largeFiles[1], Buffer.alloc(1_600_000, 'a'));
+
+  const realOpen = fs.open.bind(fs);
+  const bytes = new Map();
+
+  /**
+   * Учитывает фактические чтения двух файлов, сохраняя настоящий Git и дескриптор.
+   * Префикс бинарного файла включает кириллицу, поэтому длина в байтах больше числа символов.
+   */
+  async function countReads(filePath, ...args) {
+    const file = await realOpen(filePath, ...args);
+    const name = path.basename(filePath);
+
+    if (largeFiles.includes(name)) {
+      const read = file.read.bind(file);
+
+      bytes.set(name, 0);
+      t.mock.method(file, 'read', async (...params) => {
+        const result = await read(...params);
+
+        bytes.set(name, bytes.get(name) + result.bytesRead);
+
+        return result;
+      });
+    }
+
+    return file;
+  }
+
+  t.mock.method(fs, 'open', countReads);
+
+  const metadata = byPath((await worktreeChanges(root, { withContent: false })).files);
+
+  assert.equal(metadata.get(largeFiles[0]).binary, true);
+  assert.equal(metadata.get(largeFiles[1]).add, 0);
+  assert.deepEqual([...bytes.values()].sort(), [24_000, 24_000]);
+
+  const withContent = byPath((await worktreeChanges(root)).files);
+
+  assert.equal(withContent.get(largeFiles[0]).newContent, '');
+  assert.equal(withContent.get(largeFiles[1]).tooBig, true);
+
+  bytes.clear();
+  const diff = await fileDiffSides(root, { group: 'work', path: 'src/partial.js' });
+
+  assert.equal(diff.newContent, 'base\nstaged\nwork\n');
+  assert.equal(bytes.size, 0);
+  const rename = await fileDiffSides(root, { group: 'staged', path: 'src/renamed-to.js' });
+
+  assert.equal(rename.status, 'R');
+  assert.match(rename.oldContent, /six\nseven\n$/);
+  assert.match(rename.newContent, /six\nmoved\n$/);
+  assert.equal(bytes.size, 0);
 });
 
 test('CODE-CONFLICT-01: unmerged-файл виден только в рабочей группе со статусом U', async (t) => {

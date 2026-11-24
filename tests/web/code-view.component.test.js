@@ -1147,16 +1147,13 @@ async function mountCodeView(t, {
 
 test('холодный запуск Code сразу занимает финальную сетку без пустого loading-кадра', async (t) => {
   const projectsRequest = deferred();
-  const api = {
-    async get(url) {
-      if (url === '/api/projects') return projectsRequest.promise;
-      if (url === '/api/code/demo/repos') {
-        return { repos: [{ key: 'demo', dir: '/demo', trees: [mainTree('/demo')] }] };
-      }
-      if (url.includes('/ls?')) return { entries: [] };
-      throw new Error(`unexpected GET ${url}`);
+  const git = deferred();
+  const { api } = makeFilesApi({
+    getHandlers: {
+      projects: (_, ready) => projectsRequest.promise.then(ready),
+      git: (_, ready) => git.promise.then(ready),
     },
-  };
+  });
   const { wrapper, flushPromises } = await mountCodeView(t, {
     api,
     props: { active: true, compact: true },
@@ -1175,10 +1172,87 @@ test('холодный запуск Code сразу занимает финал�
   assert.equal(loading.find('.editorwrap').exists(), true);
   assert.equal(wrapper.find('.empty').exists(), false);
 
-  projectsRequest.resolve({ projects: [projectFixture('demo', ['/demo'])] });
+  projectsRequest.resolve();
   await settle(flushPromises);
   assert.equal(wrapper.find('.code-loading').exists(), false);
   assert.equal(wrapper.get('.lay').classes().includes('compact'), true);
+
+  await wrapper.get('.file-tree [data-file-path="a.ts"]').trigger('click');
+  await settle(flushPromises);
+  assert.equal(wrapper.get('.ehead .epath-name').text(), 'a.ts');
+  assert.equal(wrapper.find('.ehead .note').exists(), false);
+  assert.equal(wrapper.find('.file-tree [data-file-path="a.ts"]').attributes('data-status'), undefined);
+
+  git.resolve();
+  await settle(flushPromises);
+  assert.equal(wrapper.get('.file-tree [data-file-path="a.ts"]').attributes('data-status'), 'M');
+});
+
+test('предзагрузка рабочей копии повторяет навигатор текущей вкладки до готовности её данных', async (t) => {
+  const root = deferred();
+  const git = deferred();
+  const failedRoot = deferred();
+  let failNextRoot = false;
+  const { api, urls } = makeFilesApi({
+    getHandlers: {
+      ls: ({ context }, ready) => {
+        if (failNextRoot) {
+          return failedRoot.promise;
+        }
+
+        return context.treePath === '/demo-task' ? root.promise.then(ready) : ready();
+      },
+      git: ({ context }, ready) => (
+        context.treePath === '/demo-task' ? git.promise.then(ready) : ready()
+      ),
+    },
+  });
+  const { wrapper, flushPromises } = await mountCodeView(t, { api });
+  const picker = wrapper.get('#code-context-native');
+
+  await picker.setValue(JSON.stringify(['demo', '/demo-task']));
+  await settle(flushPromises);
+
+  const files = wrapper.get('[data-code-loading="files"]');
+  assert.equal(files.get('.code-row-placeholder.files').attributes('aria-hidden'), 'true');
+  assert.equal(wrapper.find('[data-action="code-search"]').exists(), true);
+  assert.equal(wrapper.find('.file-tree .pnote').exists(), false);
+
+  root.resolve();
+  await settle(flushPromises);
+  assert.equal(wrapper.find('[data-code-loading]').exists(), false);
+  assert.equal(wrapper.find('.file-tree [data-file-path="a.ts"]').exists(), true);
+
+  await selectCodeTab(wrapper, 'changes');
+  const changes = wrapper.get('[data-code-loading="changes"]');
+  assert.equal(changes.find('.git-panel-toolbar').exists(), true);
+  assert.equal(changes.find('.git-filter-bar').exists(), true);
+  assert.equal(changes.find('.git-group .code-row-placeholder.changes').exists(), true);
+  assert.equal(changes.find('.git-footer .git-sync-row').exists(), true);
+  assert.equal(changes.findAll('[role="status"]').length, 1);
+  assert.equal(changes.find('button, input').exists(), false);
+
+  await selectCodeTab(wrapper, 'commits');
+  const commits = wrapper.get('[data-code-loading="commits"]');
+  assert.equal(commits.find('.commit-search').exists(), true);
+  assert.equal(commits.find('.commit-log .code-row-placeholder.commits').exists(), true);
+  assert.equal(commits.find('.git-footer').exists(), false);
+  assert.equal(urls.filter((url) => url.includes('/git?') && query(url).get('root') === '/demo-task').length, 1);
+
+  git.resolve();
+  await settle(flushPromises);
+  assert.equal(wrapper.find('[data-code-loading]').exists(), false);
+  assert.equal(wrapper.find('.commit-log button[data-hash]').exists(), true);
+
+  failNextRoot = true;
+  await picker.setValue(JSON.stringify(['demo', '/demo']));
+  await settle(flushPromises);
+  assert.equal(wrapper.find('[data-code-loading="commits"]').exists(), true);
+
+  failedRoot.reject(new Error('Не удалось прочитать дерево'));
+  await settle(flushPromises);
+  assert.equal(wrapper.find('[data-code-loading]').exists(), false);
+  assert.match(wrapper.get('#code-navigator .perr').text(), /Не удалось прочитать дерево/);
 });
 
 test('CodeView показывает два подписанных уровня, хранит контекст по проекту и сообщает о недоступном repo', async (t) => {
@@ -5835,7 +5909,7 @@ for (const event of ['projects-changed', 'hello']) {
   });
 }
 
-test('LOAD-KEEP-inline-code: рабочая копия и поиск сохраняют маленький spinner', async (t) => {
+test('LOAD-KEEP-inline-code: поиск после загрузки рабочей копии сохраняет маленький spinner', async (t) => {
     const repos = deferred();
     const search = deferred();
     const calls = [];
@@ -5884,8 +5958,8 @@ test('LOAD-KEEP-inline-code: рабочая копия и поиск сохра�
 
     await h.wrapper.get('#code-context-native').setValue(options[1].attributes('value'));
     await settle(h.flushPromises);
-    assert.equal(h.wrapper.find('[data-variant="inline"] .ui-spinner').exists(), true);
-    assert.equal(h.wrapper.find('[data-ui-skeleton]').exists(), false);
+    assert.equal(h.wrapper.find('[data-code-loading="files"] [data-ui-skeleton]').exists(), true);
+    assert.equal(h.wrapper.find('[data-variant="inline"]').exists(), false);
     repos.resolve({
         entries: []
     });
@@ -5938,6 +6012,12 @@ for (const area of ['history', 'git', 'commits']) {
             branch: 'main',
             files: [],
             staged: [],
+            tracking: {
+              detached: false,
+              upstream: '',
+              ahead: 0,
+              behind: 0,
+            },
             log: [],
             stat: '',
             headMessage: ''
@@ -5954,6 +6034,7 @@ for (const area of ['history', 'git', 'commits']) {
     } else {
       await selectCodeTab(h.wrapper, area === 'git' ? 'changes' : 'commits');
       await settle(h.flushPromises);
+      assert.equal(h.wrapper.find('.perr').exists(), false);
 
       if (area === 'git') {
         h.wrapper.vm.git = null;
@@ -5980,7 +6061,7 @@ for (const area of ['history', 'git', 'commits']) {
 
     await h.wrapper.vm.$nextTick();
 
-    const scope = h.wrapper.get(area === 'history' ? '.file-history' : '.git-tree');
+    const scope = h.wrapper.get(area === 'history' ? '.file-history' : '#code-navigator');
     const bricks = scope.findAll('[data-ui-skeleton]').length;
     const announced = scope.find('[role="status"]').exists();
 
