@@ -23,31 +23,38 @@ test('SL-01: inline без capability, native при подтверждении,
 });
 
 /**
- * Реальный UI store выбирает новое окно, а транспорт записывает только закрытые запросы.
- * Собственное назначение документа устанавливается единственным inline-входом.
+ * Реальный UI store работает с управляемыми ответами оболочки.
+ * Запросы проходят без navigator.locks Node, чтобы тест сверял порядок ответов сам.
  */
-async function surfaceFixture(t, replies) {
+async function surfaceFixture(t, {
+  mode = 'main', capabilities = ['windows', 'taskSources'], replies = [],
+} = {}) {
   const { createPinia, disposePinia, setActivePinia } = await import(
     '../../web/node_modules/pinia/dist/pinia.mjs'
   );
   const state = {
+    mode,
+    capabilities,
     calls: [],
     replies,
     toasts: [],
   };
   const pinia = createPinia();
+  const navigatorDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
 
+  Object.defineProperty(globalThis, 'navigator', { value: {}, configurable: true });
   globalThis.__surfaceLauncher = state;
   t.after(() => {
+    Object.defineProperty(globalThis, 'navigator', navigatorDescriptor);
     disposePinia(pinia);
     setActivePinia(undefined);
     delete globalThis.__surfaceLauncher;
   });
 
   const module = await compileModule(webFile('src/stores/ui.ts'), { stubs: {
-    './shell.ts': 'export const useShellStore = () => ({ capabilities: ["windows"] });',
-    '../stores/shell.ts': 'export const useShellStore = () => ({ capabilities: ["windows"] });',
-    '../shared/desktopSettings.ts': 'export const currentDesktopMode = () => "surface";',
+    './shell.ts': 'export const useShellStore = () => globalThis.__surfaceLauncher;',
+    '../shared/desktopSettings.ts':
+      'export const currentDesktopMode = () => globalThis.__surfaceLauncher.mode;',
     '../shared/shellClient.ts': `export const shellAction = async (method, path, body) => {
       const state = globalThis.__surfaceLauncher;
       state.calls.push({ path, body });
@@ -58,138 +65,160 @@ async function surfaceFixture(t, replies) {
 
   setActivePinia(pinia);
 
-  const ui = module.useUiStore();
-
-  ui.openTaskInline('42');
-
-  return { ui, state };
+  return { ui: module.useUiStore(), state };
 }
 
-test('SL-03: другая задача получает окно, достоверный отказ доставляет диалог в main', async (t) => {
-  const { ui, state } = await surfaceFixture(t, [
-    { opened: true }, { opened: false }, { opened: true },
-  ]);
+test('SL-02: обычный выбор открывает диалог, явное отсоединение передаёт полную цель', async (t) => {
+  const reply = Promise.withResolvers();
+  const { ui, state } = await surfaceFixture(t, { replies: [reply.promise] });
+  const source = `tracker@${'a'.repeat(64)}`;
 
-  await ui.openTask('43');
+  await ui.openTask('42', source);
   assert.equal(ui.taskId, '42');
-  await ui.openTask('44');
+  assert.equal(ui.taskSource, source);
+  assert.deepEqual(state.calls, []);
+
+  const detached = ui.moveTaskWindow();
+
+  await ui.moveTaskWindow();
+  assert.equal(ui.taskWindowMoving, true);
   assert.equal(ui.taskId, '42');
-  assert.deepEqual(state.calls.map((call) => call.body), [
-    { kind: 'task', id: '43' },
-    { kind: 'task', id: '44' },
-    { destination: 'task-dialog', target: { kind: 'task', id: '44' } },
-  ]);
-  assert.equal(state.calls.at(-1).path.endsWith('/surfaces/main'), true);
+  assert.deepEqual(state.calls, [{
+    path: '/surfaces/open',
+    body: {
+      kind: 'task',
+      id: '42',
+      source,
+    },
+  }]);
+  reply.resolve({ opened: true });
+  await detached;
+  assert.equal(ui.taskId, null);
+  assert.equal(ui.taskWindowMoving, false);
   assert.deepEqual(state.toasts, []);
 });
 
-test('SL-04: unknown и неподтверждённый main сохраняют свою карточку без автоповтора', async (t) => {
-  const { ui, state } = await surfaceFixture(t, [{}, { opened: false }, { opened: false }]);
+test('SL-03: выбор из отдельного окна открывает диалог в main и сохраняет исходную задачу', async (t) => {
+  const { ui, state } = await surfaceFixture(t, {
+    mode: 'surface',
+    replies: [{ opened: true }, {}, { opened: false }],
+  });
 
+  ui.openTaskInline('42');
   await ui.openTask('43');
   assert.equal(ui.taskId, '42');
-  assert.equal(state.calls.length, 1);
-  assert.equal(state.toasts.length, 1);
+  assert.deepEqual(state.calls, [{
+    path: '/surfaces/main',
+    body: { destination: 'task-dialog', target: { kind: 'task', id: '43' } },
+  }]);
+  assert.deepEqual(state.toasts, []);
   await ui.openTask('44');
+  await ui.openTask('45');
   assert.equal(ui.taskId, '42');
   assert.equal(state.calls.length, 3);
   assert.equal(state.toasts.length, 2);
 });
-test('SL-02: настоящий UI store не применяет поздний fallback и не дублирует unknown', async (t) => {
-  // Node предоставляет собственный navigator.locks: эта фикстура проверяет ответы
-  // транспорта без очереди браузера, чтобы удержанный ACK не блокировал второй вызов.
-  const navigatorDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
 
-  Object.defineProperty(globalThis, 'navigator', { value: {}, configurable: true });
-  t.after(() => {
-    if (navigatorDescriptor) {
-      Object.defineProperty(globalThis, 'navigator', navigatorDescriptor);
-    } else {
-      delete globalThis.navigator;
-    }
-  });
-
-  const { createPinia, disposePinia, setActivePinia } = await import(
-    '../../web/node_modules/pinia/dist/pinia.mjs'
-  );
+test('SL-04: ошибка сохраняет диалог, поздний успех не закрывает следующую задачу', async (t) => {
   const deferred = Promise.withResolvers();
-  const state = {
-    supported: true, 
-    replies: [deferred.promise, { opened: false }], 
-    toasts: []
-  };
-
-  globalThis.__surfaceUiTest = state;
-  t.after(() => delete globalThis.__surfaceUiTest);
-
-  const module = await compileModule(webFile('src/stores/ui.ts'), { stubs: {
-      '../stores/shell.ts': [
-        'export const useShellStore = () => ({',
-        '  capabilities: globalThis.__surfaceUiTest.supported ? ["windows"] : []',
-        '});',
-      ].join('\n'),
-      './shell.ts': [
-        'export const useShellStore = () => ({',
-        '  capabilities: globalThis.__surfaceUiTest.supported ? ["windows"] : []',
-        '});',
-      ].join('\n'),
-      '../shared/desktopSettings.ts': [
-        'export const currentDesktopMode = () =>',
-        '  globalThis.__surfaceUiTest.mode ?? "main";',
-      ].join('\n'),
-      '../shared/shellClient.ts': [
-        'export const shellAction = async () =>',
-        '  await globalThis.__surfaceUiTest.replies.shift();',
-      ].join('\n'),
-      '../ui': 'export const showToast = (value) => globalThis.__surfaceUiTest.toasts.push(value);',
-    } });
-
-  const pinia = createPinia();
-
-  setActivePinia(pinia);
-  t.after(() => {
-    disposePinia(pinia);
-    setActivePinia(undefined);
-  });
-
-  const ui = module.useUiStore();
-  const first = ui.openTask('42');
-
-  await ui.openTask('43');
-  assert.equal(ui.taskId, '43');
-  deferred.resolve({ opened: false });
-  await first;
-  assert.equal(ui.taskId, '43');
-  state.replies.push({ then(_resolve, reject) {
-    reject(new Error('Сеть'));
-  } });
-  await ui.openTask('44');
-  assert.equal(ui.taskId, '43');
-  assert.equal(state.toasts.length, 1);
-  state.supported = false;
-  await ui.openTask('45');
-  assert.equal(ui.taskId, '45');
-  state.supported = true;
-  await ui.openTask('не-задача');
-  assert.equal(ui.taskId, '45');
-  assert.equal(state.toasts.length, 2);
-
-  const remaining = state.replies.length;
+  const { ui, state } = await surfaceFixture(t, { replies: [{ opened: false }, {}, deferred.promise] });
 
   await ui.openTask('grigdesk:100000000000');
-  assert.equal(ui.taskId, '100000000000');
-  assert.equal(ui.taskSource, undefined);
-  assert.equal(state.replies.length, remaining);
 
-  const closing = Promise.withResolvers();
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    await ui.moveTaskWindow();
+    assert.equal(ui.taskId, '100000000000');
+    assert.equal(ui.taskUnavailable, 'legacy-own');
+    assert.equal(ui.taskWindowMoving, false);
+  }
 
-  state.replies.push(closing.promise);
+  assert.equal(state.calls.length, 2);
+  assert.equal(state.toasts.length, 2);
+  assert.deepEqual(state.calls[0].body, {
+    kind: 'task',
+    id: '100000000000',
+    unavailable: 'legacy-own',
+  });
 
-  const opened = ui.openTask('46');
+  const detached = ui.moveTaskWindow();
 
-  ui.close();
-  closing.resolve({ opened: false });
-  await opened;
+  await ui.openTask('43');
+  deferred.resolve({ opened: true });
+  await detached;
+  assert.equal(ui.taskId, '43');
+  assert.equal(ui.taskWindowMoving, false);
+});
+
+test('SL-05: прежняя оболочка оставляет адресные задачи и длинные номера в диалоге', async (t) => {
+  const { ui, state } = await surfaceFixture(t, { capabilities: ['windows'] });
+  const source = `tracker@${'a'.repeat(64)}`;
+
+  await ui.openTask('42', source);
+  assert.equal(ui.taskSource, source);
+  assert.equal(ui.taskWindowTarget, null);
+  await ui.moveTaskWindow();
+  await ui.openTask('1000000000000000');
+  assert.equal(ui.taskId, '1000000000000000');
+  assert.equal(ui.taskWindowTarget, null);
+  await ui.moveTaskWindow();
+  await ui.openTask('не-задача');
+  assert.equal(ui.taskId, '1000000000000000');
+  assert.equal(state.toasts.length, 1);
+  assert.deepEqual(state.calls, []);
+});
+
+test('SL-06: возврат передаёт источник и закрывает отдельную карточку после подтверждения', async (t) => {
+  const reply = Promise.withResolvers();
+  const { ui, state } = await surfaceFixture(t, {
+    mode: 'surface',
+    replies: [{ opened: false }, reply.promise],
+  });
+  const source = `tracker@${'a'.repeat(64)}`;
+
+  ui.openTaskInline('42', source);
+  await ui.moveTaskWindow();
+  assert.equal(ui.taskId, '42');
+  assert.equal(ui.taskWindowMoving, false);
+  assert.match(state.toasts[0].title, /Присоединить обратно/);
+
+  const attached = ui.moveTaskWindow();
+
+  await ui.moveTaskWindow();
+  assert.equal(ui.taskWindowMoving, true);
+  assert.equal(ui.taskSource, source);
+  assert.equal(ui.taskId, '42');
+  assert.equal(state.calls.length, 2);
+  assert.deepEqual(state.calls[1], {
+    path: '/surfaces/main',
+    body: {
+      destination: 'task-dialog',
+      target: {
+        kind: 'task',
+        id: '42',
+        source,
+      },
+    },
+  });
+  reply.resolve({ opened: true });
+  await attached;
   assert.equal(ui.taskId, null);
-  delete globalThis.__surfaceUiTest;
+  assert.equal(ui.taskWindowMoving, false);
+});
+
+test('SL-07: выбор связанной задачи отменяет закрытие по позднему подтверждению возврата', async (t) => {
+  const reply = Promise.withResolvers();
+  const { ui } = await surfaceFixture(t, {
+    mode: 'surface',
+    replies: [reply.promise, { opened: true }],
+  });
+
+  ui.openTaskInline('42');
+
+  const attached = ui.moveTaskWindow();
+
+  await ui.openTask('43');
+  reply.resolve({ opened: true });
+  await attached;
+  assert.equal(ui.taskId, '42');
+  assert.equal(ui.taskWindowMoving, false);
 });

@@ -44,6 +44,16 @@
                 <UiRefreshIcon />
               </UiIconButton>
               <UiIconButton
+                v-if="ui.taskWindowTarget"
+                data-context="task-modal-header"
+                :label="taskWindowActionLabel"
+                v-tooltip="taskWindowActionLabel"
+                :loading="ui.taskWindowMoving"
+                @click="ui.moveTaskWindow()"
+              >
+                {{ presentation === 'document' ? '↙' : '↗' }}
+              </UiIconButton>
+              <UiIconButton
                 data-context="task-modal-header"
                 :label="t('core.taskZakrytZadachu')"
                 v-tooltip="t('core.taskZakrytEsc')"
@@ -1363,6 +1373,8 @@ const COMPLETED_STATUS = 5;
 const router = useRouter();
 
 const ui = useUiStore();
+const taskWindowActionLabel = computed(() => props.presentation === 'document'
+  ? t('core.taskAttachWindow') : t('core.taskDetachWindow'));
 const tasks = useTasksStore();
 const trackers = useTrackersStore();
 const readBlocked = ref(false);

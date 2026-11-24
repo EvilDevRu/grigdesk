@@ -15,7 +15,7 @@ let nonce = 0;
  * Монтирует карточку с живыми UI-primitives и управляемыми B24-справочниками.
  * Представление dialog или document выбирает тест, остальные подмены общие.
  */
-async function mountEditor(t, presentation = 'dialog') {
+async function mountEditor(t, presentation = 'dialog', moveTaskWindow = undefined) {
   nonce += 1;
   const prefix = `__taskModalEdit${nonce}`;
   const { Window } = await import('../../web/node_modules/happy-dom/lib/index.js');
@@ -99,8 +99,18 @@ async function mountEditor(t, presentation = 'dialog') {
     async upload() { return {}; },
   };
   globalThis[`${prefix}UiStore`] = defineStore(`task-modal-edit-ui-${nonce}`, {
-    state: () => ({ taskId: 42, launchRequested: false }),
-    actions: { close() {}, consumeTaskLaunch() {} },
+    state: () => ({
+      taskId: 42,
+      launchRequested: false,
+      taskWindowTarget: Boolean(moveTaskWindow),
+    }),
+    actions: {
+      close() {},
+      consumeTaskLaunch() {},
+      moveTaskWindow() {
+        moveTaskWindow?.();
+      },
+    },
   });
   globalThis[`${prefix}TasksStore`] = defineStore(`task-modal-edit-tasks-${nonce}`, {
     actions: {
@@ -179,6 +189,22 @@ async function mountEditor(t, presentation = 'dialog') {
     reads,
   };
 }
+
+test('Кнопка в шапке отсоединяет диалог и возвращает отдельную карточку', async (t) => {
+  const move = t.mock.fn();
+  const { wrapper } = await mountEditor(t, 'dialog', move);
+  const detach = '.mhead [aria-label="Отсоединить окно"]';
+  const attach = '.mhead [aria-label="Присоединить обратно"]';
+
+  assert.equal(wrapper.find(attach).exists(), false);
+  await wrapper.get(detach).trigger('click');
+  assert.equal(move.mock.callCount(), 1);
+
+  await wrapper.setProps({ presentation: 'document' });
+  assert.equal(wrapper.find(detach).exists(), false);
+  await wrapper.get(attach).trigger('click');
+  assert.equal(move.mock.callCount(), 2);
+});
 
 test('TaskModal редактирует все основные поля и умеет очистить описание и проект', async (t) => {
   const { wrapper, flushPromises, updates } = await mountEditor(t);

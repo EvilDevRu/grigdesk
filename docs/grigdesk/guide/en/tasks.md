@@ -31,8 +31,11 @@ quotes and the `Bearer ` prefix before Test connection. The tracker verifies the
 successful testing does not save credentials. Empty secret input keeps the previous secret.
 The test explanation refers to current form input.
 
-On desktop, external tasks may open in their own windows. They show a connecting message before loading.
-Use the window's close button; reconnecting keeps the open card's draft.
+Click a task to open its card in the main window. In the desktop app, click **Detach window** (↗)
+in the card header to open it in a separate window. The new window may show a connecting message
+before loading. Detaching the same task again brings its existing window forward. Click
+**Reattach window** (↙) in the separate window's header to return the card to the main window
+and close the separate one. A draft stays in the window where you entered it and survives reconnecting.
 
 ## What to do
 

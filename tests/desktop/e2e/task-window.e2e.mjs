@@ -510,17 +510,33 @@ async function checkNetworkEvent(page, documents, policyRequests) {
 }
 
 /**
- * Клик по задаче на доске главного окна ждёт новое окно и заголовок его карточки.
- * Повтор уже открытой задачи окна не создаёт, поэтому helper — только для первого открытия.
+ * Клик на доске сначала открывает диалог в главном документе.
+ * Отдельное окно запрашивается кнопкой в шапке этого диалога.
+ */
+async function openTaskDialog(page, id) {
+  await page.locator('[data-role="task-title"]').filter({ hasText: 'Задача ' + id }).click();
+
+  const dialog = page.locator('[data-role="task-modal"][role="dialog"]');
+
+  await dialog.locator('#task-modal-title').filter({ hasText: 'Задача ' + id }).waitFor();
+
+  return dialog;
+}
+
+/**
+ * Отсоединяем диалог и ждём готовую карточку в новом документе.
+ * Для уже открытого отдельного окна проверка повторного фокуса идёт по ответу трубы.
  */
 async function openTaskWindow(app, page, id) {
+  const dialog = await openTaskDialog(page, id);
   const opened = app.waitForEvent('window');
 
-  await page.locator('[data-role="task-title"]').filter({ hasText: 'Задача ' + id }).click();
+  await dialog.getByRole('button', { name: 'Отсоединить окно', exact: true }).click();
 
   const taskPage = await opened;
 
   await taskPage.locator('#task-modal-title').filter({ hasText: 'Задача ' + id }).waitFor();
+  await dialog.waitFor({ state: 'hidden' });
 
   return taskPage;
 }
@@ -533,16 +549,21 @@ test('TW-E01: второе окно, сохранность повтора, ре
 
     return window.taskWindowMainToken;
   });
+  const dialog = await openTaskDialog(page, '42');
+
+  assert.equal(app.windows().length, 1);
+
   const opened = app.waitForEvent('window');
 
-  await page.locator('[data-role="task-title"]').filter({ hasText: 'Задача 42' }).click();
+  await dialog.getByRole('button', { name: 'Отсоединить окно', exact: true }).click();
 
   const taskPage = await opened;
 
   await taskPage.locator('.task-card-document').waitFor();
-  assert.equal(await page.locator('[data-role="task-modal"]').count(), 0);
+  await dialog.waitFor({ state: 'hidden' });
   assert.equal(app.windows().length, 2);
-  // Карточка отметила задачу просмотренной — метка «Новая» в главном окне гаснет без перезагрузки.
+  assert.equal(await taskPage.getByRole('button', { name: 'Отсоединить окно', exact: true }).count(), 0);
+  // Карточка отметила задачу просмотренной — метка «Новая» на доске гаснет без перезагрузки.
   await waitFor(async () => await page.locator('.newbadge').count() === 2);
 
   const preferences = await app.evaluate(({ BrowserWindow }) => {
@@ -596,11 +617,13 @@ test('TW-E01: второе окно, сохранность повтора, ре
 
     return window.taskWindowDocumentToken;
   });
+  const reopened = await openTaskDialog(page, '42');
   const repeated = page.waitForResponse((response) =>
     new URL(response.url()).pathname === '/__shell/surfaces/open');
 
-  await page.locator('[data-role="task-title"]').filter({ hasText: 'Задача 42' }).click();
+  await reopened.getByRole('button', { name: 'Отсоединить окно', exact: true }).click();
   assert.equal((await (await repeated).json()).opened, true);
+  await reopened.waitFor({ state: 'hidden' });
   assert.equal(app.windows().length, 2);
   assert.equal(await taskPage.evaluate(() => window.taskWindowDocumentToken), token);
   assert.equal(
@@ -617,8 +640,9 @@ test('TW-E01: второе окно, сохранность повтора, ре
 
   const closed = taskPage.waitForEvent('close');
 
-  await taskPage.getByRole('button', { name: 'Закрыть задачу', exact: true }).click();
+  await taskPage.getByRole('button', { name: 'Присоединить обратно', exact: true }).click();
   await closed;
+  await dialog.locator('#task-modal-title').filter({ hasText: 'Обновлённая задача 42' }).waitFor();
   assert.equal(app.windows().length, 1);
   assert.equal(await page.evaluate(() => window.taskWindowMainToken), mainToken);
 });
@@ -689,11 +713,13 @@ test('TW-E02: у каждой задачи своё окно, три окна н
   await pages[0].getByRole('tab', { name: /Комментарии/ }).click();
   await pages[0].locator('[data-role="task-comment"]').fill('Черновик только задачи 42');
 
+  const reopened = await openTaskDialog(page, '42');
   const repeated = page.waitForResponse((response) =>
     new URL(response.url()).pathname === '/__shell/surfaces/open');
 
-  await page.locator('[data-role="task-title"]').filter({ hasText: 'Задача 42' }).click();
+  await reopened.getByRole('button', { name: 'Отсоединить окно', exact: true }).click();
   assert.equal((await (await repeated).json()).opened, true);
+  await reopened.waitFor({ state: 'hidden' });
   assert.equal(app.windows().length, 4);
   assert.equal(
     await pages[0].locator('[data-role="task-comment"]').inputValue(),
@@ -710,14 +736,8 @@ test('TW-E02: у каждой задачи своё окно, три окна н
 });
 test('TW-E03: вложенный диф и два Escape закрывают по одному слою', { timeout: 90000 }, async (t) => {
   const { app, page } = await taskRun(t);
-  const opened = app.waitForEvent('window');
+  const taskPage = await openTaskWindow(app, page, '42');
 
-  await page.locator('[data-role="task-title"]').filter({ hasText: 'Задача 42' }).click();
-
-  const taskPage = await opened;
-
-  await taskPage.locator('.task-card-document').waitFor();
-  await taskPage.getByRole('button', { name: 'Ещё', exact: true }).click();
   await taskPage.getByRole('button', { name: /Диф/ }).click();
   await taskPage.getByRole('dialog', { name: '#42 · диф', exact: true }).waitFor();
   await taskPage.keyboard.press('Escape');
@@ -791,13 +811,7 @@ test('TW-E05: геометрия карточки сохраняется на д
   const { app, page, dataDir, relaunch } = await taskRun(t);
   const mainBounds = await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]
     .getNormalBounds());
-  const opened = app.waitForEvent('window');
-
-  await page.locator('[data-role="task-title"]').filter({ hasText: 'Задача 42' }).click();
-
-  const taskPage = await opened;
-
-  await taskPage.locator('.task-card-document').waitFor();
+  const taskPage = await openTaskWindow(app, page, '42');
 
   const expected = await app.evaluate(({ BrowserWindow, screen }) => {
     const win = BrowserWindow.getAllWindows()
@@ -877,9 +891,10 @@ test('TW-E06: смена профиля закрывает все окна пр�
     await route.continue().catch(() => undefined);
   });
 
+  const dialog = await openTaskDialog(page, '44');
   const pending = app.waitForEvent('window');
 
-  await page.locator('[data-role="task-title"]').filter({ hasText: 'Задача 44' }).click();
+  await dialog.getByRole('button', { name: 'Отсоединить окно', exact: true }).click();
   await loading.promise;
 
   const third = await pending;
@@ -900,14 +915,7 @@ test('TW-E06: смена профиля закрывает все окна пр�
 test('TW-E07: закрытие главного окна завершает приложение и дочернюю карточку',
   { timeout: 90000 }, async (t) => {
   const { app, page } = await taskRun(t);
-  const opened = app.waitForEvent('window');
-
-  await page.locator('[data-role="task-title"]').filter({ hasText: 'Задача 42' }).click();
-
-  const taskPage = await opened;
-
-  await taskPage.locator('.task-card-document').waitFor();
-
+  const taskPage = await openTaskWindow(app, page, '42');
   const exited = app.waitForEvent('close');
 
   await app.evaluate(({ BrowserWindow }) => {
@@ -1033,16 +1041,21 @@ test('TW-E09: действия карточки, полка и речь обно
   assert.equal(f.surfaceDashboards.length, 0);
 });
 
-test('TW-E10: отказ даёт диалог main, потеря ответа сохраняет единственное окно',
+test('TW-E10: отказ и потеря ответа оставляют диалог, повтор поднимает уже созданное окно',
   { timeout: 120000 }, async (t) => {
   const { app, page } = await taskRun(t);
   const context = page.context();
 
   await context.route('**/*surface=task&id=43*', (route) => route.abort('failed'));
-  await page.locator('[data-role="task-title"]').filter({ hasText: 'Задача 43' }).click();
-  await page.locator('[role="dialog"] #task-modal-title').filter({ hasText: 'Задача 43' }).waitFor();
+
+  const rejected = await openTaskDialog(page, '43');
+
+  await rejected.getByRole('button', { name: 'Отсоединить окно', exact: true }).click();
+  await page.getByText(/Не удалось подтвердить отсоединение/).waitFor();
+  assert.equal(await rejected.isVisible(), true);
   assert.equal(app.windows().length, 1);
-  await page.getByRole('button', { name: 'Закрыть задачу', exact: true }).click();
+  await rejected.getByRole('button', { name: 'Закрыть задачу', exact: true }).click();
+  await rejected.waitFor({ state: 'hidden' });
 
   const first = await openTaskWindow(app, page, '42');
   let lose = true;
@@ -1062,22 +1075,28 @@ test('TW-E10: отказ даёт диалог main, потеря ответа �
     await route.abort('failed');
   });
 
+  const dialog = await openTaskDialog(page, '44');
+  const detach = dialog.getByRole('button', { name: 'Отсоединить окно', exact: true });
+  const lost = page.waitForEvent('requestfailed', (request) =>
+    new URL(request.url()).pathname === '/__shell/surfaces/open');
   const opened = app.waitForEvent('window');
 
-  await page.locator('[data-role="task-title"]').filter({ hasText: 'Задача 44' }).click();
+  await detach.click();
 
   const fourth = await opened;
 
   await fourth.locator('.task-card-document').waitFor();
-  await page.getByText(/ещё раз/).waitFor();
-  assert.equal(await page.locator('[role="dialog"]').count(), 0);
+  await lost;
+  await waitFor(async () => await detach.getAttribute('aria-busy') === null);
+  assert.equal(await dialog.isVisible(), true);
   await fourth.getByRole('tab', { name: /Комментарии/ }).click();
   await fourth.locator('[data-role="task-comment"]').fill('Текст после неизвестного исхода');
 
   const repeated = page.waitForResponse('**/__shell/surfaces/open');
 
-  await page.locator('[data-role="task-title"]').filter({ hasText: 'Задача 44' }).click();
+  await detach.click();
   assert.equal((await (await repeated).json()).opened, true);
+  await dialog.waitFor({ state: 'hidden' });
   assert.equal(app.windows().length, 3);
   assert.equal(
     await fourth.locator('[data-role="task-comment"]').inputValue(),
@@ -1102,9 +1121,13 @@ test('TW-E11: быстрые открытия не упираются в пул'
 
   const started = Date.now();
 
-  await f.page.locator('[data-role="task-title"]').evaluateAll((elements) => {
-    for (const element of elements) {
-      element.click();
+  await f.page.evaluate(() => {
+    const pinia = document.querySelector('#app').__vue_app__.config.globalProperties.$pinia;
+    const ui = pinia._s.get('ui');
+
+    for (const id of ['42', '43', '44', '45']) {
+      void ui.openTask(id);
+      void ui.moveTaskWindow();
     }
   });
   await waitFor(async () => f.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()

@@ -6,6 +6,7 @@ import { uiLocalePort } from '../shared/uiLocalePort.ts';
 
 
 import { parseSurfaceTarget } from '../../../shared/desktop/surfaceContract.ts';
+import type { SurfaceTarget } from '../../../shared/desktop/surfaceContract.ts';
 import { currentDesktopMode } from '../shared/desktopSettings.ts';
 import { resolveSurfaceOpening } from '../shared/surfaceLauncher.ts';
 import { shellAction } from '../shared/shellClient.ts';
@@ -40,9 +41,14 @@ function sendSurface(path: string, body: unknown) {
   return locks ? locks.request('grigdesk-surface-open', send) : send();
 }
 
+function showTaskInMain(target: Extract<SurfaceTarget, { kind: 'task' }>) {
+  return resolveSurfaceOpening(target, true,
+    (value) => sendSurface('/surfaces/main', { destination: 'task-dialog', target: value }));
+}
+
 /**
- * Потерянное подтверждение не даёт права создавать параллельный диалог.
- * Повторное нажатие безопасно поднимет существующее окно по тому же ключу.
+ * Ошибка разбора ссылки или доставки в главный документ оставляет текущую цель.
+ * Подсказка предлагает повторить выбор задачи вручную.
  */
 function showOpeningFailure() {
   showToast({
@@ -57,12 +63,39 @@ export const useUiStore = defineStore('ui', {
     taskId: null as string | null,
     taskSource: undefined as TaskSourceId | undefined,
     taskUnavailable: undefined as 'legacy-own' | undefined,
+    taskWindowMoving: false,
   }),
+
+  getters: {
+    // Перенос доступен в обоих окнах совместимой оболочки и сохраняет полную цель задачи.
+    // Диалог умеет показывать в том числе номера, которые не входят в контракт native-окон.
+    taskWindowTarget(state) {
+      if (!state.taskId || currentDesktopMode() === 'page') {
+        return null;
+      }
+
+      const { capabilities } = useShellStore();
+
+      if (!capabilities.includes('windows')
+        || ((state.taskSource || state.taskUnavailable) && !capabilities.includes('taskSources'))) {
+        return null;
+      }
+
+      const target = parseSurfaceTarget({
+        kind: 'task',
+        id: state.taskId,
+        source: state.taskSource,
+        unavailable: state.taskUnavailable,
+      });
+
+      return target?.kind === 'task' ? target : null;
+    },
+  },
 
   actions: {
     /**
-     * Все экраны выбирают размещение карточки через один вход по capability оболочки.
-     * Документ карточки сохраняет свою цель даже при отказе открытия соседней задачи.
+     * Обычный выбор открывает диалог. Из отдельного окна действие передаётся
+     * главному документу, чтобы сохранить открытую карточку и её черновик.
      */
     async openTask(id: string | number, source?: unknown): Promise<void> {
       if (source !== undefined && !isTaskSourceId(source)) {
@@ -79,66 +112,69 @@ export const useUiStore = defineStore('ui', {
         return;
       }
 
-      id = reference.id;
-      source = reference.source;
-
-      const generation = nextGeneration(this);
-      const surface = currentDesktopMode() === 'surface';
-      const target = parseSurfaceTarget({
-        kind: 'task',
-        id: String(id),
-        ...(source ? { source } : {}),
-        ...(reference.unavailable ? { unavailable: reference.unavailable } : {})
-      });
-      const supported = useShellStore().capabilities.includes('windows')
-        && (!source || useShellStore().capabilities.includes('taskSources'))
-        && (!reference.unavailable || useShellStore().capabilities.includes('taskSources'));
-
-      if (!target || !supported) {
-        if (!surface) {
-          this.taskId = String(id);
-          this.taskSource = reference.source;
-          this.taskUnavailable = reference.unavailable;
-        } else {
-          showOpeningFailure();
-        }
+      if (currentDesktopMode() !== 'surface') {
+        this.openTaskInline(reference.id, reference.source, reference.unavailable);
 
         return;
       }
 
-      const result = await resolveSurfaceOpening(target, supported,
-        (value) => sendSurface('/surfaces/open', value));
+      const target = parseSurfaceTarget({ kind: 'task', ...reference });
 
-      if (generations.get(this) !== generation) {
-        return;
-      }
-
-      if (result === 'unknown') {
+      if (target?.kind !== 'task' || !useShellStore().capabilities.includes('windows')) {
         showOpeningFailure();
 
         return;
       }
 
-      if (surface) {
-        if (result === 'inline') {
-          const delivered = await resolveSurfaceOpening(target, true,
-            () => sendSurface('/surfaces/main', { destination: 'task-dialog', target }));
+      const generation = nextGeneration(this);
 
-          if (generations.get(this) === generation && delivered !== 'window') {
-            showOpeningFailure();
-          }
-        }
+      this.taskWindowMoving = false;
 
-        return;
+      const result = await showTaskInMain(target);
+
+      if (generations.get(this) === generation && result !== 'window') {
+        showOpeningFailure();
       }
-
-      this.taskId = result === 'window' ? null : String(id);
-      this.taskSource = result === 'window' ? undefined : reference.source;
-      this.taskUnavailable = result === 'window' ? undefined : reference.unavailable;
     },
 
     /**
-     * Доставка из главного окна сохраняет полную цель без повторного выбора размещения.
+     * Переносит текущую карточку и закрывает её только после подтверждения другого окна.
+     * Поздний ответ не затрагивает карточку, которую человек открыл после запроса.
+     */
+    async moveTaskWindow(): Promise<void> {
+      const target = this.taskWindowTarget;
+
+      if (!target || this.taskWindowMoving) {
+        return;
+      }
+
+      const generation = nextGeneration(this);
+      const attaching = currentDesktopMode() === 'surface';
+
+      this.taskWindowMoving = true;
+
+      const result = await (attaching ? showTaskInMain(target) : resolveSurfaceOpening(target, true,
+        (value) => sendSurface('/surfaces/open', value)));
+
+      if (generations.get(this) !== generation) {
+        return;
+      }
+
+      this.taskWindowMoving = false;
+
+      if (result === 'window') {
+        this.close();
+      } else {
+        showToast({
+          id: 'task-window-opening',
+          title: attaching ? t('core.taskAttachFailed') : t('core.taskDetachFailed'),
+          tone: 'warning',
+        });
+      }
+    },
+
+    /**
+     * Диалог и начальная загрузка отдельного окна используют одну полную цель.
      * Исторический marker не позволяет открыть внешнюю задачу с тем же номером.
      */
     openTaskInline(id: string | number, source?: TaskSourceId, unavailable?: 'legacy-own') {
@@ -146,6 +182,7 @@ export const useUiStore = defineStore('ui', {
       this.taskId = String(id);
       this.taskSource = source;
       this.taskUnavailable = unavailable;
+      this.taskWindowMoving = false;
     },
 
     /**
@@ -157,6 +194,7 @@ export const useUiStore = defineStore('ui', {
       this.taskId = null;
       this.taskSource = undefined;
       this.taskUnavailable = undefined;
+      this.taskWindowMoving = false;
     },
   },
 });
