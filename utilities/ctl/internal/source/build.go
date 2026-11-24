@@ -127,7 +127,14 @@ func buildStageCount(target string) int {
 	if runtime.GOOS == "darwin" && target == "all" {
 		return 2
 	}
-	return map[string]int{"apk": 1, "factory": 1, "web": 2, "window": 4, "server": 4, "all": 9}[target]
+	return map[string]int{
+		"apk":     1,
+		"factory": 1,
+		"web":     2,
+		"window":  5,
+		"server":  4,
+		"all":     10,
+	}[target]
 }
 
 // showStage удерживает на экране активные параллельные стадии до их завершения.
@@ -292,9 +299,18 @@ func (runner *builder) web(ctx context.Context) int {
 	return runner.step(ctx, "web.build", filepath.Join(runner.settings.Root, "web"), "npm", "run", "build")
 }
 
+// packageWindow согласует зависимости окна перед каждым запуском упаковщика.
+// Dev-пакеты нужны и при NODE_ENV=production; отказ npm сохраняет установленное окно.
 func (runner *builder) packageWindow(ctx context.Context) int {
 	root := runner.settings.Root
-	return runner.step(ctx, "window.package", root, "npm", "--prefix", filepath.Join(root, "desktop"), "run", "dist")
+	desktop := filepath.Join(root, "desktop")
+
+	if code := runner.step(ctx, "window.dependencies", desktop,
+		"npm", "install", "--include=dev", "--no-audit", "--no-fund"); code != 0 {
+		return code
+	}
+
+	return runner.step(ctx, "window.package", root, "npm", "--prefix", desktop, "run", "dist")
 }
 
 func (runner *builder) installWindow(ctx context.Context) int {

@@ -101,6 +101,10 @@ When building GrigDesk itself from source, server, desktop and command stages ca
 in parallel. Progress keeps each stage's status separate; desktop installation begins
 after every build track succeeds.
 
+Before packaging the desktop app, the build automatically installs and updates its dependencies,
+including build tools. If package installation fails, the installed app is preserved;
+the full build log records the cause.
+
 ## Prepare and push a commit
 
 1. Stage the required files with `+`; `−` unstages them. Check directory and partial selections first.

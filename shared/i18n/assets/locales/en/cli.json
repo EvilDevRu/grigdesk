@@ -141,6 +141,7 @@
       "build": "Web: build"
     },
     "window": {
+      "dependencies": "Window: dependencies",
       "package": "Window: package",
       "install": "Window: install"
     },

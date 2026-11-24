@@ -52,7 +52,12 @@ capabilities заменяет путь атомарно. В Go CLI это ста
 `npm install --no-audit --no-fund` в сервере, затем `build:binary` и `install:binary`;
 `web` сохраняет подготовку зависимостей и
 `npm run build` в web; `window` сначала готовит и собирает веб, затем выполняет
-`npm --prefix desktop run dist` и `deploy/desktop.sh install`.
+подготовку зависимостей окна, `npm --prefix desktop run dist` и `deploy/desktop.sh install`.
+В `window` и оконной цепочке `all` стадия `window.dependencies` каждый раз запускает
+`npm install --include=dev --no-audit --no-fund` в `desktop/`: наличие `node_modules`
+не гарантирует полноту пакетов, а esbuild, Electron и упаковщик относятся к dev-зависимостям.
+Они устанавливаются и при `NODE_ENV=production`. Отказ npm прекращает цепочку до упаковки
+и установки окна; в `all` независимые цепочки доходят до конца по общему правилу отказов.
 `apk` — отдельная цель [сборки Android-приложения](ctl-build-apk.md) через `tools/mobile build`.
 Она включает общий интерфейс внутрь APK и не входит в `all`.
 `deepseek` — отдельная цель, не входящая в `all`: она не собирает веб и окно и не меняет

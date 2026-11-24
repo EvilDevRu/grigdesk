@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
-import { mkdir, stat, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, stat, symlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import test from 'node:test';
 
-import { createSandbox } from './helpers/sandbox.mts';
+import { completed, createSandbox } from './helpers/sandbox.mts';
 import { buildLog, chooseBuild, launchBuild, terminalBuildFixture } from './helpers/buildFixture.mts';
 import { down, menuTitle, up, visibleLines } from './helpers/menuFixture.mts';
 import { assertRestored, startPty } from './helpers/pty.mts';
@@ -303,6 +303,94 @@ test('CTL-GO-03: события сборки идут по fd 3 и не загр
   assert.equal(events, 'start\tweb.dependencies\nend\tweb.dependencies\t0\n'
     + 'start\tweb.build\nend\tweb.build\t0\n');
 });
+
+/**
+ * Упаковщик фикстуры требует установленный esbuild, а npm восстанавливает его только с dev-пакетами.
+ * Серверная цепочка и Go-сборщики остаются заглушками и не затрагивают живую установку.
+ */
+async function windowDependenciesFixture(t: Parameters<typeof terminalBuildFixture>[0]) {
+  const fixture = await terminalBuildFixture(t, true);
+  const desktop = path.join(fixture.root, 'desktop');
+  const dependency = path.join(desktop, 'node_modules/esbuild/package.json');
+  const npm = path.join(fixture.env.PATH.split(':')[0]!, 'npm');
+  const original = await readFile(npm, 'utf8');
+  const anchor = 'const failed = failure.command === command && args.includes(failure.argument);';
+
+  assert.ok(original.includes(anchor));
+  await writeFile(npm, original.replace(anchor, [
+    anchor,
+    `const dependency = ${JSON.stringify(dependency)};`,
+    `if (process.cwd() === ${JSON.stringify(desktop)} && args.includes('install') && !failed) {`,
+    "  if (!args.includes('--include=dev')) process.exit(81);",
+    "  fs.mkdirSync(require('node:path').dirname(dependency), { recursive: true });",
+    "  fs.writeFileSync(dependency, '{}');",
+    '}',
+    "if (args.includes('dist') && !fs.existsSync(dependency)) process.exit(82);",
+  ].join('\n')));
+
+  for (const name of ['build-factory.sh', 'build-go-utilities.sh']) {
+    await writeFile(path.join(fixture.root, 'tools', name), '#!/bin/bash\nexit 0\n');
+  }
+
+  return {
+    fixture,
+    desktop,
+    dependency,
+  };
+}
+
+for (const target of ['all', 'window']) {
+  for (const installed of [false, true]) {
+    test(`CTL-GO-DEPS: ${target} восстанавливает dev-пакеты окна, node_modules=${installed}`, {
+      skip: process.platform !== 'linux',
+    }, async (t) => {
+      const { fixture, desktop, dependency } = await windowDependenciesFixture(t);
+
+      if (installed) {
+        await mkdir(path.join(desktop, 'node_modules'));
+      }
+
+      const [file, ...argv] = fixture.argv(['build', target]);
+      const result = await completed(spawn(file!, argv, {
+        env: {
+          ...fixture.env,
+          NODE_ENV: 'production',
+          npm_config_omit: 'dev',
+        },
+        stdio: ['ignore', 'pipe', 'pipe'],
+      }));
+      const calls = await fixture.calls();
+      const dependencies = calls.findIndex((call: { cwd: string; args: string[] }) =>
+        call.cwd === desktop && call.args.includes('install'));
+      const packaged = calls.findIndex((call: { args: string[] }) => call.args.includes('dist'));
+
+      assert.equal(result.code, 0, result.stderr);
+      await stat(dependency);
+      assert.ok(dependencies >= 0);
+      assert.ok(packaged > dependencies);
+      assert.ok(calls.some((call: { command: string }) => call.command === 'desktop'));
+    });
+  }
+
+  test(`CTL-GO-DEPS: ${target} сохраняет окно при отказе установки зависимостей`, {
+    skip: process.platform !== 'linux',
+  }, async (t) => {
+    const { fixture } = await windowDependenciesFixture(t);
+
+    await fixture.fail('npm', '--include=dev', 31);
+
+    const [file, ...argv] = fixture.argv(['build', target]);
+    const result = await completed(spawn(file!, argv, {
+      env: fixture.env,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    }));
+    const calls = await fixture.calls();
+
+    assert.equal(result.code, 31, result.stderr);
+    assert.ok(!calls.some((call: { args: string[] }) => call.args.includes('dist')));
+    assert.ok(!calls.some((call: { command: string }) => call.command === 'desktop'));
+  });
+}
 
 test('CTL-GO-04: уборка не трогает живой Node lock и внешнюю цель ссылки', async (t) => {
   const fixture = await createSandbox(t, { go: true });
