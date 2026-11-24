@@ -638,6 +638,93 @@ test('Codex ограничивает один multi-file tool двадцатью
   assert.deepEqual(sink.steps, sent, 'SSE и сохранённая история видят один и тот же bounded step');
 });
 
+test('Codex: запись файлов через shell называется в свёрнутой строке Bash', () => {
+  // Ultrafast-модели пишут код не через apply_patch, а через `cat > P <<'EOF'` внутри
+  // `/bin/bash -lc`. Для app-server это обычный commandExecution без диффа: строка
+  // показывала серый Bash с началом команды, и человек читал ленту как «агент ничего
+  // не писал», хотя на диске появились файлы. Путь и знак записи — единственное, что
+  // можно извлечь честно; сам код в ленту не дублируем.
+  const sink = createStepSink(null, { now: () => 150 });
+  const normalize = createCodexStepNormalizer();
+
+  const bashOf = (id, script) => normalize({
+    method: 'item/completed',
+    params: {
+      item: {
+        type: 'commandExecution',
+        id,
+        status: 'completed',
+        exit_code: 0,
+        command: ['/bin/bash', '-lc', script],
+      },
+    },
+  });
+  const toolOf = (id) => sink.steps.find((step) => step.k === 'tool' && step.id === id);
+
+  // Формы взяты из сохранённой ленты реального ultrafast-чата: кавычки внутри `-lc`
+  // экранированы, запись идёт после `mkdir -p … &&`, несколько файлов в одной команде.
+  const cases = [
+    [
+      'heredoc',
+      'mkdir -p "/tmp/run" && cat > "/tmp/run/src/a.ts" <<\'EOF\'\nexport const a = 1;\nEOF',
+      ['/tmp/run/src/a.ts'],
+    ],
+    ['append', 'cat >> ../journal.md <<\'EOF\'\n\n## Шаг 1\nEOF', ['../journal.md']],
+    [
+      'tee',
+      'python3 - <<\'PY\' | tee \'/tmp/run/prod-http.log\'\nprint(1)\nPY',
+      ['/tmp/run/prod-http.log'],
+    ],
+    [
+      'redirect-eol',
+      'docker ps --format \'{{.Names}}\' > /tmp/run/containers.txt',
+      ['/tmp/run/containers.txt'],
+    ],
+    [
+      'sed',
+      'sed -i \'s/baseUrl: .*/baseUrl: "http:\/\/localhost:5173",/\' /tmp/run/ui/vite.config.ts',
+      ['/tmp/run/ui/vite.config.ts'],
+    ],
+    [
+      'two-writes',
+      'cat > /tmp/run/x.js <<\'EOF\'\n1\nEOF\ncat > /tmp/run/y.js <<\'EOF\'\n2\nEOF',
+      ['/tmp/run/x.js', '/tmp/run/y.js'],
+    ],
+  ];
+
+  for (const [label, script, files] of cases) {
+    sink.steps.length = 0;
+    sink.emitAll(bashOf(`w-${label}`, script));
+
+    const tool = toolOf(`w-${label}`);
+
+    assert.equal(tool?.name, 'Bash', `${label}: имя инструмента не меняется`);
+    assert.deepEqual(tool?.files, files, `${label}: строка называет записанные файлы`);
+    assert.match(tool?.title || '', /→\s*\d+\s*файл/, `${label}: свёрнутый заголовок говорит о записи`);
+    assert.ok(
+      tool?.title.endsWith(files.map((file) => file.split('/').pop()).join(', ')),
+      `${label}: заголовок перечисляет имена файлов`,
+    );
+  }
+
+  // Чтение, поиск и запуск тестов файлом не являются: у таких строк `files` нет,
+  // заголовок остаётся первой строкой команды.
+  sink.steps.length = 0;
+  sink.emitAll(bashOf('r-1', 'cat CLAUDE.md && rg -n "steps" server/src | head -20'));
+
+  const read = toolOf('r-1');
+
+  assert.equal(read?.files, undefined, 'чтение и поиск не называются записью');
+  // Без записи заголовок остаётся прежним — первая строка команды вместе с обёрткой `-lc`.
+  assert.equal(read?.title, '/bin/bash -lc cat CLAUDE.md && rg -n "steps" server/src | head -20');
+
+  // `2>/dev/null` и `>/dev/null` — не запись файла, несмотря на `>`.
+  sink.steps.length = 0;
+  sink.emitAll(bashOf('r-2', 'ls missing 2>/dev/null >/dev/null; echo ok'));
+
+  assert.equal(toolOf('r-2')?.files, undefined, 'перенаправление в /dev/null не считается записью');
+});
+
 test('Codex сообщает id thread до первого шага хода', async (t) => {
   const f = await fixture(t, 'early-thread-notification');
   const seen = [];

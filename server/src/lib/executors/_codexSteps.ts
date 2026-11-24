@@ -16,6 +16,9 @@ const MAX_CODEX_FILE_CHANGES = 20;
 const MAX_CODEX_CHANGE_DIFF_BYTES = 16 * 1024;
 const MAX_CODEX_CHANGE_PATH_CHARS = 500;
 const DIFF_CUT_MARKER = '\n… сокращено …\n';
+// Заголовок команды, пишущей файлы, перечисляет имена: 200 не вмещали даже три
+// коротких имени после стрелки и счётчика. Раскрытая команда ограничена отдельно.
+const SHELL_WRITE_TITLE_LIMIT = 300;
 
 // Элемент потока Codex. Форма зависит от типа и версии транспорта (app-server
 // либо legacy JSONL), поэтому объявлено ровно то, что читает нормализатор.
@@ -130,6 +133,131 @@ function textOf(value: unknown): string {
 function commandOf(item: CodexItem | null | undefined): string {
   const command = item?.command ?? item?.cmd ?? '';
   return Array.isArray(command) ? command.join(' ') : textOf(command);
+}
+
+// Расширения, которые разумно считать исходником или документом: только их читаем
+// у безымянного `>` в конце команды, иначе `> build/out` и `> /dev/null` приходилось
+// бы отличать частными случаями. Heredoc, `tee` и `sed -i` называют путь явно,
+// поэтому там фильтр по расширению не нужен.
+const SHELL_WRITE_EXTENSIONS = new Set([
+  'ts', 'tsx', 'js', 'jsx', 'mjs', 'cjs', 'vue', 'svelte', 'py', 'go', 'rs', 'java', 'kt',
+  'c', 'h', 'cc', 'cpp', 'hpp', 'cs', 'rb', 'php', 'sh', 'bash', 'zsh', 'sql', 'json',
+  'yml', 'yaml', 'toml', 'xml', 'html', 'css', 'scss', 'md', 'mdx', 'txt', 'env', 'conf',
+  'ini', 'cfg', 'service', 'dockerfile', 'lock', 'svg',
+]);
+
+const DEV_NULL = /^\/dev\/null$/;
+
+// Кавычки внутри `/bin/bash -lc "…"` экранированы: `\"` и `\'` — обычные символы
+// внутри скрипта, а не граница строки. Убираем только обратный слэш перед кавычкой.
+function unescapeShellQuotes(value: string): string {
+  return value.replace(/\\(["'])/g, '$1');
+}
+
+/**
+ * Читает путь, который стоит сразу после оператора записи: `"…"`, `'…'` или голый
+ * до пробела и разделителя команды. Возвращает и путь, и позицию после него, чтобы
+ * вызывающий мог отличить путь от heredoc-метки `<<'EOF'`.
+ */
+function shellPathAfter(source: string, from: number): { path: string; end: number } | null {
+  const rest = source.slice(from);
+  const quoted = /^"([^"\n]+)"|^'([^'\n]+)'/.exec(rest);
+
+  if (quoted) {
+    const path = quoted[1] ?? quoted[2] ?? '';
+
+    return { path, end: from + quoted[0].length };
+  }
+
+  const bare = /^([^\s;|&<>]+)/.exec(rest);
+
+  return bare ? { path: bare[1], end: from + bare[1].length } : null;
+}
+
+/**
+ * Голый `>` в конце команды пишет куда угодно — и в исходник, и в `/dev/null`, и в
+ * бинарник сборки. Записью считаем только знакомые расширения исходников и документов,
+ * поэтому «`> out`» без расширения и служебные устройства в ленту не попадают.
+ */
+function hasWriteExtension(file: string): boolean {
+  const name = file.split('/').pop() || '';
+  const lower = name.toLowerCase();
+  const ext = lower.includes('.') ? lower.slice(lower.lastIndexOf('.') + 1) : '';
+
+  return SHELL_WRITE_EXTENSIONS.has(ext);
+}
+
+/**
+ * Файлы, которые shell-команда пишет на диск: `cat > P <<'EOF'`, `cat >> P`, `tee P`,
+ * `> P.ext` и `sed -i … P`.
+ *
+ * Invariant: путь берётся только из самой команды, тело heredoc не разбирается и в
+ * ленту не попадает — это не дифф, а имя того, что агент записал. Возвращаются
+ * уникальные пути в порядке появления; `/dev/null` и перенаправления без расширения
+ * источника записью не считаются. Эффект: свёрнутая строка Bash честно называет
+ * файлы, поэтому ход, где модель писала код через shell, не выглядит бездействием.
+ */
+export function shellWriteFiles(command: string): string[] {
+  const source = unescapeShellQuotes(command);
+  const files: string[] = [];
+
+  const push = (file: string) => {
+    const trimmed = file.trim();
+
+    if (!trimmed || DEV_NULL.test(trimmed) || files.includes(trimmed)) {
+      return;
+    }
+
+    files.push(trimmed);
+  };
+
+  // `cat > P <<TAG` и `cat >> P <<TAG`: путь стоит между `cat` и heredoc-меткой.
+  const heredoc = /\bcat\s?>>?\s*(?=[^\s])/g;
+
+  for (const match of source.matchAll(heredoc)) {
+    const target = shellPathAfter(source, match.index + match[0].length);
+
+    if (target && !target.path.startsWith('<<')) {
+      push(target.path);
+    }
+  }
+
+  // `tee P` и `| tee P`: путь — первый аргумент после tee, флаги `-a`/`-p` пропускаем.
+  const tee = /(?:^|[|;]\s*)tee\s+(?:-[a-zA-Z]+\s+)*/g;
+
+  for (const match of source.matchAll(tee)) {
+    const target = shellPathAfter(source, match.index + match[0].length);
+
+    if (target) {
+      push(target.path);
+    }
+  }
+
+  // `sed -i … P`: правка на месте, последний аргумент — файл.
+  const sed = /\bsed\s+-i\S*\s+[^;|&\n]+/g;
+
+  for (const match of source.matchAll(sed)) {
+    const parts = match[0].trim().split(/\s+/);
+    const last = unescapeShellQuotes(parts[parts.length - 1] || '').replace(/^['"]|['"]$/g, '');
+
+    if (last && !last.startsWith('-')) {
+      push(last);
+    }
+  }
+
+  // Голый `> P.ext` и `>> P.ext`: только с расширением исходника. `2>`, `&>` — тоже
+  // дескрипторы, но путь после них пишется одинаково; `<` и `>&` не являются записью.
+  const redirect = /(?<![0-9&<])>{1,2}(?![<&])\s*/g;
+
+  for (const match of source.matchAll(redirect)) {
+    const target = shellPathAfter(source, match.index + match[0].length);
+
+    if (target && hasWriteExtension(target.path)) {
+      push(target.path);
+    }
+  }
+
+  return files;
 }
 
 function itemOk(item: CodexItem | null | undefined): boolean {
@@ -321,10 +449,21 @@ function toolOf(item: CodexItem | null | undefined): Record<string, unknown> | n
 
   if (item.type === 'command_execution' || item.type === 'commandExecution') {
     const command = commandOf(item);
+    // Команда, пишущая файлы, называет их в свёрнутом заголовке: иначе `cat > x.ts`
+    // с сотнями строк кода выглядит серой строкой Bash, и ход читается как бездействие.
+    const files = shellWriteFiles(command);
+    const title = files.length
+      ? cut(`→ ${files.length} файл: ${files.map(base).join(', ')}`, SHELL_WRITE_TITLE_LIMIT)
+      : cut(command.split('\n')[0], 200);
+
     return {
-      id, name: 'Bash', title: cut(command.split('\n')[0], 200),
+      id,
+      name: 'Bash',
+      title,
       command: cutMiddle(command, STEP_TEXT_LIMIT),
-      preview: cut(item?.description || '', 200), lang: 'bash',
+      preview: cut(item?.description || '', 200),
+      lang: 'bash',
+      ...(files.length ? { files } : {}),
     };
   }
 

@@ -56,11 +56,11 @@
             :disabled="!hasBody(r)"
             @update:open="toggle(r)"
           >
-            <span class="head" :class="kindOf(r.name).cls">
+            <span class="head" :class="kindOf(r).cls">
               <svg class="ico" width="15" height="15" viewBox="0 0 24 24" fill="none"
                    stroke="currentColor" stroke-width="1.5" stroke-linecap="round"
                    stroke-linejoin="round" aria-hidden="true">
-                <path :d="kindOf(r.name).ico" />
+                <path :d="kindOf(r).ico" />
               </svg>
               <span class="nm">{{ toolLabel(r.name) }}</span>
               <span class="ttl">{{ r.title }}</span>
@@ -84,6 +84,8 @@
               </a>
             </template>
             <!-- В компактной строке команда сокращена; в раскрытии видны начало и конец. -->
+            <!-- Заголовок называет только имена записанных файлов — полные пути лежат здесь. -->
+            <pre v-if="r.name === 'Bash' && r.files?.length" class="body files">{{ r.files.join('\n') }}</pre>
             <pre v-if="r.command" class="body command">{{ r.command }}</pre>
             <!-- Один вызов инструмента может изменить несколько файлов. -->
             <div v-if="changesOf(r).length" class="changes">
@@ -376,8 +378,15 @@ const KIND: Record<string, { ico: string; cls: string }> = {
 /**
  * Имя инструмента выбирает монохромный контур из фиксированного набора.
  * Неизвестный MCP-вызов получает знак подключения, прочие вызовы — нейтральную точку.
+ * Bash, записавший файлы (`cat > P <<EOF`, `tee`, `sed -i`), получает знак правки:
+ * свёрнутая лента должна показывать запись кода, а не серую команду.
  */
-function kindOf(name: string | undefined) {
+function kindOf(row: StepRow) {
+  const name = row.name;
+
+  if (name === 'Bash' && Array.isArray(row.files) && row.files.length) {
+    return KIND.Write;
+  }
   if (name && KIND[name]) {
     return KIND[name];
   }

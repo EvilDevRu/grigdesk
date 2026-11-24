@@ -102,6 +102,12 @@ messages already shown stay visible even if a later page fails to load.
 Receiving the same block again does not add a copy. You do not need to clear
 a long conversation's history to process new replies.
 
+A Bash row with the edit icon and the title "→ 2 files: a.ts, journal.md" is a
+command that wrote files (`cat > … <<EOF`, `tee`, `sed -i`). Codex on Ultrafast often
+writes code this way instead of a separate edit: expand the row to see the full paths
+and the command. The code itself is not duplicated in the feed — it is on disk.
+A plain command without a write keeps the terminal icon.
+
 ## Limits and recovery
 
 If an executor disconnects during a work tool call, the server keeps serving other

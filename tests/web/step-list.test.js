@@ -60,6 +60,59 @@ test('StepList раскрывает Bash-команду целиком, не о�
   assert.equal(wrapper.find('.body.command').text(), command);
 });
 
+test('StepList показывает Bash-запись файлов знаком правки и полными путями', async (t) => {
+  // Codex на ultrafast пишет код через `cat > P <<EOF`. Сервер называет файлы в `files`,
+  // а свёрнутый заголовок — только имена; без знака правки такая строка читалась как
+  // обычная команда, и ход выглядел бездействием.
+  const wrapper = await mountStepList(t, [{
+    k: 'tool',
+    id: 'shell-write-1',
+    name: 'Bash',
+    title: '→ 2 файл: a.ts, journal.md',
+    files: ['/tmp/run/src/a.ts', '/tmp/run/journal.md'],
+    command: "/bin/bash -lc \"cat > /tmp/run/src/a.ts <<'EOF'\nexport const a = 1;\nEOF\"",
+  }]);
+
+  const head = wrapper.find('.head');
+
+  assert.ok(head.classes('write'), 'строка записи получает класс правки, а не терминала');
+  assert.ok(!head.classes('bash'), 'класс терминала не дублируется поверх знака правки');
+  assert.equal(wrapper.find('.nm').text(), 'Bash', 'имя инструмента остаётся честным — это shell');
+  assert.equal(wrapper.find('.body.files').exists(), false);
+
+  await head.trigger('click');
+
+  assert.equal(
+    wrapper.find('.body.files').text(),
+    '/tmp/run/src/a.ts\n/tmp/run/journal.md',
+    'раскрытие показывает полные пути записанных файлов',
+  );
+});
+
+test('StepList не меняет вид Bash без files и Edit с files', async (t) => {
+  const wrapper = await mountStepList(t, [
+    {
+      k: 'tool',
+      id: 'plain-1',
+      name: 'Bash',
+      title: 'ls',
+      command: 'ls',
+    },
+    {
+      k: 'tool',
+      id: 'edit-1',
+      name: 'Edit',
+      title: 'x.ts',
+      files: ['x.ts'],
+      changes: [],
+    },
+  ]);
+  const heads = wrapper.findAll('.head');
+
+  assert.ok(heads[0].classes('bash'), 'обычный Bash остаётся терминалом');
+  assert.ok(heads[1].classes('write'), 'Edit остаётся правкой');
+});
+
 test('StepList склеивает старые текстовые дельты по capability без изменения истории', async (t) => {
   const steps = [
     { k: 'think', text: 'Один' },

@@ -344,6 +344,7 @@
 - [Переезд Codex на app-server молча сузил рабочую область агента до cwd](codex-workspace-scope.md)
 - [Codex: живое уточнение требует подсказки вернуться к исходной задаче](codex-in-turn-live.md)
 - [Песочница Codex в чате: сеть и loopback есть, `systemctl --user`, FUSE и запись в `$HOME` — нет](codex-sandbox-capabilities.md)
+- [«Codex написал тонну кода, а в чате ни слова» = модель на Ultrafast пишет через `cat > P <<EOF`, и строка Bash не называла файлы](codex-shell-file-writes.md)
 - [Claude: lifecycle уточнений, закрытие по result и прерывание очереди после «Стопа»](claude-in-turn-live.md)
 - [Полоса «Неделя · Fable» растёт без Fable = расход вне этой машины, а не ошибка GrigDesk](provider-account-usage.md)
 - [Фризы при наборе в чате = черновик сохранялся тем же тяжёлым путём, что и переписка](draft-save-performance.md)
