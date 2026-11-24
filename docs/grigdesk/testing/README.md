@@ -107,7 +107,7 @@ HTTP, TLS, сигналы и синтетический синтез через 
 - [DOM equality: скалярные сравнения, старый снимок Android, AST-сторож и общий бюджет памяти](happy-dom-assert-memory.md)
 - [Фоновый Bash может сделать проверку SIGINT ложно красной](background-sigint.md)
 - [Пауза в TAP-выводе не доказывает зависание тестов](buffered-test-progress.md)
-- [Файл замка остаётся после полного прогона; занятость проверяет flock](full-suite-lock.md)
+- [Замок полного прогона в папке данных, отдельный файл на рабочее дерево](full-suite-lock.md)
 - [Playwright падает до первой спеки: в общем кэше нет ревизии chromium под версию проекта](playwright-browser-revision.md)
 - [Перенаправленный XDG_CACHE_HOME прячет браузеры Playwright](playwright-xdg-cache.md)
 - [Удалённый JS-файл валит снимок миграции, хотя код рабочий](migration-inventory-snapshot.md)

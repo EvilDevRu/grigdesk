@@ -3,7 +3,7 @@
 # Холодная legacy fixture сама устанавливает exact зависимости; прогретая работает без npm.
 set -uo pipefail
 
-PROJECT_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+PROJECT_ROOT="$(cd "$(dirname "$0")/.." && pwd -P)" || exit 1
 RC=0
 
 # Один прогон на рабочее дерево. Параллельные копии кодируют одно и то же видео в
@@ -13,8 +13,16 @@ RC=0
 # держится, пока жив хоть один процесс прогона — его и называем в отказе, ведь
 # записанный в файле pid к этому моменту мог уже смениться на потомка.
 # Изолированный прогон может хранить замок вместе с журналом вне дерева исходников.
-RUN_ALL_LOCK="${GRIGDESK_RUN_ALL_LOCK:-$PROJECT_ROOT/.state/run-all.lock}"
-mkdir -p "$(dirname "$RUN_ALL_LOCK")"
+RUN_ALL_LOCK="${GRIGDESK_RUN_ALL_LOCK:-}"
+if [[ -z "$RUN_ALL_LOCK" ]]; then
+  source "$PROJECT_ROOT/deploy/lib/runtime-env.sh"
+  # Разные GRIGDESK_HOME для одного checkout должны держать один и тот же замок.
+  LOCK_DATA_HOME=$(GRIGDESK_HOME= grigdesk_data_home) || exit 1
+  LOCK_TREE_ID=$(node -e 'process.stdout.write(require("node:crypto").hash("sha256", process.argv[1]))' \
+    "$PROJECT_ROOT") || exit 1
+  RUN_ALL_LOCK="$LOCK_DATA_HOME/dev/test-locks/$LOCK_TREE_ID/run-all.lock"
+fi
+mkdir -p "$(dirname "$RUN_ALL_LOCK")" || exit 1
 
 if command -v flock >/dev/null 2>&1; then
   exec {RUN_ALL_LOCK_FD}<>"$RUN_ALL_LOCK"
