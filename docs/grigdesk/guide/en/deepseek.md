@@ -21,6 +21,16 @@ Its absence does not disable other executors.
 
 ## Result
 
+### GLM chat access
+
+Open **Available in this chat** next to the composer to check folder permissions, image input,
+search configuration, available browser tabs, project MCP servers, and tool failure counts in loaded history.
+
+- For web search, set the service variable `GRIGDESK_GLM_SEARCH_API_KEY` to a DeepSeek search key.
+- Select a project MCP server in the dialog or send `/mcp name request`. Approve its startup and each call.
+- For extended work, send `/goal objective`. The activity feed shows each round and the outcome.
+  Use **Stop** to interrupt the run. Send `/goal resume` to resume the goal.
+
 The executor uses the available models and selected policy.
 Keys saved through the window apply on the server without manual file editing.
 

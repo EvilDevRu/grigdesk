@@ -10,8 +10,11 @@
 предполётная проверка → generation и identity допуска → home, overlay, окружение → web
   → session/create или resume → onSessionCreated (CAS привязки) → session/selectModel
     (модель и reasoningEffort одним вызовом) → follow и $events, snapshot follow сверяет
-    projections.modelSelection.next → prompt → turn/end → остановка процесса
+    projections.modelSelection.next → prompt → turn/end → остановка процесса или новый раунд цели
 ```
+
+Единственный запуск процесса обслуживает дополнительные нативные раунды цели, созданной
+или возобновлённой в этом явном `/goal`. [Доступ в чате GLM](glm-chat-access.md).
 
 После каждого ожидания до prompt проверяется abort: остановленный ход до модели не доходит,
 процесс и каталог запуска закрываются. Предполётная проверка идёт до любого процесса:

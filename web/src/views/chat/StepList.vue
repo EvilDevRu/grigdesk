@@ -69,6 +69,9 @@
               <span v-if="r.res" class="mark" :class="{ bad: !r.res!.ok }">
                 {{ r.res.ok ? '✓' : '✕' }}
               </span>
+              <span v-if="r.res?.ok === false" class="ttl step-failure">
+                {{ failureLine(r.res) }}
+              </span>
               <span v-else-if="live" class="mark run">…</span>
             </span>
           </UiDisclosureButton>
@@ -85,7 +88,10 @@
             </template>
             <!-- В компактной строке команда сокращена; в раскрытии видны начало и конец. -->
             <!-- Заголовок называет только имена записанных файлов — полные пути лежат здесь. -->
-            <pre v-if="r.name === 'Bash' && r.files?.length" class="body files">{{ r.files.join('\n') }}</pre>
+            <pre
+              v-if="r.name === 'Bash' && Array.isArray(r.files) && r.files.length"
+              class="body files"
+            >{{ r.files.join('\n') }}</pre>
             <pre v-if="r.command" class="body command">{{ r.command }}</pre>
             <!-- Один вызов инструмента может изменить несколько файлов. -->
             <div v-if="changesOf(r).length" class="changes">
@@ -130,6 +136,7 @@
               <span class="ttl">{{ t('core.chatDeystvieVytesnenoIzLenty') }}</span>
               <span v-if="r.lines" class="stat">{{ r.lines }} {{ t('core.chatStr') }}</span>
               <span class="mark" :class="{ bad: !r.ok }">{{ r.ok ? '✓' : '✕' }}</span>
+              <span v-if="r.ok === false" class="ttl step-failure">{{ failureLine(r) }}</span>
             </span>
           </UiDisclosureButton>
           <pre
@@ -144,7 +151,7 @@
         <div v-else-if="r.k === 'start'" class="note start"> {{ t('core.chatStartModel') }} <b>{{ modelLabel(r.model) || '?' }}</b><template v-if="r.mode"> {{ t('core.chatRezhim') }} {{ r.mode }}</template>
         </div>
         <div v-else-if="r.k === 'note'" class="note" :class="r.level">
-          {{ r.text }}<template v-if="r.times! > 1"> ×{{ r.times }}</template>
+          {{ noteText(r) }}<template v-if="r.times! > 1"> ×{{ r.times }}</template>
         </div>
       </div>
     </div>
@@ -164,6 +171,39 @@ import { UiDisclosureButton, t } from '../../ui';
 import { chatWorkdirImageHref } from './chatImages.ts';
 import { foldChatSteps, nestChatStepRows } from './chatStepRows.ts';
 import type { StepRow } from './chatStepRows.ts';
+
+function failureLine(step: ChatStep) {
+  return step.text?.trim().split('\n', 1)[0]?.slice(0, 180) || t('core.chatToolFailed');
+}
+
+/**
+ * Статус цели строится из событий Harness, пояснение блокировки остаётся текстом.
+ * Сохранённые заметки без кода по-прежнему отображаются как есть.
+ */
+function noteText(row: StepRow) {
+  const progress = { round: Number(row.round) || 0, total: Number(row.total) || 0 };
+
+  if (row.label === 'goalRound') {
+    return t('core.chatGoalRound', progress);
+  }
+  if (row.label === 'goalWaitingStopped') {
+    return t('core.chatGoalWaitingStopped');
+  }
+  if (row.label !== 'goalState') {
+    return row.text;
+  }
+
+  switch (row.phase) {
+    case 'active': return t('core.chatGoalActive', progress);
+    case 'paused': return t('core.chatGoalPaused', progress);
+    case 'complete': return t('core.chatGoalComplete', progress);
+    case 'blocked': return t('core.chatGoalBlocked', {
+      ...progress,
+      reason: row.reasonCode === 'round-limit' ? t('core.chatGoalLimitReached') : row.text || '',
+    });
+    default: return t('core.chatGoalCleared');
+  }
+}
 
 // Лента хода агента: размышления, вызовы инструментов и их результаты —
 // то же, что видно в чате VS Code. Живая (пока агент работает) и сохранённая
@@ -356,13 +396,14 @@ const ICON = {
 };
 
 // Иконка и вид строки инструмента не зависят от исполнителя или темы окна.
+const writeKind = { ico: ICON.write, cls: 'write' };
 const KIND: Record<string, { ico: string; cls: string }> = {
   Bash: { ico: ICON.bash, cls: 'bash' },
   Read: { ico: ICON.read, cls: 'read' },
   GenerateImage: { ico: ICON.image, cls: 'read' },
-  Write: { ico: ICON.write, cls: 'write' },
-  Edit: { ico: ICON.write, cls: 'write' },
-  NotebookEdit: { ico: ICON.write, cls: 'write' },
+  Write: writeKind,
+  Edit: writeKind,
+  NotebookEdit: writeKind,
   Glob: { ico: ICON.find, cls: 'find' },
   Grep: { ico: ICON.find, cls: 'find' },
   Agent: { ico: ICON.task, cls: 'task' },
@@ -385,10 +426,13 @@ function kindOf(row: StepRow) {
   const name = row.name;
 
   if (name === 'Bash' && Array.isArray(row.files) && row.files.length) {
-    return KIND.Write;
+    return writeKind;
   }
-  if (name && KIND[name]) {
-    return KIND[name];
+
+  const kind = name ? KIND[name] : undefined;
+
+  if (kind) {
+    return kind;
   }
 
   return name?.startsWith('mcp__') ? { ico: ICON.mcp, cls: 'mcp' } : { ico: ICON.other, cls: 'other' };
@@ -517,5 +561,6 @@ function toolLabel(name: string | undefined) {
 }
 .section .step > .note { padding-left: 27px; }
 .note.warn { color: var(--warn, #e0a33a); }
+.head .step-failure { color: var(--danger, #e46b73); }
 .note.start b { color: var(--ink-mid); font-weight: 500; }
 </style>

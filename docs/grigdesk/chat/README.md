@@ -230,6 +230,7 @@
 - [Кеш GLM: категории токенов, стоимость хода и границы сверки](glm-cache-cost.md)
 - [Native gate и foreground-делегирование GLM](glm-native-gate.md) — proof до эффекта, точная связь ребёнка, журнал resume и remote ownership.
 - [Политика инструментов GLM: native gate чата и прежний hook Factory/ACP](glm-tool-policy.md)
+- [Доступ в чате GLM: поиск, проектные MCP, цели и диагностика](glm-chat-access.md)
 - [Навыки GLM: каталог пользователя и разрешённый загрузчик skill типом read](glm-skill-policy.md)
 - [Навыки GLM и DeepSeek в меню: общий каталог и обычный ход по /имени](harness-skill-menu.md)
 - [Встроенный grigdesk-connect-project: интервью, доставка в пакетах и проверка меню](grigdesk-connect-project-skill.md)

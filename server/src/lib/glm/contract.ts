@@ -11,7 +11,18 @@ export type GlmAccessMode = 'api' | 'coding-plan';
 export type { GlmCompatibilityRuntime };
 
 export const GLM_PROFILE_REVISION = 'grigdesk-glm-profile-v3';
-export const GLM_POLICY_REVISION = 'grigdesk-glm-policy-v4';
+export const GLM_POLICY_REVISION = 'grigdesk-glm-policy-v5';
+export const GLM_GOAL_ROUND_LIMIT = 16;
+
+/**
+ * Каталог чата передаёт пару провайдер/модель, overlay — имя модели маршрута.
+ * Возможность изображения соответствует семействам закреплённого каталога Z.ai.
+ */
+export function glmImageInput(model: string): boolean {
+  const name = /^\["zai","([^"]+)"\]$/u.exec(model)?.[1] ?? model;
+
+  return /^glm-5\.3-flash(?:x(?:-legal)?)?$/u.test(name);
+}
 // Ревизии отвязанного этапа фабрики отдельны от чата: смена Factory профиля или политики
 // не меняет отпечаток, допуск и память обычного чата GLM.
 export const GLM_FACTORY_PROFILE_REVISION = 'grigdesk-glm-factory-profile-v2';

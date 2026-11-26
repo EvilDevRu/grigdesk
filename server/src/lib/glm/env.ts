@@ -19,6 +19,7 @@ export interface GlmAccess {
 type GlmEnv = NodeJS.ProcessEnv | Record<string, string | undefined>;
 
 export const GLM_ROUTE_KEY_ENV = 'GRIGDESK_GLM_ROUTE_KEY';
+export const GLM_SEARCH_KEY_ENV = 'GRIGDESK_GLM_SEARCH_API_KEY';
 
 /**
  * Ошибка доступа несёт только публичный код: ни ключа, ни значения окружения в ней нет.
@@ -73,10 +74,12 @@ export function buildGlmChildEnv({
   source,
   dshHome,
   mode,
+  webSearch,
 }: {
   source: GlmEnv;
   dshHome: string;
   mode: GlmAccessMode;
+  webSearch?: boolean;
 }): Record<string, string> {
   const key = selectGlmServiceKey(mode, source);
 
@@ -84,11 +87,15 @@ export function buildGlmChildEnv({
     throw glmAccessError('glm_key_missing', 'Для GLM нужен ключ выбранного режима в окружении службы');
   }
 
-  return buildHarnessChildEnv({
+  const env = buildHarnessChildEnv({
     source,
     dshHome,
     credential: { name: GLM_ROUTE_KEY_ENV, value: key },
   });
+
+  const searchKey = webSearch ? source[GLM_SEARCH_KEY_ENV]?.trim() : '';
+
+  return searchKey ? { ...env, [GLM_SEARCH_KEY_ENV]: searchKey } : env;
 }
 
 /**

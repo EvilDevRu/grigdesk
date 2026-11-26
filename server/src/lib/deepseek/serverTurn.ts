@@ -105,6 +105,11 @@ export interface DeepSeekTurnVariant {
   autoApprove: (toolName: string) => boolean;
   // Событие хода, при котором ход нужно остановить (например, нарушена регистрация hooks).
   inspectEvent?: (event: Record<string, unknown>) => Error | null;
+  goal?: {
+    isActive: () => boolean;
+    inspect: (event: Record<string, unknown>, emit: (step: ChatStep) => void) => void;
+  };
+  startTurn?: (client: DeepSeekWebClient, sessionId: string, signal?: AbortSignal) => Promise<unknown>;
   // Перевод approval/request: отказ без человека либо представление для onPermission.
   approve?: (request: Record<string, unknown>) => Promise<{ allow: boolean } | {
     presentation: Record<string, unknown>;
@@ -335,6 +340,7 @@ export async function runDeepSeekServerTurn(options: DeepSeekServerTurnOptions) 
     let lastContextUsage: ChatContextUsage = { contextMetric: 'unavailable' };
     let replyMessageId = '';
     let turnStarted = false;
+    let goalTimer: ReturnType<typeof setTimeout> | undefined;
     let finished = false;
     let awaitingAnswer = false;
     let failure: Error | null = null;
@@ -462,6 +468,18 @@ export async function runDeepSeekServerTurn(options: DeepSeekServerTurnOptions) 
       scopedRemote?.close();
       options.onInTurnAvailability?.({ available: false, reason: 'not_ready' });
       notify();
+    };
+
+    /**
+     * Даём Harness запустить следующий раунд после сохранения журнала.
+     * При остановившемся драйвере закрываем подписки и отменяем оставшуюся работу.
+     */
+    const waitForGoalRound = () => {
+      goalTimer = setTimeout(() => {
+        sink.emit({ k: 'note', label: 'goalWaitingStopped' });
+        cancellation ||= server.client.cancel(sessionId).catch(() => {});
+        finish();
+      }, 15_000);
     };
     const setAwaiting = (value: boolean) => {
       awaitingAnswer = value;
@@ -631,7 +649,19 @@ export async function runDeepSeekServerTurn(options: DeepSeekServerTurnOptions) 
 
         return;
       }
-      if (event.type === 'turn/start') turnStarted = true;
+      if (event.type === 'turn/start') {
+        clearTimeout(goalTimer);
+        goalTimer = undefined;
+        turnStarted = true;
+      }
+
+      variant?.goal?.inspect(event, sink.emit);
+
+      if (goalTimer && event.type === 'goal/change' && !variant?.goal?.isActive()) {
+        finish();
+
+        return;
+      }
       // Полное состояние маршрута: отсутствие окна отменяет прежнюю ёмкость.
       if (event.type === 'request/context') {
         applyContextWindow(data.contextWindow);
@@ -690,6 +720,9 @@ export async function runDeepSeekServerTurn(options: DeepSeekServerTurnOptions) 
           }
         } else if (reason.kind === 'blocked') {
           fail(variant?.blocked?.() ?? new Error(labels.blocked));
+        } else if (reason.kind === 'completed' && variant?.goal?.isActive()) {
+          turnStarted = false;
+          waitForGoalRound();
         } else {
           finish();
         }
@@ -847,9 +880,14 @@ export async function runDeepSeekServerTurn(options: DeepSeekServerTurnOptions) 
       options.onPromptAttempted?.();
       promptAttempted = true;
       await waitForDshOperation(
-        server.client.prompt(sessionId, options.message, randomUUID(), 'queue', operationSignal),
+        variant?.startTurn?.(server.client, sessionId, operationSignal)
+          ?? server.client.prompt(sessionId, options.message, randomUUID(), 'queue', operationSignal),
         operationSignal,
       );
+
+      if (variant?.startTurn && !turnStarted && !goalTimer && !finished) {
+        waitForGoalRound();
+      }
 
       const port: InTurnPort = {
         /**
@@ -908,7 +946,7 @@ export async function runDeepSeekServerTurn(options: DeepSeekServerTurnOptions) 
           ...(deliverySignal ? { turnFailure: deliverySignal } : {}),
           // Разрешение продолжать — только окончательный error-исход принятого turn:
           // сбой WebSocket/RPC и неизвестное завершение сюда не попадают.
-          turnRecovery: { canContinue: turnStarted, madeProgress },
+          turnRecovery: { canContinue: turnStarted && !variant?.goal, madeProgress },
           stopReason: 'error',
         } : {
           stopReason: 'completed', ...(reply ? {} : { emptyRun: true }),
@@ -929,6 +967,7 @@ export async function runDeepSeekServerTurn(options: DeepSeekServerTurnOptions) 
 
       throw error;
     } finally {
+      clearTimeout(goalTimer);
       options.signal?.removeEventListener('abort', abort);
       if (cancellation) await cancellation;
 

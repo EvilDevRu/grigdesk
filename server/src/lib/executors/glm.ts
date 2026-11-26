@@ -9,17 +9,21 @@ import { selectedDeepSeekBinary } from '../deepseek/distribution.ts';
 import type { ExecutorDistributionProbe, ExecutorProbe } from './index.ts';
 import {
   GLM_ALLOWED_MODES,
+  GLM_GOAL_ROUND_LIMIT,
   GLM_POLICY_REVISION,
   GLM_PROFILE_REVISION,
   buildGlmRoute,
   glmCompatibilityIdentity,
+  glmImageInput,
   selectGlmServiceKey,
 } from '../glm/contract.ts';
 import type { GlmAccessMode } from '../glm/contract.ts';
-import { assertGlmRuntimeHome, glmAccessError, glmAuthProfileId, resolveGlmAccess } from '../glm/env.ts';
+import {
+  GLM_SEARCH_KEY_ENV, assertGlmRuntimeHome, glmAccessError, glmAuthProfileId, resolveGlmAccess,
+} from '../glm/env.ts';
 import { assertGlmGenerationAdmission, describeGlmGenerationAsync } from '../glm/generation.ts';
 import { readGlmCatalog } from '../glm/catalog.ts';
-import { glmMcpStatus } from '../glm/mcp.ts';
+import { glmMcpStatus, listGlmProjectMcpNames } from '../glm/mcp.ts';
 import { runGlmTurn } from '../glm/runtime.ts';
 import { runGlmModelOnly } from '../glm/modelOnly.ts';
 import { glmUsage } from '../glm/usage.ts';
@@ -54,6 +58,26 @@ const AUTH_LABELS: Readonly<Record<string, (mode: GlmAccessMode | null) => strin
 
 function keyName(mode: GlmAccessMode | null): string {
   return mode === 'api' ? 'ZAI_API_KEY' : 'ZAI_CODING_API_KEY';
+}
+
+/**
+ * Правила запуска согласуются с текущим runtime независимо от сохранённой памяти.
+ * Предыдущая ревизия узнаётся только при тех же endpoint и флагах прав.
+ */
+function glmChatSecurityProfile(
+  mode: GlmAccessMode, endpoint: unknown, settings: Record<string, unknown>, policy: string,
+) {
+  const fingerprint = createHash('sha256').update(JSON.stringify({
+    profile: GLM_PROFILE_REVISION,
+    policy,
+    mode,
+    endpoint,
+    ssh: settings.blockDirectSsh !== false,
+    db: settings.blockDirectDb === true,
+    strictDb: settings.strictUnknownDbClient === true,
+  })).digest('hex');
+
+  return `${GLM_PROFILE_REVISION}:${fingerprint}`;
 }
 
 function shellArgument(value: string): string {
@@ -147,10 +171,18 @@ export function createGlmAdapter(deps: GlmAdapterDeps) {
     order: 5,
     workToolsTransport: 'mcp',
     workdir: { switch: 'reseed', roots: 'single' },
+    async chatAccess({ cwd, model }: { cwd: string; model: string }) {
+      return {
+        imageInput: glmImageInput(model),
+        webSearch: Boolean(deps.env[GLM_SEARCH_KEY_ENV]?.trim()),
+        goalRoundLimit: GLM_GOAL_ROUND_LIMIT,
+        projectMcpNames: await listGlmProjectMcpNames(cwd),
+      };
+    },
     sessionBinding: {
       /**
-       * Прежний binding содержит только compatibility, режим и прежние флаги прав.
-       * Подготовленный runtime и допуск проверяются до принятия этой формулы ядром.
+       * Сохраняем память из v4 и поддержанную прежнюю формулу на базе compatibility.
+       * Допуск новой сборки проверяется до CAS и запуска с новыми правами.
        */
       legacySecurityProfiles: async (
         config: GlmConfig,
@@ -175,7 +207,12 @@ export function createGlmAdapter(deps: GlmAdapterDeps) {
           strictDb: settings.strictUnknownDbClient === true,
         })).digest('hex');
 
-        return [`${GLM_PROFILE_REVISION}:${fingerprint}`];
+        const endpoint = deps.modelEndpoint ?? buildGlmRoute(mode).baseURL ?? 'zai:built-in-coding-plan';
+
+        return [
+          `${GLM_PROFILE_REVISION}:${fingerprint}`,
+          glmChatSecurityProfile(mode, endpoint, settings, 'grigdesk-glm-policy-v4'),
+        ];
       },
       /**
        * Учётная запись привязки — режим и отпечаток ключа; ключ наружу не выходит.
@@ -210,17 +247,8 @@ export function createGlmAdapter(deps: GlmAdapterDeps) {
         }
 
         const endpoint = deps.modelEndpoint ?? buildGlmRoute(mode).baseURL ?? 'zai:built-in-coding-plan';
-        const fingerprint = createHash('sha256').update(JSON.stringify({
-          profile: GLM_PROFILE_REVISION,
-          policy: GLM_POLICY_REVISION,
-          mode,
-          endpoint,
-          ssh: settings.blockDirectSsh !== false,
-          db: settings.blockDirectDb === true,
-          strictDb: settings.strictUnknownDbClient === true,
-        })).digest('hex');
 
-        return `${GLM_PROFILE_REVISION}:${fingerprint}`;
+        return glmChatSecurityProfile(mode, endpoint, settings, GLM_POLICY_REVISION);
       },
     },
     /**

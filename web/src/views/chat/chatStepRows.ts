@@ -75,7 +75,7 @@ export function foldChatSteps(
     }
 
     if (step.k === 'note' && previous?.k === 'note'
-      && previous.text === step.text && previous.parent === step.parent) {
+      && !step.label && !previous.label && previous.text === step.text && previous.parent === step.parent) {
       previous.times = (previous.times || 1) + 1;
 
       continue;

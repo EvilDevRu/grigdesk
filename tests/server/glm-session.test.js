@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import fs from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import os from 'node:os';
@@ -137,6 +138,20 @@ test('ключ, режим, права и cwd меняют binding, а identity 
   }, {}), security, 'identity сборки не входит в профиль прав');
   assert.notEqual(await binding.securityProfile(f.config, { blockDirectSsh: false }), security, 'SSH');
   assert.notEqual(await binding.securityProfile(f.config, { blockDirectDb: true }), security, 'БД');
+
+  const legacyFingerprint = createHash('sha256').update(JSON.stringify({
+    profile: 'grigdesk-glm-profile-v3',
+    policy: 'grigdesk-glm-policy-v4',
+    mode: 'api',
+    endpoint: 'https://api.z.ai/api/paas/v4',
+    ssh: true,
+    db: false,
+    strictDb: false,
+  })).digest('hex');
+  const legacyProfile = `grigdesk-glm-profile-v3:${legacyFingerprint}`;
+
+  assert.ok((await binding.legacySecurityProfiles(f.config)).includes(legacyProfile));
+  assert.ok(!(await binding.legacySecurityProfiles(f.config, { blockDirectDb: true })).includes(legacyProfile));
 
   // cwd входит в identity привязки ядра; DSH ищет журнал по cwd — сессию из другой папки
   // GLM не продолжает молча новой.

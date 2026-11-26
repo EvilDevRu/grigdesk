@@ -33,7 +33,7 @@ import { pipeline } from 'node:stream/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { isRecord } from '../../../../shared/lib/objects.ts';
+import { isRecord, recordOrEmpty } from '../../../../shared/lib/objects.ts';
 import { BROWSER_USAGE_GUIDANCE } from '../../../../shared/browser/browserTool.ts';
 
 import {
@@ -332,6 +332,7 @@ type InteractionQueue = Omit<PermissionQueue, 'entries'> & {
 // Порт исполнителя в объёме одного интерактивного хода. Каталоги остаются unknown
 // до проверки массива, а модели и ответы несут только поля, которые читает модуль.
 interface ChatExecutor {
+  chatAccess?: ExecutorAdapter['chatAccess'];
   chatSpeed?: ExecutorAdapter['chatSpeed'];
   id: string;
   bin?: ExecutorAdapter['bin'];
@@ -1516,7 +1517,7 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
   }
 
   fastify.addHook('onRequest', async (request) => {
-    if (/^\/api\/chat\/(?:store|workdir|sessions?)(?:\/|\?|$)/.test(request.url)) {
+    if (/^\/api\/chat\/(?:store|workdir|access|sessions?)(?:\/|\?|$)/.test(request.url)) {
       await catalogPreparation;
     }
   });
@@ -1564,6 +1565,38 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
       } : undefined;
 
       return await workdirTransitions.preview(record, candidate);
+    } catch (error) {
+      return workdirFailure(reply, error);
+    }
+  });
+
+  fastify.get<{ Params: { id: string } }>('/api/chat/access/:id', async (request, reply) => {
+    try {
+      const record = await history.readOne(request.params.id);
+      const ref = normalizeModelRef(record?.modelRef);
+      const executor = ref ? await executorResolver(ref.provider) : null;
+
+      if (!record || !ref || !executor?.chatAccess) {
+        return reply.code(404).send({ error: 'chat_access_unavailable' });
+      }
+
+      const workspace = await workspaceOf(record);
+      const owner = await chatBrowserOwners.owner(request.params.id);
+      const tabs = owner && opts.browser?.routing.mode() === 'grigdesk'
+        ? recordOrEmpty(await opts.browser.access.invoke(owner, { action: 'list' }, {
+          signal: AbortSignal.timeout(2500),
+        }).catch(() => null)) : {};
+      const visibleTabs = Array.isArray(tabs.tabs) ? tabs.tabs : [];
+
+      return {
+        ...await executor.chatAccess({ cwd: workspace.cwd, model: ref.model }),
+        writablePath: workspace.cwd,
+        readOnlyPaths: workspace.extraDirs,
+        browser: tabs.ok === true ? 'ready' : 'unavailable',
+        browserTabs: visibleTabs.length,
+        browserTabTitles: visibleTabs.map((tab) => recordOrEmpty(tab).title)
+          .filter((title): title is string => typeof title === 'string' && Boolean(title)).slice(0, 20),
+      };
     } catch (error) {
       return workdirFailure(reply, error);
     }
@@ -4061,6 +4094,7 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
         signal: ac.signal,
         env: { ...baseEnv, MCP_TOOL_TIMEOUT: String(PERM_WAIT_MS), ...compactEnv },
         message: fullMessage,
+        ...(!plan && !slash ? { userMessage: message } : {}),
         cwd,
         extraDirs: uniqueExtraDirs,
         model,
@@ -4280,6 +4314,7 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
           ? {
             ...runArgs,
             message: attempt.message,
+            userMessage: undefined,
             sessionId: attempt.sessionId,
             // Вложения исходного запроса повторно не отправляются: агент сверяет уже
             // сохранённые файлы сам, а каталог вложений остаётся ему доступен.

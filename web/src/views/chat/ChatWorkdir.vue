@@ -100,8 +100,10 @@
                   <span class="workdir-choice-copy">
                     <span class="workdir-choice-heading">
                       <span class="workdir-choice-title">{{ option.title }}</span>
-                      <span v-if="option.additional" class="workdir-caption">
-                        {{ t('core.workdirExtraRepo') }}
+                      <span v-if="option.additional || (showAccess && option.selected)" class="workdir-caption">
+                        {{ t(showAccess
+                          ? (option.selected ? 'core.chatAccessReadWrite' : 'core.chatAccessReadOnly')
+                          : 'core.workdirExtraRepo') }}
                       </span>
                     </span>
                     <span v-if="option.detail" class="workdir-choice-detail">{{ option.detail }}</span>
@@ -159,6 +161,7 @@
               <ProjectIcon class="workdir-icon" name="folder" />
               <span class="workdir-choice-copy">
                 <span class="workdir-choice-title">{{ copy.key }}</span>
+                <span v-if="showAccess" class="workdir-caption">{{ t('core.chatAccessReadOnly') }}</span>
                 <code class="workdir-path">{{ copy.path }}</code>
               </span>
             </li>
@@ -276,6 +279,7 @@ const props = withDefaults(defineProps<{
   embedded?: boolean;
   active?: boolean;
   frozen?: boolean;
+  showAccess?: boolean;
 }>(), {
   embedded: false,
   active: true,

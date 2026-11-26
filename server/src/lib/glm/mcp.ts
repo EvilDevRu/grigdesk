@@ -2,7 +2,10 @@ import path from 'node:path';
 
 import { readProjectMcpServers } from '../deepseek/projectMcp.ts';
 import { glmAccessError } from './env.ts';
-import { GLM_WORK_SERVER_NAME } from './policy.ts';
+import { GLM_WORK_SERVER_NAME, glmMcpServerNameAllowed, glmProjectMcpNameAllowed } from './policy.ts';
+import type { GlmTurnOptions } from './runtime.ts';
+
+export { glmMcpServerNameAllowed } from './policy.ts';
 
 export interface GlmMcpServer {
   name: string;
@@ -13,17 +16,16 @@ export interface GlmMcpServer {
 
 export type GlmMcpExclusion = 'name_invalid' | 'reserved' | 'project_unsupported';
 
-// Имя сервера однозначно читается из имени инструмента `mcp__<сервер>__<инструмент>`:
-// без `__` и без `_` на краях, от двух до 32 символов.
-const SERVER_NAME = /^[A-Za-z0-9](?:[A-Za-z0-9-]|_(?!_))*[A-Za-z0-9]$/u;
 const NOT_READY = 'Служебный MCP grigdesk-work не готов или потерян; действие не выполнено.';
 
 /**
- * Шаблон имени MCP-сервера GLM: 2–32 символа, без `__` и `_` на краях.
- * Имя из одного символа шаблон отсекает сознательно.
+ * Предпросмотр отдаёт только доступные для явного выбора имена.
+ * Чтение конфигурации не запускает проектный процесс.
  */
-export function glmMcpServerNameAllowed(name: string): boolean {
-  return typeof name === 'string' && name.length <= 32 && SERVER_NAME.test(name);
+export async function listGlmProjectMcpNames(cwd: string): Promise<string[]> {
+  const { servers } = await readProjectMcpServers(cwd);
+
+  return servers.map(({ name }) => name).filter(glmProjectMcpNameAllowed);
 }
 
 /**
@@ -64,15 +66,60 @@ export function selectGlmMcpServers({
   return {
     mounted,
     excluded,
-    warnings: excluded.map(({ name, reason }) => `MCP-сервер «${name}» не подключается к GLM: ${
+    warnings: excluded.map(({ name, reason }) => `MCP-сервер «${name}» не подключён к GLM: ${
       reason === 'reserved' ? 'имя зарезервировано GrigDesk'
-        : reason === 'name_invalid' ? 'имя не подходит под шаблон' : 'проектные MCP GLM не использует'}.`),
+        : reason === 'name_invalid' ? 'имя не подходит под шаблон' : 'требуется явный выбор в чате'}.`),
   };
 }
 
 /**
- * Публичный статус MCP карточки: проектные серверы папки GrigDesk не подключаются,
- * поэтому список пуст, а заметка называет только их число — без имён, команд и env.
+ * Только прямой выбор пользователя разрешает показать запрос на запуск процесса.
+ * После подтверждения повторно сверяем выбранную запись и передаём ровно этот снимок.
+ */
+export async function approveGlmProjectMcp(
+  cwd: string, options: GlmTurnOptions,
+): Promise<GlmMcpServer | undefined> {
+  const name = options.userMessage?.trim().match(/^(?:\/goal\s+)?\/mcp\s+(\S+)(?:\s|$)/u)?.[1];
+
+  if (!name) {
+    return;
+  }
+
+  const findServer = async () => (await readProjectMcpServers(cwd)).servers.find((server) => server.name === name);
+  const server = glmProjectMcpNameAllowed(name) ? await findServer() : undefined;
+
+  if (!server) {
+    throw glmAccessError('glm_project_mcp_unknown', 'Выбранный проектный MCP недоступен в рабочей папке.');
+  }
+
+  const answer = await options.onPermission?.({
+    tool: `MCP: ${name}`,
+    source: 'GLM',
+    requiresExplicitUser: true,
+    canRemember: false,
+    signal: options.signal,
+    input: {
+      kind: 'execute',
+      command: [server.command, ...server.args].map((part) => JSON.stringify(part)).join(' '),
+      cwd,
+    },
+  });
+
+  options.signal?.throwIfAborted();
+
+  if (answer?.allow !== true) {
+    throw glmAccessError('glm_project_mcp_declined', 'Запуск проектного MCP не подтверждён.');
+  }
+  if (JSON.stringify(await findServer()) !== JSON.stringify(server)) {
+    throw glmAccessError('glm_project_mcp_changed', 'Настройки проектного MCP изменились во время подтверждения.');
+  }
+
+  return server;
+}
+
+/**
+ * Публичный статус MCP карточки относится к папке приложения.
+ * Выбор сервера производится в чате с фактической рабочей папкой.
  */
 export async function glmMcpStatus(config: { rootDir?: string }) {
   let count = 0;
@@ -83,10 +130,10 @@ export async function glmMcpStatus(config: { rootDir?: string }) {
 
   return {
     state: 'ok' as const,
-    note: `GLM подключает только служебный MCP grigdesk-work. ${count
-      ? `${count} проектн. MCP-сервер(ов) из .mcp.json папки GrigDesk в этой поставке не запускаются.`
-      : 'Проектные MCP-серверы из .mcp.json в этой поставке не запускаются.'}`,
-    emptyText: 'Для GLM проектные MCP не используются: доступен только служебный grigdesk-work.',
+    note: `Служебный MCP grigdesk-work подключается автоматически. ${count
+      ? `${count} проектн. MCP в папке GrigDesk. ` : ''}`
+      + 'В каждом чате доступные проектные серверы определяются его рабочей папкой.',
+    emptyText: 'Чтобы запустить проектные MCP, выберите сервер в окне доступа чата GLM.',
     servers: [],
   };
 }

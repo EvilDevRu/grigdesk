@@ -1,15 +1,15 @@
 {
   "format": 1,
   "profileRevision": "grigdesk-glm-profile-v3",
-  "policyRevision": "grigdesk-glm-policy-v4",
+  "policyRevision": "grigdesk-glm-policy-v5",
   "admission": [
     {
-      "mode": "api",
-      "compatibility": "e283e8ee57dcd06e1caaf2abb0ec186f7fc691ebee04cda0f0cf9873966fab47"
+      "mode": "coding-plan",
+      "compatibility": "3309e596b5bcbed44c57e600f780076f878e8487d2d22634bc0221f4eab7e5d1"
     },
     {
-      "mode": "coding-plan",
-      "compatibility": "1bacf128077cdcd4e10b859227a9ae79677923f01465099add9a872b6ff583eb"
+      "mode": "api",
+      "compatibility": "3e64f54c10875b6109b12d260fc817794e3c3a39f8c68ae368f7e34757017946"
     }
   ]
 }

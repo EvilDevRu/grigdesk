@@ -24,8 +24,12 @@ import {
   GLM_MODEL_UNAVAILABLE,
 } from './contract.ts';
 import type { GlmAccessMode } from './contract.ts';
-import { assertGlmRuntimeHome, buildGlmChildEnv, glmAccessError, resolveGlmAccess } from './env.ts';
+import {
+  GLM_SEARCH_KEY_ENV, assertGlmRuntimeHome, buildGlmChildEnv, glmAccessError, resolveGlmAccess,
+} from './env.ts';
 import { classifyGlmModelError } from './modelErrors.ts';
+import { createGlmGoalTurn, resumeGlmGoal } from './goalTurn.ts';
+import { approveGlmProjectMcp } from './mcp.ts';
 import { assertGlmFactoryContext } from './factoryContext.ts';
 import type { GlmFactoryTurnContext } from './factoryContext.ts';
 import {
@@ -62,6 +66,7 @@ export interface GlmRuntimeDeps {
 export interface GlmTurnOptions {
   config: DeepSeekRuntimeConfig & { glmRuntimeHome?: string };
   message?: string;
+  userMessage?: string;
   model?: string;
   effort?: string;
   cwd?: string;
@@ -306,8 +311,12 @@ export async function runGlmTurn(options: GlmTurnOptions, deps: GlmRuntimeDeps) 
   // STATE_DIR — единственный workspace проверяющего узла. Рабочие деревья читаются
   // по абсолютным путям, а native write/edit и shell остаются в одной песочнице DSH.
   const factory = selected.factory;
+  const goalRequested = !factory && /^\/goal\s+\S/u.test(options.userMessage?.trim() ?? '');
+  const goalResume = goalRequested && options.userMessage?.trim() === '/goal resume';
+  const webSearch = !factory && Boolean(deps.env[GLM_SEARCH_KEY_ENV]?.trim());
   const cwd = await fs.realpath(factory?.context.filesystem === 'state-only'
     ? factory.context.stateDir! : options.cwd!);
+  const approvedMcp = factory ? undefined : await approveGlmProjectMcp(cwd, options);
   const runtimeHome = assertGlmRuntimeHome(String(options.config.glmRuntimeHome ?? ''));
   const home = runtime.kind === 'binary' ? glmChatHome(runtimeHome, options.chatKey!)
     : glmChatHome(runtimeHome, identity, options.chatKey!);
@@ -377,6 +386,9 @@ export async function runGlmTurn(options: GlmTurnOptions, deps: GlmRuntimeDeps) 
       hostServer: GLM_FACTORY_STATUS_SERVER,
     } : {}),
     workTools,
+    approvedMcp,
+    goalRequested,
+    webSearch,
     modelEndpoint: deps.modelEndpoint,
     egressGuard: deps.egressGuard,
     warn: (message) => options.log?.warn?.({ chatKey: options.chatKey }, message),
@@ -385,6 +397,7 @@ export async function runGlmTurn(options: GlmTurnOptions, deps: GlmRuntimeDeps) 
     source: deps.env,
     dshHome: launch.dshHome,
     mode: selected.accessMode,
+    webSearch,
   }), deps.env, Boolean(factory));
   const state = {
     promptAttempted: false,
@@ -436,7 +449,10 @@ export async function runGlmTurn(options: GlmTurnOptions, deps: GlmRuntimeDeps) 
       overlayPath: launch.overlayPath,
       cwd,
       env,
-      message: String(options.message || ''),
+      message: goalRequested
+        ? 'Пользователь явно выбрал работу по цели через /goal. Вызови штатные инструменты цели.\n\n'
+          + String(options.message || '')
+        : String(options.message || ''),
       sessionId,
       model: options.model,
       effort: selected.effort,
@@ -474,10 +490,13 @@ export async function runGlmTurn(options: GlmTurnOptions, deps: GlmRuntimeDeps) 
         env,
         signal: options.signal,
         spawnProcess: deps.spawn,
+        projectMcp: approvedMcp?.name,
         ...(factory ? { hostServer: GLM_FACTORY_STATUS_SERVER } : {}),
       }),
       variant: {
         labels: LABELS,
+        ...(goalRequested ? { goal: createGlmGoalTurn() } : {}),
+        ...(goalResume ? { startTurn: resumeGlmGoal } : {}),
         ...(launch.nativeGate ? {
           createObserver: (context) => createGlmTreeObserver({
             ...context,

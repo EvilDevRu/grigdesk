@@ -9,10 +9,15 @@ import type { NativeGateIdentity } from './nativeGuard.ts';
 import { DEEPSEEK_PIN } from '../deepseek/contract.ts';
 import { buildLaunchFiles } from '../deepseek/profile.ts';
 import type { DeepSeekLaunchFiles, YamlValue } from '../deepseek/profile.ts';
-import { GLM_FACTORY_PROFILE_REVISION, GLM_PROFILE_REVISION, buildGlmRoute } from './contract.ts';
+import {
+  GLM_FACTORY_PROFILE_REVISION, GLM_GOAL_ROUND_LIMIT, GLM_NATIVE_TOOLS, GLM_PROFILE_REVISION,
+  buildGlmRoute, glmImageInput,
+} from './contract.ts';
 import type { GlmAccessMode } from './contract.ts';
+import { GLM_SEARCH_KEY_ENV } from './env.ts';
 import { glmFactoryPolicy, glmFactoryToolPolicy } from './factoryPolicy.ts';
 import type { GlmFactoryFilesystem } from './factoryPolicy.ts';
+import { GLM_WORK_SERVER_NAME, glmMcpToolName } from './policy.ts';
 import { helperCommand, runtimeKind } from '../runtimePaths.ts';
 import { shellQuote as quoteShellArgument } from '../../../../shared/lib/shellQuote.ts';
 
@@ -32,6 +37,9 @@ export interface GlmLaunchFilesOptions {
   };
   // Сырые имена инструментов grigdesk-work этого запуска: hook пропускает только их.
   workTools?: readonly string[];
+  goalRequested?: boolean;
+  webSearch?: boolean;
+  projectMcp?: string;
   mcpServers?: readonly {
     name: string;
     command: string;
@@ -94,6 +102,12 @@ export async function buildGlmLaunchFiles(
   // Режим и approval этапа выбирает только проверенная функция политики, до записи файлов.
   const factory = options.factory ? glmFactoryPolicy(options.factory.filesystem) : null;
   const nativeGate = !factory && options.transport === 'web';
+  const visibleTools = [
+    ...GLM_NATIVE_TOOLS.filter((name) => (name !== 'web_search' || options.webSearch === true)
+      && (name !== 'read_image' || glmImageInput(options.model))),
+    'get_goal', 'subagent', 'subagent_fork',
+    ...(options.goalRequested ? ['create_goal', 'update_goal'] : []),
+  ];
   const launchId = randomUUID();
   const route = {
     ...buildGlmRoute(options.accessMode),
@@ -134,6 +148,10 @@ export async function buildGlmLaunchFiles(
         id: 'agent-presets', config: {
           default: 'grigdesk-glm', includeUserRoot: false,
         }
+      }, {
+        id: 'goal', config: { defaultMaxGoalRounds: GLM_GOAL_ROUND_LIMIT },
+      }, {
+        id: 'web-search-deepseek', config: { apiKeyEnv: GLM_SEARCH_KEY_ENV },
       }] : []),
       { id: 'llm-deepseek', disabled: true },
       { id: 'session-title-llm', disabled: true },
@@ -148,7 +166,9 @@ export async function buildGlmLaunchFiles(
         config: {
           command: `${policyCommand} --native-gate`,
           policyFile,
-          launchId
+          launchId,
+          visibleTools,
+          workToolNames: (options.workTools ?? []).map((name) => glmMcpToolName(GLM_WORK_SERVER_NAME, name)),
         },
       }] : []),
       {
@@ -184,6 +204,9 @@ export async function buildGlmLaunchFiles(
     ssh: options.hooks.ssh,
     db: options.hooks.db,
     strictDb: options.hooks.strictDb,
+    ...(nativeGate ? { search: options.webSearch === true } : {}),
+    ...(nativeGate && options.goalRequested ? { goal: true } : {}),
+    ...(nativeGate && options.projectMcp ? { projectMcp: options.projectMcp } : {}),
     ...(nativeGate ? { delegation: 'foreground-v1' } : {}),
   };
 

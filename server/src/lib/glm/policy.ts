@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 
 import { evaluateDirectCommand } from '../executors/_directSshPolicy.ts';
 import {
+  GLM_GOAL_ROUND_LIMIT,
   GLM_MCP_HASH_LENGTH,
   GLM_MCP_NAME_LIMIT,
   GLM_NATIVE_TOOLS,
@@ -14,6 +15,9 @@ export interface GlmToolPolicy {
   db: boolean;
   strictDb: boolean;
   delegation?: 'foreground-v1';
+  goal?: true;
+  search?: boolean;
+  projectMcp?: string;
 }
 
 export type GlmToolKind = 'read' | 'search' | 'edit' | 'execute' | 'question' | 'plan' | 'mcp' | 'other';
@@ -25,6 +29,25 @@ export interface GlmToolDecision {
 }
 
 export const GLM_WORK_SERVER_NAME = 'grigdesk-work';
+
+// Точное имя сервера отделяется от имени инструмента по границе `__`.
+const SERVER_NAME = /^[A-Za-z0-9](?:[A-Za-z0-9-]|_(?!_))*[A-Za-z0-9]$/u;
+
+/**
+ * Короткое имя без двойного подчёркивания сохраняет границу MCP-сервера.
+ * Она остаётся читаемой и в нормализованном имени инструмента с хэшем.
+ */
+export function glmMcpServerNameAllowed(name: string): boolean {
+  return typeof name === 'string' && name.length <= 32 && SERVER_NAME.test(name);
+}
+
+/**
+ * Префикс GrigDesk зарезервирован для служебных серверов.
+ * Проектная регистрация не может получить разрешения под служебным именем.
+ */
+export function glmProjectMcpNameAllowed(name: string): boolean {
+  return glmMcpServerNameAllowed(name) && !/^grigdesk-/iu.test(name);
+}
 
 const KINDS: Readonly<Record<string, GlmToolKind>> = Object.freeze({
   read: 'read',
@@ -47,6 +70,9 @@ const KINDS: Readonly<Record<string, GlmToolKind>> = Object.freeze({
   job_kill: 'execute',
   ask_user_question: 'question',
   todo_write: 'plan',
+  get_goal: 'read',
+  create_goal: 'plan',
+  update_goal: 'plan',
 });
 
 /**
@@ -97,6 +123,9 @@ export function parseGlmToolPolicy(value: unknown): GlmToolPolicy {
     || policy.workTools.some((name) => typeof name !== 'string' || !name)
     || typeof policy.ssh !== 'boolean' || typeof policy.db !== 'boolean'
     || typeof policy.strictDb !== 'boolean'
+    || policy.goal !== undefined && policy.goal !== true
+    || policy.search !== undefined && typeof policy.search !== 'boolean'
+    || policy.projectMcp !== undefined && !glmProjectMcpNameAllowed(policy.projectMcp)
     || policy.delegation !== undefined && policy.delegation !== 'foreground-v1') {
     throw new TypeError('Политика инструментов GLM повреждена');
   }
@@ -107,6 +136,27 @@ export function parseGlmToolPolicy(value: unknown): GlmToolPolicy {
     db: policy.db,
     strictDb: policy.strictDb,
     ...(policy.delegation ? { delegation: policy.delegation } : {}),
+    ...(policy.goal ? { goal: policy.goal } : {}),
+    ...(policy.search !== undefined ? { search: policy.search } : {}),
+    ...(policy.projectMcp ? { projectMcp: policy.projectMcp } : {}),
+  };
+}
+
+/**
+ * Цель может запускать новые раунды, поэтому мутации доступны только по запросу человека.
+ * Предел проверяется до изменения состояния, включая редактирование существующей цели.
+ */
+function decideGoal(name: string, input: unknown, policy: GlmToolPolicy): GlmToolDecision {
+  const max = (input as { max_goal_rounds?: unknown } | null)?.max_goal_rounds;
+  const valid = max === undefined || typeof max === 'number'
+    && Number.isSafeInteger(max) && max >= 1 && max <= GLM_GOAL_ROUND_LIMIT;
+  const allow = valid && (policy.goal === true || name === 'get_goal');
+  const reason = valid ? 'Для изменения цели используйте /goal' : `Лимит цели — ${GLM_GOAL_ROUND_LIMIT}`;
+
+  return {
+    allow,
+    kind: glmToolKind(name),
+    reason: allow ? '' : reason,
   };
 }
 
@@ -117,8 +167,18 @@ export function parseGlmToolPolicy(value: unknown): GlmToolPolicy {
 export function decideGlmTool(name: string, input: unknown, policy: GlmToolPolicy): GlmToolDecision {
   const kind = glmToolKind(name);
 
+  if (policy.delegation === 'foreground-v1' && ['get_goal', 'create_goal', 'update_goal'].includes(name)) {
+    return decideGoal(name, input, policy);
+  }
+
+  if (name === 'web_search' && policy.search === false) {
+    return { allow: false, kind, reason: 'Веб-поиск GLM не настроен' };
+  }
+
   if (name.startsWith('mcp__')) {
-    const allowed = policy.workTools.some((tool) => glmMcpToolName(GLM_WORK_SERVER_NAME, tool) === name);
+    const allowed = policy.workTools.some((tool) => glmMcpToolName(GLM_WORK_SERVER_NAME, tool) === name)
+      || Boolean(policy.delegation === 'foreground-v1' && policy.projectMcp
+        && name.startsWith(`mcp__${policy.projectMcp}__`));
 
     return {
       allow: allowed,

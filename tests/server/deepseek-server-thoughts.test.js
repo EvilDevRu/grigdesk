@@ -7,6 +7,7 @@ import { classifyTurnFailure } from '../../server/src/lib/chat/turnFailures.ts';
 import { DSH_TURN_FAILURE_RULES } from '../../server/src/lib/deepseek/turnFailureRules.ts';
 import { DeepSeekWebClient } from '../../server/src/lib/deepseek/serverClient.ts';
 import { runDeepSeekServerTurn, storageMessageId } from '../../server/src/lib/deepseek/serverTurn.ts';
+import { createGlmGoalTurn } from '../../server/src/lib/glm/goalTurn.ts';
 
 const requireServer = createRequire(new URL('../../server/package.json', import.meta.url));
 const Fastify = requireServer('fastify');
@@ -51,7 +52,7 @@ async function runWire(
   t,
   frames,
   reason = { kind: 'completed' },
-  { snapshot = { type: 'snapshot', records: [] }, observeProgress } = {},
+  { snapshot = { type: 'snapshot', records: [] }, observeProgress, goal = false } = {},
 ) {
   const app = Fastify();
   const subscriptions = new Map();
@@ -138,6 +139,12 @@ async function runWire(
       });
     },
     onRunMetadata: (value) => metadata.push(value),
+    ...(goal ? { variant: {
+      labels: { stopped: 'stopped', blocked: 'blocked', modelError: 'error', action: 'tool', source: 'GLM' },
+      autoApprove: () => false,
+      classifyModelError: () => null,
+      goal: createGlmGoalTurn(),
+    } } : {}),
     startServer: async () => ({ client, stop: async () => {} }),
   }).catch((error) => error);
 
@@ -149,6 +156,44 @@ async function runWire(
     metadata,
   };
 }
+
+test('Цель GLM сохраняет запущенный транспорт до конца следующего раунда', async (t) => {
+  const goal = { phase: 'active', maxGoalRounds: 2 };
+  const frames = [
+    wireEvent('goal/change', { operation: 'create', goal, roundsStarted: 0 }),
+    wireEvent('turn/end', { reason: { kind: 'completed' } }),
+    wireEvent('turn/start'),
+    wireEvent('user/message', { source: { kind: 'goal', round: 1 } }),
+    wireEvent('goal/change', { operation: 'complete', goal: { ...goal, phase: 'complete' }, roundsStarted: 1 }),
+  ];
+
+  const { broadcast, result } = await runWire(t, frames, undefined, { goal: true });
+
+  assert.equal(result.stopReason, 'completed');
+  assert.deepEqual(broadcast.filter((step) => step.label).map((step) => [step.label, step.phase, step.round]), [
+    ['goalState', 'active', 0],
+    ['goalRound', undefined, 1],
+    ['goalState', 'complete', 1],
+  ]);
+});
+
+test('Исчерпание цели между ходами завершает ожидание нативного раунда', async (t) => {
+  const goal = { phase: 'active', maxGoalRounds: 1 };
+  const frames = [
+    wireEvent('goal/change', { operation: 'create', goal }),
+    wireEvent('turn/end', { reason: { kind: 'completed' } }),
+    wireEvent('goal/change', {
+      operation: 'block',
+      goal: { ...goal, phase: 'blocked', blockedReason: { code: 'round-limit', message: 'Лимит цели' } },
+      roundsStarted: 1,
+    }),
+  ];
+
+  const { broadcast, result } = await runWire(t, frames, undefined, { goal: true });
+
+  assert.equal(result.stopReason, 'completed');
+  assert.equal(broadcast.at(-1).text, 'Лимит цели');
+});
 
 test('web: сотни фрагментов дают одно размышление в ленте и трансляции', async (t) => {
   const fragments = Array.from({ length: 50 }, () => [

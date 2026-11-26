@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import { GLM_GATE_REVISION, glmGateHash, parseGlmGateProof } from './glmGateProtocol.mjs';
 
 export const name = 'grigdesk-glm-gate';
-export const inject = ['tools', 'agents', 'shell', 'sessionProjections'];
+export const inject = ['tools', 'agents', 'shell', 'sessionProjections', 'approval'];
 
 /**
  * Native gate принадлежит GLM-процессу и проверяет все registry executions.
@@ -18,6 +18,8 @@ export async function apply(ctx, config) {
   }
 
   const document = JSON.parse(readFileSync(config.policyFile, 'utf8'));
+  const projectPrefix = document.projectMcp ? `mcp__${document.projectMcp}__` : '';
+  const isProjectTool = (tool) => projectPrefix && tool.startsWith(projectPrefix);
   const policyHash = glmGateHash(document);
   const preflight = { launchId: config.launchId, policyHash };
   const check = await ctx.shell.run(ctx.shell.resolve({
@@ -32,8 +34,24 @@ export async function apply(ctx, config) {
     throw new Error('Helper native gate GLM не готов');
   }
 
+  if (Array.isArray(config.visibleTools)) {
+    const visible = new Set(config.visibleTools);
+    const work = new Set(config.workToolNames ?? []);
+
+    ctx.provide('grigdeskGlmToolVisible', (tool, agent) => {
+      const child = agent.session.header.origin === 'subagent';
+
+      if (child && ['create_goal', 'update_goal', 'ask_user_question'].includes(tool)) {
+        return false;
+      }
+
+      return visible.has(tool) || work.has(tool) || !child && Boolean(isProjectTool(tool));
+    });
+  }
+
   const active = new AsyncLocalStorage();
   const proofs = new WeakMap();
+  const projectGrants = new WeakSet();
   const lineage = new Map();
   const ready = new Set();
   let fatal = false;
@@ -112,7 +130,31 @@ export async function apply(ctx, config) {
       proofs.set(exec, proof);
       exec.agent.session.append('grigdesk/glm-policy', proof);
 
-      return proof.decision === 'deny' ? { kind: 'deny', reason: proof.reason } : next();
+      if (proof.decision === 'deny') {
+        return { kind: 'deny', reason: proof.reason };
+      }
+      if (isProjectTool(exec.name)) {
+        if (!ctx.approval || !ctx.agents.roots().includes(exec.agent)) {
+          return { kind: 'deny', reason: 'Проектный MCP требует решения человека в основном чате' };
+        }
+
+        const approval = await ctx.approval.request({
+          agent: exec.agent,
+          toolName: exec.name,
+          callId: exec.callId,
+          reason: 'Вызов проектного MCP',
+          signal: exec.signal,
+        });
+
+        if (approval !== 'allowed-once' || exec.signal.aborted) {
+          return { kind: 'deny', reason: 'Вызов проектного MCP не подтверждён' };
+        }
+
+        parseGlmGateProof(JSON.stringify(proof), bindingOf(exec));
+        projectGrants.add(exec);
+      }
+
+      return next();
     } catch {
       if (!exec.signal.aborted) {
         broken(exec.agent);
@@ -131,6 +173,10 @@ export async function apply(ctx, config) {
       }
 
       parseGlmGateProof(JSON.stringify(proof), bindingOf(exec));
+
+      if (isProjectTool(exec.name) && !projectGrants.has(exec)) {
+        return 'Вызов проектного MCP требует разового подтверждения';
+      }
 
       return undefined;
     } catch {

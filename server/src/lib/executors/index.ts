@@ -236,6 +236,7 @@ export interface ExecutorAuth {
 // Общая часть запуска: её используют и чат, и арбитр. Дополнительные каналы
 // взаимодействия описывает вызывающая подсистема, а не имя конкретного провайдера.
 export interface ExecutorRunInput {
+  userMessage?: string;
   config: Partial<GrigDeskConfig>;
   message?: string;
   model?: string;
@@ -349,6 +350,8 @@ export interface PermissionModeContext {
 }
 
 export interface ExecutorAdapter {
+  chatAccess?: (input: { cwd: string; model: string }) =>
+    Promise<import('../../../../shared/chat/chatAccess.ts').ExecutorChatAccess>;
   catalogAccessScope?: (config: unknown) => string | Promise<string>;
   accessProfiles?: AccessCapability;
   chatSpeed?: ChatSpeedCapability & {

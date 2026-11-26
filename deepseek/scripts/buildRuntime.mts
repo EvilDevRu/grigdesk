@@ -459,6 +459,24 @@ export async function buildDeepSeekRuntime(options: {
     await fs.writeFile(eventCatalog, catalogSource.replace(catalogAnchor,
       `${catalogAnchor}\n${GLM_SESSION_EVENTS.map((name) => `  '${name}',`).join('\n')}`));
 
+    // Ограничение GLM входит в запрос и persistence header до вычисления отпечатка.
+    // В других процессах сервис отсутствует, и штатный набор Harness сохраняется.
+    const agentLoop = path.join(staging, 'packages/core/agent-loop/src/agent.ts');
+    const assemblySource = await fs.readFile(agentLoop, 'utf8');
+    const assemblyAnchor = '    return { ...decision, assembly }';
+
+    if (assemblySource.split(assemblyAnchor).length !== 2) {
+      throw new Error('Изменилось место сборки инструментов Harness');
+    }
+
+    await fs.writeFile(agentLoop, assemblySource.replace(assemblyAnchor, [
+      "    const visible = this.loopCtx.get('grigdeskGlmToolVisible' as never) as",
+      '      ((name: string, agent: Agent) => boolean) | undefined',
+      '    if (!visible) return { ...decision, assembly }',
+      '    const tools = assembly.tools.filter(({ name }) => visible(name, this))',
+      '    return { ...decision, assembly: { ...assembly, tools } }',
+    ].join('\n')));
+
     const closure = await discoverRuntimeClosure(staging, dependencyRoot);
     const composition = await readRuntimeComposition(staging, dependencyRoot);
     const dynamicImports = JSON.parse(await fs.readFile(

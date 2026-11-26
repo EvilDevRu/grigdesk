@@ -1,9 +1,11 @@
 # Политика инструментов GLM и разрешения
 
-В web-чате профиля `grigdesk-glm-profile-v3` с политикой `grigdesk-glm-policy-v4`
+В web-чате профиля `grigdesk-glm-profile-v3` с политикой `grigdesk-glm-policy-v5`
 каждый вызов проходит [native gate](glm-native-gate.md), включая
 окончательный guard перед эффектом. Chat policy дополнительно разрешает только foreground
 `subagent` и `subagent_fork` без смены модели и прав ребёнка.
+Чатовая политика v5 также ограничивает схемы запроса, поддерживает цели по явной команде,
+настроенный веб-поиск и выбранный проектный MCP. [Контракт чата](glm-chat-access.md).
 
 Ниже описан прежний контракт hook, который сохраняется у Factory и ACP-каталога.
 В этой ветке каждый вызов проходит server-owned PreToolUse hook с matcher `*`

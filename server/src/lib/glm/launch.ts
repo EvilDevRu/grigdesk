@@ -8,8 +8,9 @@ import { readProjectMcpServers } from '../deepseek/projectMcp.ts';
 import type { DeepSeekRuntimeDescriptor } from '../deepseek/runtimeProcess.ts';
 import { startDeepSeekServer } from '../deepseek/serverRuntime.ts';
 import type { DeepSeekServerProcess, StartDeepSeekServerOptions } from '../deepseek/serverRuntime.ts';
-import { assertGlmRuntimeHome } from './env.ts';
+import { assertGlmRuntimeHome, glmAccessError } from './env.ts';
 import { glmMcpStartupError, selectGlmMcpServers } from './mcp.ts';
+import type { GlmMcpServer } from './mcp.ts';
 import { buildGlmLaunchFiles } from './profile.ts';
 import { adoptLegacyChatHome } from '../deepseek/legacyCutover.ts';
 import type { GlmLaunchFilesOptions } from './profile.ts';
@@ -56,10 +57,10 @@ export async function adoptLegacyGlmHome(runtimeHome: string, identity: string, 
 
 /**
  * Готовит один запуск процесса GLM: private home чата, одноразовый каталог запуска,
- * server-owned settings-документ и overlay. Проектные MCP не подключаются (факт G2):
- * каждый проектный сервер даёт предупреждение, а в overlay попадает только grigdesk-work.
+ * server-owned settings-документ и overlay. Проектный сервер приходит после выбора
+ * и подтверждения конкретного процесса, служебные серверы проходят прежний фильтр.
  */
-export async function prepareGlmLaunch(options: GlmLaunchOptions) {
+export async function prepareGlmLaunch(options: GlmLaunchOptions & { approvedMcp?: GlmMcpServer }) {
   const runtimeHome = assertGlmRuntimeHome(options.runtimeHome);
 
   if (!/^[a-f0-9]{64}$/u.test(options.identity) || !options.chatKey) {
@@ -82,7 +83,7 @@ export async function prepareGlmLaunch(options: GlmLaunchOptions) {
   const project = await readProjectMcpServers(options.cwd);
   const selected = selectGlmMcpServers({
     chat: options.mcpServers ?? [],
-    project: project.servers,
+    project: project.servers.filter(({ name }) => name !== options.approvedMcp?.name),
     ...(options.hostServer ? { hostServer: options.hostServer } : {}),
   });
 
@@ -98,7 +99,8 @@ export async function prepareGlmLaunch(options: GlmLaunchOptions) {
     ...options,
     launchDir,
     settingsDocument,
-    mcpServers: selected.mounted,
+    projectMcp: options.approvedMcp?.name,
+    mcpServers: options.approvedMcp ? [...selected.mounted, options.approvedMcp] : selected.mounted,
   });
 
   return {
@@ -122,6 +124,7 @@ export async function startGlmProcess(options: {
   spawnProcess?: StartDeepSeekServerOptions['spawnProcess'];
   startServer?: (options: StartDeepSeekServerOptions) => Promise<DeepSeekServerProcess>;
   hostServer?: string;
+  projectMcp?: string;
 }): Promise<DeepSeekServerProcess> {
   let server: DeepSeekServerProcess;
   let diagnostics = '';
@@ -149,6 +152,10 @@ export async function startGlmProcess(options: {
   } catch (error) {
     if ((error as { code?: unknown }).code !== 'deepseek_binary_cleanup') {
       await fs.rm(options.launch.launchDir, { recursive: true, force: true });
+    }
+
+    if (options.projectMcp && glmMcpStartupError(diagnostics, options.projectMcp)) {
+      throw glmAccessError('glm_project_mcp_not_ready', 'Выбранный проектный MCP не запустился.');
     }
 
     throw glmMcpStartupError(diagnostics, options.hostServer) ?? error;

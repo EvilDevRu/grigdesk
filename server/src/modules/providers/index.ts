@@ -357,6 +357,7 @@ async function providersModule(
         capabilities: {
           ...(ex.legacyTextStepDeltas ? { legacyTextStepDeltas: true } : {}),
           chatAutoCompact: universal && (ex.chatAutoCompact === true || !!ex.autoCompactEnv),
+          ...(chatEnabled && ex.chatAccess ? { chatAccess: true } : {}),
           scopedWorkspace: chatEnabled && await supportsScopedWorkspace(ex, config),
           untrustedText: chatEnabled
             && typeof ex.runUntrusted === 'function'

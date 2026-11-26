@@ -48,7 +48,8 @@ packageId и SHA выбранного ELF, а также [HTTP-ошибки мо
   Background/continuable, прямые child approvals/questions пока закрыты.
 - Legacy Factory/ACP сохраняют hook. Его fail-open ограничение не относится к native gate
   профиля чата v3: аварийный hook там мог пропустить эффект до реакции серверного сторожа.
-- Проектные MCP в первую поставку не входят: DSH не спрашивает approval для MCP-инструментов.
+- Проектный MCP выбирается на ход, а вызовы подтверждаются в основном чате.
+  [Доступ в чате GLM](glm-chat-access.md).
 - `ZAI_API_KEY` и `ZAI_CODING_API_KEY` в окружении службы наследуют дочерние процессы других
   исполнителей (Claude, Codex, Kimi) — так же, как сегодня `DEEPSEEK_API_KEY`.
 - Публикация новых ELF DSH требует зелёных compiled-тестов GLM. Совместимые

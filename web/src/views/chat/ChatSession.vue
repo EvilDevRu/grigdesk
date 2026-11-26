@@ -1,5 +1,6 @@
 <template>
-  <div v-if="sess" class="cs" :class="{ frozen, 'options-open': optionsOpen }" :style="composerStyle"
+  <div v-if="sess" ref="sessionRoot" class="cs" :class="{ frozen, 'options-open': optionsOpen }"
+       :style="composerStyle"
        @dragenter.prevent="onDragEnter" @dragover.prevent @dragleave="onDragLeave" @drop.prevent="onDrop">
     <!-- Оверлей при перетаскивании файла -->
     <div v-if="dragOver" class="drop-overlay">
@@ -113,7 +114,8 @@
               </template>
             </UiTooltip>
             <ChatWorkdir :sid="sid" :embedded="phoneLayout"
-                         :active="!phoneLayout || optionsOpen" :frozen="frozen" />
+                         :active="!phoneLayout || optionsOpen" :frozen="frozen"
+                         :show-access="current.provider?.capabilities?.chatAccess === true" />
           </div>
         </Teleport>
       </div>
@@ -355,6 +357,11 @@
 
     </UiInlineMessage>
 
+    <ChatAccessPanel v-if="accessOpen && current.provider?.capabilities?.chatAccess"
+                     :chat-id="sid" :messages="sess.messages" :running="sess.sending || sess.compacting"
+                     :has-draft="Boolean(input.trim())"
+                     @close="accessOpen = false"
+                     @prepare="prepareAccessCommand" @navigate="navigateFromAccess" />
     <UiDialog v-model:open="optionsOpen" size="compact" :title="t('core.conversationOptions')"
               class="phone-chat-options" data-role="chat-options" data-ui-workspace data-ui-touch
               data-ui-chat-options
@@ -729,6 +736,14 @@
         <div v-if="interimSpeech" class="speech-interim" data-testid="speech-interim">{{ t('core.chatSlyshu') }} {{ interimSpeech }}</div>
         <div class="composer">
           <ChatKeyboardLayout @visibility-change="keyboardLayoutVisible = $event" />
+          <UiIconButton v-if="current.provider?.capabilities?.chatAccess" role="peer"
+                        data-context="chat-access" :label="t('core.chatAccessTitle')"
+                        v-tooltip="t('core.chatAccessTitle')" @click="accessOpen = true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+              <circle cx="12" cy="12" r="9" />
+              <path d="M12 11v6m0-10v2" />
+            </svg>
+          </UiIconButton>
           <UiFilePicker
             data-role="chat-attachment"
             density="compact"
@@ -849,6 +864,7 @@ import {
 } from './chatLayout.ts';
 
 import ChatWorkdir from './ChatWorkdir.vue';
+import ChatAccessPanel from './ChatAccessPanel.vue';
 import ChatKeyboardLayout from './ChatKeyboardLayout.vue';
 import { chatWorkdirLabel } from '../../../../shared/chat/chatWorkdir.ts';
 import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue';
@@ -911,6 +927,7 @@ const optionsOpen = ref(false);
 const workspaceOptionsHost = ref<HTMLElement | null>(null);
 const controlOptionsHost = ref<HTMLElement | null>(null);
 const contextOptionsHost = ref<HTMLElement | null>(null);
+const sessionRoot = ref<HTMLElement | null>(null);
 const phoneOptionsMedia = window.matchMedia('(max-width: 600px)');
 const phoneLayout = ref(phoneOptionsMedia.matches);
 
@@ -1987,6 +2004,45 @@ onUnmounted(() => document.removeEventListener('visibilitychange', markRead));
 
 // ── Ввод ──
 const input = ref(sess.value?.draft || '');
+const accessOpen = ref(false);
+
+/**
+ * Используем штатные поля модели и папки, в том числе внутри настроек телефона.
+ * После закрытия окна доступа фокус получает выбранное поле разговора.
+ */
+async function navigateFromAccess(target: 'workspace' | 'model') {
+  accessOpen.value = false;
+
+  if (phoneLayout.value) {
+    optionsOpen.value = true;
+  }
+
+  await nextTick();
+
+  const selector = target === 'workspace' ? '[data-context="chat-workdir"]' : '[data-role="chat-model"]';
+  const optionsHost = target === 'workspace' ? workspaceOptionsHost.value : controlOptionsHost.value;
+  const container = phoneLayout.value ? optionsHost : sessionRoot.value;
+
+  container?.querySelector<HTMLElement>(selector)?.focus();
+}
+
+/**
+ * Выбор из окна доступа заполняет черновик с явной командой пользователя.
+ * Существующий текст сохраняется, отправка остаётся обычным действием чата.
+ */
+async function prepareAccessCommand(command: string) {
+  const draft = input.value.trimStart();
+
+  if (command.startsWith('/mcp ') && draft.startsWith('/goal ')) {
+    input.value = `/goal ${command} ${draft.slice(6)}`;
+  } else if (draft !== command && !draft.startsWith(`${command} `)) {
+    input.value = `${command} ${draft}`;
+  }
+
+  accessOpen.value = false;
+  await nextTick();
+  taEl.value?.focus();
+}
 const body = ref<HTMLElement | null>(null);
 
 function scrollDown() {

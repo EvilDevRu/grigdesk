@@ -21,7 +21,7 @@ const TEXT = { updates: [{ sessionUpdate: 'agent_message_chunk', content: { text
  * Временный Fastify с общим auth guard, карточками исполнителей и модулем чата.
  * GLM — DI-адаптер на фейковом DSH web; каждый запуск хода виден тесту.
  */
-async function fixture(t, scenario = TEXT) {
+async function fixture(t, scenario = TEXT, { isolatedWorkdir = false } = {}) {
   const runtime = await createGlmFakeRuntime(t, scenario);
   const app = Fastify({ logger: false });
   const events = [];
@@ -77,6 +77,7 @@ async function fixture(t, scenario = TEXT) {
       chat: {
         id: 'glm-chat',
         modelRef: { provider: 'glm', model: MODEL },
+        ...(isolatedWorkdir ? { workdir: { kind: 'path', path: runtime.root } } : {}),
         messages: [],
         revision: 0,
       },
@@ -127,10 +128,11 @@ test('auth guard закрывает карточку, каталог и ход G
   const anonymous = await Promise.all([
     f.app.inject('/api/providers'),
     f.app.inject('/api/providers/glm/mcp'),
+    f.app.inject('/api/chat/access/glm-chat'),
     f.chat({}, { anonymous: true }),
   ]);
 
-  assert.deepEqual(anonymous.map((response) => response.statusCode), [401, 401, 401]);
+  assert.deepEqual(anonymous.map((response) => response.statusCode), [401, 401, 401, 401]);
   assert.equal(f.runs.length, 0);
   assert.equal(f.children.length, 0);
 
@@ -141,6 +143,24 @@ test('auth guard закрывает карточку, каталог и ход G
   assert.equal(providers.statusCode, 200, providers.body);
   assert.equal(card.chatEnabled, true);
   assert.equal(card.sessionBinding, true);
+});
+
+test('Доступ чата GLM описывает выбранную папку без запуска модели и проектного MCP', async (t) => {
+  const f = await fixture(t, TEXT, { isolatedWorkdir: true });
+
+  await fs.writeFile(path.join(f.root, '.mcp.json'), JSON.stringify({ mcpServers: {
+    fixture: { command: process.execPath, args: ['synthetic-secret-argument'] },
+  } }));
+
+  const response = await f.app.inject({ url: '/api/chat/access/glm-chat', headers: f.headers });
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.json().writablePath, f.root);
+  assert.deepEqual(response.json().projectMcpNames, ['fixture']);
+  assert.equal(response.json().imageInput, false);
+  assert.equal(response.json().browser, 'unavailable');
+  assert.doesNotMatch(response.body, /synthetic-secret-argument/u);
+  assert.equal(f.children.length, 0);
 });
 
 /**
