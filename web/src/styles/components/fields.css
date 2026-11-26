@@ -27,10 +27,16 @@
 }
 
 .ui-input,
+.ui-input-frame,
 .ui-number-input,
 .ui-select {
-  height: var(--control-height);
-  min-height: var(--control-height);
+  height: var(--field-height);
+  min-height: var(--field-height);
+}
+
+.ui-input,
+.ui-number-input,
+.ui-select {
   padding: 0 10px;
 }
 
@@ -157,7 +163,7 @@
 .ui-input-frame > .ui-input {
   flex: 1 1 0;
   height: auto;
-  min-height: calc(var(--control-height) - 2px);
+  min-height: 0;
   border: 0;
   border-radius: inherit;
   background: transparent;
@@ -233,8 +239,6 @@ button.ui-select {
 /* Фильтры конвейера входят в одну телефонную строку без плашек формы.
    Счётчик не сжимается вместе с длинным именем; площадка сохраняет 44 px. */
 .ui-select[data-context='pipeline-phone-filter'] {
-  height: 44px;
-  min-height: 44px;
   padding-inline: 8px 24px;
   border: 0;
   border-radius: var(--radius-sm);
@@ -301,11 +305,9 @@ button.ui-select {
   pointer-events: none;
 }
 
-/* Поиск имеет один вид во всех меню независимо от компоновки пунктов.
-   Toolbar-токен задаёт 28 px на desktop и сохраняет 44 px на touch. */
+/* Отступ под значок общий для поиска во всех выпадающих меню.
+   Высоту задаёт тот же токен, что и полю выбора. */
 .ui-select-popup .ui-input[data-context='select-search'] {
-  height: var(--toolbar-control-h);
-  min-height: var(--toolbar-control-h);
   padding-left: 32px;
   border-radius: var(--radius-sm);
 }
@@ -618,8 +620,9 @@ button.ui-select {
 .ui-search-input__action,
 .ui-input-composite > .ui-icon-button {
   position: absolute;
-  top: 3px;
+  top: 50%;
   right: 3px;
+  transform: translateY(-50%);
 }
 
 .ui-number-field__steppers,
@@ -763,8 +766,6 @@ button.ui-select {
 
 .ui-input[data-role='chat-title'] {
   max-width: 420px;
-  height: 26px;
-  min-height: 26px;
   padding: 0 8px;
   border-color: var(--line-2);
   border-radius: 7px;
@@ -823,8 +824,6 @@ button.ui-select {
 /* Клип и скорость входят в единую строку анимации рядом с timeline холста. */
 .ui-select[data-context='studio-clip'],
 .ui-select[data-context='studio-speed'] {
-  height: var(--toolbar-control-h);
-  min-height: var(--toolbar-control-h);
   padding-top: 0;
   padding-bottom: 0;
   border-radius: 4px;
@@ -833,8 +832,6 @@ button.ui-select {
 
 .ui-select[data-context='chat-session-toolbar'],
 .ui-select[data-context='code-head-select'] {
-  height: var(--toolbar-control-h);
-  min-height: var(--toolbar-control-h);
   padding: 0 22px 0 0;
   border: 0;
   border-bottom: 1px solid transparent;
@@ -891,8 +888,6 @@ button.ui-select {
    Площадка расширяется по вертикали до 44 px и не сдвигает соседние значения. */
 html[data-ui-touch] .ui-select[data-context='chat-session-toolbar'] {
   position: relative;
-  height: 32px;
-  min-height: 32px;
 }
 
 html[data-ui-touch] .ui-select[data-context='chat-session-toolbar']::after {
@@ -906,8 +901,6 @@ html[data-ui-touch] .ui-select[data-context='chat-session-toolbar']::after {
 /* Поиск списка использует ту же поверхность, что и остальные поля шапки.
    Внешние поля контейнера отделяют его от верхней границы без роста самой формы. */
 html:root .ui-search-input[data-size='compact'] > .ui-input {
-  height: 32px;
-  min-height: 32px;
   border-radius: var(--radius-sm);
   font-size: 13px;
 }
@@ -923,11 +916,6 @@ html:root .ui-search-input[data-size='compact'] > .ui-input {
 
   .phone-chat-options .ui-select[data-context='chat-session-toolbar'] {
     font-size: 16px;
-  }
-
-  .ui-dialog[data-ui-chat-options] .ui-select[data-context='chat-session-toolbar'] {
-    height: 44px;
-    min-height: 44px;
   }
 
   .ui-dialog[data-ui-chat-options] .ui-select[data-context='chat-session-toolbar']::after {
@@ -967,8 +955,6 @@ html:root .ui-search-input[data-size='compact'] > .ui-input {
 
 .ui-input.pvsetinput[data-context='settings-field'],
 .ui-number-input.pvsetinput[data-context='settings-field'] {
-  height: var(--control-height);
-  min-height: var(--control-height);
   padding: 0 9px;
   border-radius: 8px;
   font-size: 13px;
@@ -978,11 +964,6 @@ html:root .ui-search-input[data-size='compact'] > .ui-input {
 .ui-number-input.pvsetinput[data-context='settings-field']:focus {
   border-color: var(--accent);
   outline: none;
-}
-
-.trusted-add .ui-input[data-context='settings-field'] {
-  height: 38px;
-  min-height: 38px;
 }
 
 .ui-file-picker[data-role='chat-attachment'] {
@@ -1125,9 +1106,6 @@ html:root .ui-search-input[data-size='compact'] > .ui-input {
   }
 
   html:root .ui-select[data-context='code-head-select'] {
-    height: auto;
-    min-height: var(--control-height);
-    padding-block: 8px;
     font-size: 16px;
   }
 
@@ -1136,6 +1114,7 @@ html:root .ui-search-input[data-size='compact'] > .ui-input {
     overflow: hidden;
     -webkit-box-orient: vertical;
     -webkit-line-clamp: 2;
+    line-height: 1.2;
     white-space: normal;
     overflow-wrap: anywhere;
   }

@@ -2176,8 +2176,6 @@ html[data-ui-touch] .cs .ui-pressable[data-context='chat-status-more'] {
 .ui-button[data-context='chat-workdir'] {
   flex: 0 0 auto;
   max-width: min(240px, 45%);
-  height: 30px;
-  min-height: 30px;
   padding: 0 9px;
   font-size: 12.5px;
 }
@@ -2216,7 +2214,6 @@ html[data-ui-touch] .cs .ui-pressable[data-context='chat-status-more'] {
     width: 100%;
     max-width: 100%;
     justify-content: flex-start;
-    min-height: 44px;
     border: 1px solid var(--line);
     border-radius: var(--radius-sm);
     background: var(--surface-2);
@@ -2399,11 +2396,6 @@ html[data-ui-touch] .cs .ui-pressable[data-context='chat-status-more'] {
   min-height: var(--control-height);
   padding: 0 10px;
   font-size: 12px;
-}
-
-.trusted-add .ui-button[data-role='settings-action'] {
-  height: 38px;
-  min-height: 38px;
 }
 
 .ui-button.plugin-save[data-role='settings-action'] {
@@ -2738,6 +2730,13 @@ html[data-ui-touch] .cs .ui-pressable[data-context='chat-status-more'] {
 :root[data-ui-touch] :is(.ui-button, .ui-pressable, .ui-action-link, [data-ui-shell-nav]) {
   min-height: 44px;
   min-width: 44px;
+}
+
+/* Кнопки в паре с полем подстраиваются под его высоту в том же ряду. */
+:root .ui-button:is([data-context='chat-workdir'], [data-context='workdir-path-mode'], [data-role='task-tag-add']),
+.trusted-add .ui-button[data-role='settings-action'] {
+  height: var(--field-height);
+  min-height: var(--field-height);
 }
 
 /* Выбор этапа сохраняет семантику кнопки и общий масштаб строк каталога. */

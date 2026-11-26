@@ -21,8 +21,9 @@ Script разделяется пустыми строками на imports, publ
 а настоящая action-ссылка — через `UiActionLink`. `UiPressable`/`UiSvgPressable` предназначены
 только для доменных поверхностей, которым стандартный button skin не подходит.
 
-Обычные peer-controls всегда получают `--control-height: 36px` и
-`--control-radius: 9px`. Consumer управляет раскладкой, но не переопределяет `.ui-*`,
+Однострочные поля используют `--field-height`: 32 px в широком окне и 44 px до 600 CSS px.
+Обычные действия используют `--control-height`, скругление задаёт `--control-radius`.
+Consumer управляет раскладкой, но не переопределяет `.ui-*`,
 `--ui-*`, высоту, радиус, focus ring или state skin. Смысл задаётся через `variant`, `tone`,
 `loading`, `disabled`, `ariaDisabled`, `invalid`, `pressed` и `selected`.
 

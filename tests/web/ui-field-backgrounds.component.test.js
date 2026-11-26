@@ -117,10 +117,23 @@ function assertBackground(root, color) {
 
 for (const attrs of [{}, { 'data-ui-workspace': '' }, { 'data-ui-touch': '' }]) {
   test(`FIELD-SURFACE: общий фон в окружении ${JSON.stringify(attrs)}`, (t) => {
-    const wrapper = fixture(t, () => h('section', attrs, fields()));
-    const controls = assertBackground(wrapper.element, '#1c222c');
+    const wrapper = fixture(t, () => h('div', attrs, [
+      h('section', fields()),
+      h(ui.UiInput, {}, { trailing: () => h('span', 'Дополнение') }),
+    ]));
+    const controls = assertBackground(wrapper.get('section').element, '#1c222c');
 
     assert.equal(controls.length, 15);
+
+    const singleLine = wrapper.findAll('.ui-input, .ui-input-frame, .ui-number-input, button.ui-select')
+      .filter((field) => !field.element.parentElement.matches('.ui-input-frame'));
+
+    for (const field of singleLine) {
+      const { height, minHeight } = browser.getComputedStyle(field.element);
+
+      assert.equal(height, '32px', field.attributes('data-context'));
+      assert.equal(minHeight, '32px', field.attributes('data-context'));
+    }
   });
 }
 
@@ -207,9 +220,7 @@ for (const attrs of [{}, { 'data-ui-workspace': '' }, { 'data-ui-touch': '' }]) 
         assert.equal(actual.fontSize, '13px');
         assert.equal(actual.searchShadow, 'none');
 
-        if ('data-ui-touch' in attrs) {
-          assert.equal(actual.searchHeight, '44px');
-        }
+        assert.equal(actual.searchHeight, '32px');
       }
 
       browser.document.body.dispatchEvent(new browser.KeyboardEvent('keydown', {

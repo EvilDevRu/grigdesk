@@ -28,6 +28,7 @@ an unknown size does not mean access was denied.
 Each conversation card shows a circular project avatar on the left and a model badge in the agent provider’s
 color on the right. A chat without a project shows a folder icon. In a conversation without a task,
 you can use the Project picker in the header.
+Pickers and search fields have the same height, including search inside the open project menu.
 A ring in the agent provider’s color spins around the icon during a turn or context compaction.
 The working folder menu beside it lists the selected project’s repositories. When a project
 filter is active on the left, a new chat starts with that project selected.

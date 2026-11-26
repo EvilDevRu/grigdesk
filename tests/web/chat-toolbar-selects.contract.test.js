@@ -17,7 +17,7 @@ test('селекты toolbar сохраняют геометрию, а шапк�
 
   const declarations = flatRule[1];
 
-  assert.match(declarations, /height:\s*var\(--toolbar-control-h\)/u);
+  assert.doesNotMatch(declarations, /(?:min-)?height\s*:/u);
   assert.match(declarations, /border:\s*0/u);
   assert.match(declarations, /border-bottom:\s*1px solid transparent/u);
   assert.match(declarations, /border-radius:\s*0/u);

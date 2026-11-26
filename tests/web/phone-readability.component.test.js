@@ -118,7 +118,7 @@ for (const width of [390, 1280]) {
       assert.equal(css('.ui-tabs').marginTop, '6px');
       assert.equal(css('.ui-tab').minHeight, '32px');
       assert.equal(css('.ui-tab').fontSize, '12px');
-      assert.equal(css('input').height, '32px');
+      assert.equal(css('input').height, width <= 600 ? '44px' : '32px');
       assert.equal(css('input').fontSize, '13px');
       assert.equal(css('.ui-search-input button').height, '24px');
 

@@ -65,7 +65,8 @@
             <div class="workdir-toolbar">
               <UiSearchInput v-model="search" :aria-label="t('core.workdirSearch')" :disabled="busy"
                              :placeholder="t('core.search')" autocomplete="off" :spellcheck="false" />
-              <UiButton v-if="!projectId" ref="pathModeButton" :disabled="busy" @click="showPathInput">
+              <UiButton v-if="!projectId" ref="pathModeButton" data-context="workdir-path-mode"
+                        :disabled="busy" @click="showPathInput">
                 <template #leading>
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
                        stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">

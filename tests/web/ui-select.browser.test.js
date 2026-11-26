@@ -144,11 +144,13 @@ test('SELECT-CHAT-BROWSER: модели на десктопе, телефоне 
           };
         }));
 
+      const fieldHeight = width <= 600 ? 44 : 32;
+
       assert.equal(toolbarStyles.length, 3);
       assert.deepEqual(toolbarStyles[0], toolbarStyles[1]);
       assert.deepEqual(toolbarStyles[1], toolbarStyles[2]);
-      assert.equal(toolbarStyles[0].height, touch ? (width <= 600 ? '44px' : '32px') : '28px');
-      assert.equal(toolbarStyles[0].targetHeight, touch ? 44 : 28);
+      assert.equal(toolbarStyles[0].height, `${fieldHeight}px`);
+      assert.equal(toolbarStyles[0].targetHeight, touch ? 44 : fieldHeight);
       assert.equal(toolbarStyles[0].radius, '4px');
       await page.locator('.cs-top').screenshot({
         path: path.join(client.artifacts, `chat-header-${width}x${height}.png`),
@@ -236,7 +238,7 @@ test('SELECT-CHAT-BROWSER: модели на десктопе, телефоне 
       assert.equal(geometry.overflow, false);
       assert.equal(geometry.listHeight >= 44, true);
       assert.equal(geometry.searchFocused, !touch);
-      assert.equal(geometry.searchHeight, touch ? 44 : 28);
+      assert.equal(geometry.searchHeight, fieldHeight);
       assert.equal(geometry.searchRadius, '4px');
       assert.equal(geometry.searchShadow, 'none');
       assert.equal(geometry.labelsHidden, true);

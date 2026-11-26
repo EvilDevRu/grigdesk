@@ -25,8 +25,9 @@ Desktop использует один вид без настройки плот�
 | Верхняя панель `--app-topbar-h` | 36 |
 | Левая и правая рейки `--app-rail-w` | 36 |
 | Высота кнопки навигации `--app-nav-row-h` | 30 |
-| Обычный control `--control-height` | 36 |
-| Control рабочей формы с `data-ui-workspace` | 32 |
+| Обычное действие `--control-height` | 36 |
+| Действие рабочей формы с `data-ui-workspace` | 32 |
+| Однострочное поле `--field-height`, включая поиск в селекте | 32 |
 | Плоский toolbar `--toolbar-control-h` | 28 |
 | Действия дока `--tool-dock-action-size` | 30 |
 | Минимум шапки чатов `--chat-head-h` | 80, на touch 101 |
