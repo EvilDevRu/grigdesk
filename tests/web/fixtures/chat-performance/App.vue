@@ -1,6 +1,6 @@
 <template>
   <div class="performance-fixture">
-    <ChatList />
+    <ChatList :selected-id="chat.activeId" />
     <ChatSession v-if="chat.activeId" :key="chat.activeId" :sid="chat.activeId" />
   </div>
 </template>

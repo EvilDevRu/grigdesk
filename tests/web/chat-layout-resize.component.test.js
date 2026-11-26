@@ -138,6 +138,7 @@ async function mountChats(t, browser, { storedWidth, activeId = '', wide = true,
   globalThis.__chatsDockCapable = ref(wide);
   globalThis.__chatsResizeStore = defineStore(`chats-resize-${nonce}`, {
     state: () => ({
+      loaded: true,
       activeId,
       revealRequest,
       openedChatIds: activeId ? [activeId] : [],
@@ -185,7 +186,7 @@ test('COMP-VIS-05: mobile list не видит mounted ChatSession, открыт
   const browser = await browserHarness();
   const wrapper = await mountChats(t, browser, { activeId: 'chat-mobile', wide: false });
 
-  assert.deepEqual(wrapper.__surface.value, { chatId: 'chat-mobile', visible: false });
+  assert.deepEqual(wrapper.__surface.value, { chatId: null, visible: false });
   assert.deepEqual(wrapper.__read, []);
   await wrapper.find('.stub-open').trigger('click');
   assert.deepEqual(wrapper.__surface.value, { chatId: 'chat-mobile', visible: true });
@@ -335,6 +336,7 @@ test('строка чата: чип модели красится цветом �
   const ChatList = await compileChatList();
   const wrapper = mount(ChatList, {
     attachTo: browser.document.querySelector('#mount'),
+    props: { selectedId: 'a' },
     global: { plugins: [createPinia()] },
   });
   t.after(() => wrapper.unmount());

@@ -2,7 +2,7 @@
   <div ref="host" class="agents"
     :data-perf-pending="!chat.loaded && (!chat.loadError || chat.loading) ? '' : undefined"
     :data-perf-error="!chat.loaded && chat.loadError && !chat.loading ? '' : undefined" :class="`m-${pane}`" :style="layoutStyle">
-    <ChatList @open="pane = 'chat'" @open-project="openProject" />
+    <ChatList :selected-id="visibleChatId" @open="pane = 'chat'" @open-project="openProject" />
     <div ref="splitter" class="lsplit" role="separator" aria-orientation="vertical" tabindex="0"
          :aria-label="t('core.chatShirinaSpiskaChatov')"
          :aria-valuemin="LIST_MIN_W" :aria-valuemax="Math.round(listMaxW)"
@@ -15,7 +15,12 @@
     </div>
     <div class="stage">
       <ChatLoadingPreview v-if="chat.loaded === false" :failed="Boolean(chat.loadError)" />
-      <ChatSession v-else-if="activeId && explicitlyOpened && (dockCapable || pane === 'chat')" :key="activeId" :sid="activeId" @back="pane = 'list'" />
+      <ChatSession
+        v-else-if="visibleChatId"
+        :key="visibleChatId"
+        :sid="visibleChatId"
+        @back="pane = 'list'"
+      />
     </div>
   </div>
 </template>
@@ -59,31 +64,31 @@ watch(() => chat.revealRequest, (id) => {
 }, { immediate: true });
 
 const { dockCapable } = useDockViewport();
-const explicitlyOpened = computed(() => (chat.openedChatIds || []).includes(activeId.value || ''));
-const chatsContext = useUiContextSource('chats', { layer: 'page', active: false });
+// Сохранённый выбор остаётся в сторе. Подсветка, UI-контекст и загрузка
+// истории относятся только к чату, который показывает эта страница.
+const visibleChatId = computed(() => {
+  const id = activeId.value;
 
-watch(activeId, (chatId) => {
+  if (!chat.loaded || !id || !chat.openedChatIds?.includes(id)) {
+    return null;
+  }
+
+  return dockCapable.value || pane.value === 'chat' ? id : null;
+});
+const chatsContext = useUiContextSource('chats', { layer: 'page', active: false });
+const pageSurface = chat.registerSurface('chats-page', { chatId: null, visible: false });
+
+watch(visibleChatId, (chatId) => {
+  pageSurface.update({ chatId, visible: Boolean(chatId) });
+
   if (chatId) {
     chatsContext.focus({ details: { chatId } });
+    chat.markRead(chatId);
   } else {
     chatsContext.blur();
   }
 }, { immediate: true });
 
-// До явного открытия detail не монтируется, а телефон дополнительно учитывает pane.
-// Регистрируем фактическую поверхность, чтобы скрытый чат не гасил
-// unread и не подавлял уведомление.
-const pageSurface = chat.registerSurface('chats-page', { chatId: null, visible: false });
-
-watch([activeId, dockCapable, pane, explicitlyOpened], ([chatId, wide, currentPane, opened]) => {
-  const visible = Boolean(chatId) && opened && (wide || currentPane === 'chat');
-
-  pageSurface.update({ chatId: chatId || null, visible });
-
-  if (visible) {
-    chat.markRead(chatId!);
-  }
-}, { immediate: true });
 onMounted(() => {
   chat.ensure();
 });

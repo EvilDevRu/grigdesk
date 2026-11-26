@@ -271,12 +271,12 @@
         v-memo="[
           r.title, r.snippet, r.modelName, r.providerColor, r.catalogProjectId, r.projectTitle, r.projectIcon,
           r.archived, r.draft, r.sending, r.compacting, r.unread, r.waiting, r.sleep,
-          r.id === chat.activeId, r.id === editId, r.id === editId ? editVal : '', ago(r.ts),
+          r.id === selectedId, r.id === editId, r.id === editId ? editVal : '', ago(r.ts),
         ]"
         class="row"
         :class="{
           archived: r.archived,
-          cur: r.id === chat.activeId,
+          cur: r.id === selectedId,
           wait: r.waiting,
         }"
         :style="r.providerColor ? { '--prov': r.providerColor } : null"
@@ -318,7 +318,7 @@
         <UiPressable
           v-else
           class="row-hit"
-          :pressed="r.id === chat.activeId"
+          :pressed="r.id === selectedId"
           :aria-description="r.projectTitle || t('core.chatProjectNone')"
           @click="select(r)"
           @dblclick="startEdit(r)"
@@ -485,6 +485,8 @@ type ListRow = ChatListRow & {
   projectTitle: string;
   sleep?: ChatSleepingSession;
 };
+
+defineProps<{ selectedId?: string | null }>();
 
 const chat = useChatStore();
 // open — «чат выбран, покажи его». Нужен мобильной раскладке, где список и чат делят одну

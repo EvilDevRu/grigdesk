@@ -84,7 +84,9 @@ synchronization continues in the background. Sending checks the selected agent p
 ordinary renaming or another window's answer does not require closing windows.
 Actual write failures show a reason and preserve a local copy.
 
-History initially loads the last 40 messages. Scroll up or click “Earlier messages” between
+Opening a card loads the last 40 messages. The list highlights the open conversation.
+After launching the app or going back to the list on a phone, open a card to see its transcript.
+Scroll up or click “Earlier messages” between
 the divider lines at the top of the transcript; the current line stays in place.
 The button shows a spinner while loading.
 If new messages arrive, use “Jump to new messages”; you can keep loading older history before jumping.

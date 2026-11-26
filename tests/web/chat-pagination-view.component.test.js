@@ -44,6 +44,7 @@ test('PAGE-COLD-MOUNT: watcher/parent/повтор делят один page1, de
   globalThis.__pagingDock = ref(scenario.wide);
   globalThis.__pagingProbeMounts = 0;
   globalThis.__pagingMountConnected = ref(true);
+  globalThis.__pagingContextChatId = null;
 
   const pagingSseStub = `export const useSse = () => ({
     connected: globalThis.__pagingMountConnected,
@@ -71,7 +72,9 @@ test('PAGE-COLD-MOUNT: watcher/parent/повтор делят один page1, de
         load() {}, modelOf() { return { model: null, provider: null }; },
       });`,
       '../composables/useUiContextSource.ts': `export const useUiContextSource = () => ({
-        focus() {}, update() {}, blur() {},
+        focus({ details }) { globalThis.__pagingContextChatId = details.chatId; },
+        update() {},
+        blur() { globalThis.__pagingContextChatId = null; },
       });`,
       '../shared/tools/viewport.ts': `export const useDockViewport = () => ({
         dockCapable: globalThis.__pagingDock,
@@ -80,7 +83,7 @@ test('PAGE-COLD-MOUNT: watcher/parent/повтор делят один page1, de
         export default { name: 'PagingMountProbe', props: ['sid'], setup() {
           onMounted(() => { globalThis.__pagingProbeMounts += 1; });
           return {};
-        }, template: '<section data-mount-probe />' };`,
+        }, template: '<section :data-mount-probe="sid" />' };`,
     },
   });
   const network = windowApi(world.app);
@@ -116,6 +119,7 @@ test('PAGE-COLD-MOUNT: watcher/parent/повтор делят один page1, de
     delete globalThis.__pagingDock;
     delete globalThis.__pagingProbeMounts;
     delete globalThis.__pagingMountConnected;
+    delete globalThis.__pagingContextChatId;
   });
 
   const repeated = chat.ensure();
@@ -140,14 +144,36 @@ test('PAGE-COLD-MOUNT: watcher/parent/повтор делят один page1, de
   assert.equal(wrapper.find('[data-mount-probe]').exists(), false);
   assert.equal(network.calls.some((call) => call.url.includes('archived=1')), false);
   assert.equal(network.calls.some((call) => /store\/chat\//.test(call.url)), false);
-  await wrapper.find('.cl .row-hit').trigger('click');
+  const firstChat = wrapper.get(`[data-chat-id="${records[0].id}"]`);
+
+  assert.equal(chat.activeId, records[0].id);
+  assert.equal(firstChat.classes('cur'), false);
+  assert.equal(firstChat.get('.row-hit').attributes('aria-pressed'), 'false');
+  assert.equal(globalThis.__pagingContextChatId, null);
+  await firstChat.get('.row-hit').trigger('click');
   await chat.ensureChatMessages(records[0].id, { jumpToLatest: true });
   await drain();
-  assert.equal(wrapper.find('[data-mount-probe]').exists(), true);
+  assert.equal(wrapper.get('[data-mount-probe]').attributes('data-mount-probe'), records[0].id);
+  assert.equal(firstChat.classes('cur'), true);
+  assert.equal(firstChat.get('.row-hit').attributes('aria-pressed'), 'true');
+  assert.equal(globalThis.__pagingContextChatId, records[0].id);
   assert.equal(globalThis.__pagingProbeMounts, 1);
   assert.equal(chat.session(records[0].id).messages.length, 40);
   wrapper.findComponent({ name: 'PagingMountProbe' }).vm.$emit('back');
   await drain();
+  assert.equal(firstChat.classes('cur'), scenario.wide);
+  assert.equal(wrapper.find('[data-mount-probe]').exists(), scenario.wide);
+  assert.equal(globalThis.__pagingContextChatId, scenario.wide ? records[0].id : null);
+
+  const secondChat = wrapper.get(`[data-chat-id="${records[1].id}"]`);
+
+  await secondChat.get('.row-hit').trigger('click');
+  await chat.ensureChatMessages(records[1].id, { jumpToLatest: true });
+  await drain();
+  assert.equal(wrapper.get('[data-mount-probe]').attributes('data-mount-probe'), records[1].id);
+  assert.equal(firstChat.get('.row-hit').attributes('aria-pressed'), 'false');
+  assert.equal(secondChat.get('.row-hit').attributes('aria-pressed'), 'true');
+  assert.equal(globalThis.__pagingContextChatId, records[1].id);
   t.mock.timers.enable({ apis: ['setTimeout'] });
 
   const cursor = chat.pageFor('', false).nextCursor;
