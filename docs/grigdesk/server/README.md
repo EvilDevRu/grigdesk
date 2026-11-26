@@ -17,7 +17,7 @@
 
 - [Остановка до выхода ОС: независимые сторожа worker, потеря launcher, код 75 и поэтапный журнал](shutdown-watchdogs.md)
 - [Изоляция исходящих интеграций: буферизованный HTTP, DNS для потоков и восстановление](isolated-statistics-fetch.md)
-- [Предел попыток happy-eyeballs: битый IPv6 не роняет IPv4 в серверных транспортах](network-family-attempt-timeout.md)
+- [Предел попыток happy-eyeballs: переключение между IPv4 и IPv6 в сервере и Harness](network-family-attempt-timeout.md)
 - [Ротация stdout/stderr, gzip-архивы и чтение всех частей журнала окна](log-rotation.md)
 - [Времена HTTP, ожидания, цикл событий, CPU и GC](runtime-performance.md)
 - [Единый режим допуска GLM при установке сервера и DeepSeek](server-install-glm-mode.md)

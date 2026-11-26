@@ -14,6 +14,7 @@ const shared = [
   'shared/node/directoryLock.ts',
   'shared/node/files.ts',
   'shared/node/hash.ts',
+  'shared/node/networkFamily.ts',
   'shared/node/payloadArchive.ts',
   'shared/node/payloadCache.ts',
   'shared/node/seaBuild.ts',

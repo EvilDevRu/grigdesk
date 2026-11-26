@@ -8,8 +8,8 @@ import { runInNewContext } from 'node:vm';
 import { runLauncherWorker } from '../../deepseek/src/launcher/worker.ts';
 
 /**
- * Только entry подменён локальной программой; forwarding, IPC и итог берутся из launcher.
- * Worker держится живым после подтверждения, поэтому успех требует настоящего SIGKILL.
+ * Подменяем bootstrap локальной программой. Аргументы Node, forwarding, IPC и итог
+ * остаются за launcher, поэтому тест видит параметры и сигналы настоящего процесса.
  */
 async function workerCase(t: test.TestContext, body: string) {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'launcher-disposal-'));
@@ -25,6 +25,16 @@ async function workerCase(t: test.TestContext, body: string) {
     capture: true,
   });
 }
+
+test('launcher даёт worker 2 секунды на выбор семейства сети', async (t) => {
+  const result = await workerCase(t, `
+import { getDefaultAutoSelectFamilyAttemptTimeout } from 'node:net';
+process.stdout.write(String(getDefaultAutoSelectFamilyAttemptTimeout()));
+`);
+
+  assert.equal(result.code, 0);
+  assert.equal(result.stdout, '2000');
+});
 
 for (const code of [0, 130]) {
   test(`launcher сохраняет подтверждённый ${code} после добивания worker`, async (t) => {

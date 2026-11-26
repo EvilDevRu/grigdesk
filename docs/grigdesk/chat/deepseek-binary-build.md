@@ -55,6 +55,10 @@ vendor manifest. Его SHA входит в ключ generation и в metadata �
 установленный ELF включает эти данные внутрь. Изменение версии поставки сохраняет buildId
 и GLM compatibility, меняя packageId и bytes ELF.
 
+Переупаковка также обновляет launcher. Так можно применить исправление выбора семейства
+сети в worker, сохранив generation и кодеки журнала. Для установки по-прежнему нужен
+допуск используемого режима GLM. См. [сетевой транспорт](../server/network-family-attempt-timeout.md).
+
 В SEA manifest хранится в каноническом JSON без поля packageId. Отдельный asset содержит
 SHA256 этих bytes; launcher сверяет его перед разбором JSON. Канонизация выполняется
 при сборке, а публичное runtime-info и build-sidecar по-прежнему содержат packageId.

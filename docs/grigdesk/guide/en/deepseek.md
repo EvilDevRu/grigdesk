@@ -44,6 +44,11 @@ The distribution checks update/rollback compatibility. Operations with unknown o
 The model list may take a little longer to appear after you install or update Harness.
 On the first catalog refresh, GrigDesk extracts and verifies the new distribution.
 
+If GLM or DeepSeek reports a lost connection to the model on a route with broken IPv6,
+update the standalone Harness to a build with the IPv4 and IPv6 fallback fix.
+Once a compatible build is installed, the next turn uses it without restarting GrigDesk.
+Open the same conversation and continue where it stopped.
+
 When GLM reports an exhausted Coding Plan quota, GrigDesk ends the turn without scheduling a one-minute continuation.
 Check the reset time in GLM limits and resume after recovery. The Z.ai response code identifies this failure
 even if Harness labels it a rate limit. Harness may perform its own retries before returning the final error.

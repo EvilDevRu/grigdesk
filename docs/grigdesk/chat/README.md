@@ -76,7 +76,7 @@
 - [Память DeepSeek: стабильный home, обновление/откат и несовместимый журнал](deepseek-binary-memory.md)
 - [Подготовленный runtime: внутренний handle адаптера и native context](prepared-executor-runtime.md)
 - [Управляемая поставка: чистые distribution/bin и запрет обновления через карточку](provider-managed-delivery.md)
-- [Нативная сборка DeepSeek, worker Node, кэш по SHA и GLM-5.4 для обоих режимов на 0.1.5-rc.2](deepseek-binary-build.md)
+- [Нативная сборка DeepSeek, обновление launcher, кэш по SHA и GLM-5.4 на 0.1.5-rc.2](deepseek-binary-build.md)
 - [Kernel fingerprints прогретого кэша DeepSeek](deepseek-cache-fingerprints.md)
 - [Физические codec журналов и worker миграции DeepSeek](deepseek-journal-codecs.md)
 - [Целостность generation и проверка ABI выбранного Node](deepseek-runtime-integrity.md)

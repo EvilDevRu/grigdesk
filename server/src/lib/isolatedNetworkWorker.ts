@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 
-import { NETWORK_FAMILY_ATTEMPT_TIMEOUT_MS } from './networkFamily.ts';
+import { NETWORK_FAMILY_ATTEMPT_TIMEOUT_MS } from '../../../shared/node/networkFamily.ts';
 import { nodeExecutable } from './runtimePaths.ts';
 
 // Ввод передаётся через stdin. Самосторож действует даже при потере родительского процесса.

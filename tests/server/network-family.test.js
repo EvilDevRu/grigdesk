@@ -5,7 +5,7 @@ import test from 'node:test';
 import {
   applyNetworkFamilyAttemptTimeout,
   NETWORK_FAMILY_ATTEMPT_TIMEOUT_MS,
-} from '../../server/src/lib/networkFamily.ts';
+} from '../../shared/node/networkFamily.ts';
 import { runIsolatedNetworkWorker } from '../../server/src/lib/isolatedNetworkWorker.ts';
 
 test('предел попыток happy-eyeballs применяется в текущем процессе', () => {
