@@ -7,7 +7,11 @@ export function installAppViewport(win: Window = window, doc: Document = documen
   const coarse = win.matchMedia('(pointer: coarse)');
   const viewport = win.visualViewport;
   const previousTouch = root.hasAttribute('data-ui-touch');
+  const previousAndroid = root.hasAttribute('data-ui-android');
   const previousHeight = root.style.getPropertyValue('--app-viewport-height');
+
+  root.toggleAttribute('data-ui-android', /\bAndroid\b/u.test(win.navigator.userAgent) || previousAndroid);
+
   /**
    * Размер берётся из видимого viewport, включая клавиатуру и масштаб документа.
    * Общие CSS-токены получают одно согласованное значение до кадра приложения.
@@ -32,6 +36,7 @@ export function installAppViewport(win: Window = window, doc: Document = documen
     viewport?.removeEventListener('scroll', update);
     win.removeEventListener('resize', update);
     root.toggleAttribute('data-ui-touch', previousTouch);
+    root.toggleAttribute('data-ui-android', previousAndroid);
 
     if (previousHeight) {
       root.style.setProperty('--app-viewport-height', previousHeight);

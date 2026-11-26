@@ -26,7 +26,7 @@
         v-tooltip="t('core.chatProjectNone')" @click="emit('select', '@none')">
         <span aria-hidden="true">—</span>
       </UiIconButton>
-      <div class="project-rail-scroll">
+      <div class="project-rail-scroll" data-ui-rail-scroll>
         <UiIconButton v-for="item in items" :key="item.id" data-context="chat-project-rail-item"
           :data-chat-project="item.id" :label="item.title" :pressed="modelValue === item.id"
           :disabled="disabled" v-tooltip="item.title" @click="emit('select', item.id)">
@@ -82,7 +82,7 @@ const emit = defineEmits<{ select: [value: string]; create: [] }>();
 }
 
 @supports selector(::-webkit-scrollbar) {
-  .project-rail-scroll {
+  :root:not([data-ui-android]) .project-rail-scroll {
     scrollbar-width: auto;
     scrollbar-color: auto;
     scrollbar-gutter: stable both-edges;

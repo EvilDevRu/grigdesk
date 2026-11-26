@@ -614,6 +614,10 @@
   border-inline-start: 0;
 }
 
+:root[data-ui-android] .ui-segmented-control[data-context='chat-scope'] > .ui-button {
+  min-height: var(--chat-list-filter-h);
+}
+
 /* Вкладки Docker занимают свою область рядом со сводкой.
    Границу всей навигационной полосы задаёт её контейнер, а не каждый блок отдельно. */
 .ui-tabs[data-ui-docker-tabs] {

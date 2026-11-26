@@ -825,12 +825,17 @@ test('PROJECT-UI-SELECT: полоса выбирает проект, откры�
   assert.equal(calls.search.at(-1)[2].project, 'alpha');
   assert.equal(state.activeId, 'c-2');
   assert.equal(wrapper.findAll('[data-chat-id]').length, 1);
-  assert.equal(wrapper.find('[data-chat-project-current]').text().includes('Альфа'), true);
+  assert.equal(wrapper.get('[data-chat-project="alpha"]').attributes('aria-label'), 'Альфа');
+  assert.equal(wrapper.get('[data-chat-project="alpha"]').attributes('aria-pressed'), 'true');
+  assert.equal(wrapper.find('[data-chat-project-current]').exists(), false);
 
-  await wrapper.find('[data-chat-project-clear]').trigger('click');
+  const all = wrapper.get('[data-chat-project=""]');
+
+  await all.trigger('click');
   await drain();
 
   assert.equal(calls.search.at(-1)[2].project ?? '', '');
+  assert.equal(all.attributes('aria-pressed'), 'true');
 });
 
 test('PROJECT-UI-CREATE-PLUS: плюс полосы и компактной шапки открывает модалку создания', async (t) => {
@@ -916,6 +921,13 @@ test('PROJECT-UI-SELECT-COMPACT: компактный выбор использ�
 
   assert.equal(calls.search.at(-1)[2].project, 'beta');
   assert.equal(wrapper.find('[data-chat-project="beta"]').attributes('aria-pressed'), 'true');
+  assert.equal(selector.props('modelValue'), 'beta');
+
+  selector.vm.$emit('update:modelValue', '');
+  await drain();
+
+  assert.equal(calls.search.at(-1)[2].project ?? '', '');
+  assert.equal(selector.props('modelValue'), '');
 });
 
 test('PROJECT-UI-LEGACY: старый сервер скрывает project-навигацию', async (t) => {
@@ -1027,7 +1039,7 @@ test('PROJECT-UI-ARCHIVE-HIDE: архивирование снимает фил�
 
   assert.equal(wrapper.find('[data-chat-project="alpha"]').exists(), false);
   assert.equal(wrapper.find('[data-chat-project-picker="compact"] option[value="alpha"]').exists(), false);
-  assert.equal(wrapper.find('[data-chat-project-current]').exists(), false);
+  assert.equal(wrapper.get('[data-chat-project=""]').attributes('aria-pressed'), 'true');
   assert.equal(calls.search.at(-1)[2].project ?? '', '');
   assert.equal(state.activeId, 'c-2');
 

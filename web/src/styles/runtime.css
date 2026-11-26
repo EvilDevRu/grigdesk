@@ -4,6 +4,16 @@ body,
   height: 100%;
 }
 
+/* В Android WebView полоса отнимает ширину рейки, когда клавиатура уменьшает высоту.
+   Прокрутка жестом сохраняет доступ к пунктам, которые не помещаются над клавиатурой. */
+:root[data-ui-android] [data-ui-rail-scroll] {
+  scrollbar-width: none;
+}
+
+:root[data-ui-android] [data-ui-rail-scroll]::-webkit-scrollbar {
+  display: none;
+}
+
 /* Пока открыт диф-модал — гасим blur нижних оверлеев (приёмка/задача): они под непрозрачным
    дифом, но их перерисовка под Monaco даёт мерцание. Класс ставит DiffModal. */
 html.diff-modal-open .soverlay,

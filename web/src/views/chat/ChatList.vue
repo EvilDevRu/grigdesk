@@ -13,79 +13,75 @@
 
     <div class="cl-body">
     <div class="top">
-      <ChatProjectPicker
-        v-if="projectAvailable"
-        :items="projectItems"
-        :model-value="selectedProject"
-        :disabled="!projectsReady"
-        compact
-        @select="selectProject"
-        @create="createOpen = true"
-      />
-      <UiInlineMessage v-if="projectAvailable && projects.error" data-chat-project-error tone="danger">
-        {{ projects.error }}
-      </UiInlineMessage>
-      <UiButton
-        v-if="projectAvailable && projects.error"
-        data-chat-project-retry
-        size="compact"
-        variant="text"
-        :disabled="projects.loading"
-        @click="retryProjects"
-      >
-        {{ t('core.chatProjectRetry') }}
-      </UiButton>
-      <div class="tools">
-        <div class="search">
-          <UiSearchInput
-            v-model="q"
-            size="compact"
-            :placeholder="showArchived ? t('core.chatPoiskVArhive') : t('core.search')"
+      <div class="top-controls">
+        <ChatProjectPicker
+          v-if="projectAvailable"
+          :items="projectItems"
+          :model-value="selectedProject"
+          :disabled="!projectsReady"
+          compact
+          @select="selectProject"
+          @create="createOpen = true"
+        />
+        <UiInlineMessage v-if="projectAvailable && projects.error" data-chat-project-error tone="danger">
+          {{ projects.error }}
+        </UiInlineMessage>
+        <UiButton
+          v-if="projectAvailable && projects.error"
+          data-chat-project-retry
+          size="compact"
+          variant="text"
+          :disabled="projects.loading"
+          @click="retryProjects"
+        >
+          {{ t('core.chatProjectRetry') }}
+        </UiButton>
+        <div class="tools">
+          <div class="search">
+            <UiSearchInput
+              v-model="q"
+              size="compact"
+              :placeholder="showArchived ? t('core.chatPoiskVArhive') : t('core.search')"
+            />
+          </div>
+          <UiCreateButton
+            class="new"
+            :label="t('core.chatNovyyChat')"
+            :disabled="!canCreateChat"
+            @click="newChat"
           />
         </div>
-        <UiCreateButton
-          class="new"
-          :label="t('core.chatNovyyChat')"
-          :disabled="!canCreateChat"
-          @click="newChat"
-        />
-      </div>
-      <div v-if="selectedProject" data-chat-project-current class="project-current">
-        <span>{{ selectedProjectTitle }}</span>
-        <UiIconButton data-chat-project-clear role="embedded" :label="t('core.chatProjectAll')"
-          @click="selectProject('')">×</UiIconButton>
-      </div>
-
-      <div class="list-controls">
-        <UiSegmentedControl
-          v-model="scopeSegment"
-          class="scope"
-          data-context="chat-scope"
-          size="compact"
-          :options="scopeOptions"
-          :label="t('core.chatListScope')"
-        />
-        <UiIconButton
-          v-if="filtersAvailable"
-          class="filter-toggle"
-          data-chat-filter-toggle
-          :label="activeFilterCount
-            ? t('core.chatListFiltersActive', { count: activeFilterCount })
-            : t('core.chatListFilters')"
-          :tone="activeFilterCount ? 'accent' : 'neutral'"
-          :pressed="Boolean(activeFilterCount)"
-          :aria-expanded="String(filtersOpen)"
-          v-tooltip="t('core.chatListFilters')"
-          aria-controls="chat-list-filters"
-          @click="filtersOpen = !filtersOpen"
-        >
-          <svg width="16" height="16" viewBox="0 0 24 24"
-               fill="none" stroke="currentColor" stroke-width="1.8"
-               stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <path d="M4 5h16l-6.3 7.1v5.4l-3.4 1.7v-7.1z" />
-          </svg>
-          <span v-if="activeFilterCount" class="filter-count">{{ activeFilterCount }}</span>
-        </UiIconButton>
+        <div class="list-controls">
+          <UiSegmentedControl
+            v-model="scopeSegment"
+            class="scope"
+            data-context="chat-scope"
+            size="compact"
+            :options="scopeOptions"
+            :label="t('core.chatListScope')"
+          />
+          <UiIconButton
+            v-if="filtersAvailable"
+            class="filter-toggle"
+            data-chat-filter-toggle
+            :label="activeFilterCount
+              ? t('core.chatListFiltersActive', { count: activeFilterCount })
+              : t('core.chatListFilters')"
+            :tone="activeFilterCount ? 'accent' : 'neutral'"
+            :pressed="Boolean(activeFilterCount)"
+            :aria-expanded="String(filtersOpen)"
+            v-tooltip="t('core.chatListFilters')"
+            aria-controls="chat-list-filters"
+            @click="filtersOpen = !filtersOpen"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24"
+                 fill="none" stroke="currentColor" stroke-width="1.8"
+                 stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M4 5h16l-6.3 7.1v5.4l-3.4 1.7v-7.1z" />
+            </svg>
+            <span v-if="activeFilterCount" class="filter-count">{{ activeFilterCount }}</span>
+          </UiIconButton>
+        </div>
       </div>
       <div
         v-if="filtersAvailable"
@@ -552,8 +548,6 @@ const canCreateChat = computed(() => chat.loaded && (
   !selectedProject.value || selectedProject.value === '@none'
   || Boolean(selectedProjectRecord.value)
 ));
-const selectedProjectTitle = computed(() => selectedProject.value === '@none'
-  ? t('core.chatProjectNone') : selectedProjectRecord.value?.title ?? selectedProject.value);
 const listFilters = computed<ChatListFilters>(() => {
   const ordinary = { ...filters.value };
 
@@ -1118,24 +1112,26 @@ async function del(r: ListRow) {
   min-height: 0;
 }
 
-.project-current {
+.top,
+.top-controls {
   display: flex;
-  align-items: center;
-  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
 }
-
-.project-current > span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.top {
+  --chat-list-header-inset: var(--chat-head-block-padding, 8px);
+  flex: none;
+  padding: var(--chat-list-header-inset) 10px;
+  border-bottom: 1px solid var(--line);
 }
-
-/* Высота шапки — общий с открытым чатом токен (--chat-head-h): содержимое здесь и справа
-   разное, и без общей высоты две разделительные линии идут на разном уровне. Содержимое
-   центрируем по вертикали — тогда запас высоты не выглядит «прибитым» к верху. */
-.top { display: flex; flex-direction: column; justify-content: center; gap: 4px;
-  min-height: var(--chat-head-h); flex: none; padding: 8px 10px; border-bottom: 1px solid var(--line); }
+/* Поиск и переключатель центрируются на высоте общей шапки без панели и чипов.
+   Фильтры добавляют место под ними, сохраняя координаты верхних действий. */
+.top-controls {
+  min-height: calc(var(--chat-head-h) - 2 * var(--chat-list-header-inset) - 1px);
+  justify-content: center;
+}
 .tools { display: flex; align-items: center; gap: 7px; }
+.top-controls > :is(.tools, .list-controls) { min-height: var(--chat-head-row-h, auto); }
 .search { flex: 1; min-width: 0; }
 /* Строка под поиском — единый левый кластер: лёгкий pill-переключатель области
    (chat-scope) и сразу за ним голая иконка фильтров, без прижатия к правому краю.
@@ -1419,10 +1415,10 @@ async function del(r: ListRow) {
 
 @media (max-width: 600px) {
   .top {
-    min-height: 0;
-    padding: 6px 12px;
-    gap: 4px;
+    --chat-list-header-inset: 6px;
+    padding-inline: 12px;
   }
+  .top-controls { min-height: 0; }
   .rows { padding: 4px 6px; }
   .row { gap: 8px; padding: 8px 6px; }
   .name { font-size: 15px; }

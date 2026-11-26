@@ -34,9 +34,12 @@
      Токен общий, потому что иначе их разделительные линии расходятся: слева высоту
      задаёт поиск с тумблером архива, справа — название, задача и ряд настроек. */
   --app-topbar-h: 36px;
+  --app-topbar-gap: 8px;
   --app-phone-status-h: 30px;
   --app-rail-w: 36px;
   --app-nav-row-h: 30px;
+  --rail-selected-background: color-mix(in srgb, var(--accent) 30%, transparent);
+  --rail-touch-inset: 4px;
   --toolbar-control-h: 28px;
   --pane-header-action-h: 28px;
   --panel-header-font-size: 13px;
@@ -184,6 +187,12 @@ html:root[data-ui-touch] {
   --app-rail-w: 44px;
   --app-topbar-h: 44px;
   --app-nav-row-h: 44px;
+}
+
+html:root[data-ui-android] {
+  --app-topbar-h: 36px;
+  --app-topbar-gap: 6px;
+  --chat-list-filter-h: 32px;
 }
 
 /* Телефонные поля оставляют место данным, а не внешним рамкам страницы.

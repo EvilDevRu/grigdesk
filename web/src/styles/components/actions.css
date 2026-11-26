@@ -858,17 +858,31 @@
   color: var(--ink);
 }
 
-.ui-icon-button[data-context='code-rail-item'][aria-pressed='true'],
-.ui-icon-button[data-context='chat-project-rail-item'][aria-pressed='true'] {
+.ui-icon-button[data-context='code-rail-item'][aria-pressed='true'] {
   background: color-mix(in srgb, var(--accent) 14%, transparent);
   color: var(--accent);
 }
 
-/* Служебные элементы повторяют видимые 28 px аватаров и сохраняют площадку нажатия 34 px. */
-.ui-icon-button[data-context='chat-project-rail-item']:is([data-chat-project=''], [data-chat-project='@none']) {
-  padding: 3px;
-  border-radius: calc(var(--control-radius) + 3px);
+.ui-icon-button[data-context='chat-project-rail-item'][aria-pressed='true'] {
+  --ui-action-background-hover: var(--rail-selected-background);
+  background-color: var(--ui-action-background-hover);
+  color: var(--accent);
+}
+
+/* Заливка проекта ограничена внутренней плиткой и сохраняет поля при наведении.
+   При касании WebView использует только эту заливку; поля входят в область нажатия. */
+.ui-icon-button[data-context='chat-project-rail-item'][data-chat-project],
+.ui-icon-button[data-context='chat-project-rail-item']:hover:not(:disabled, [aria-disabled='true']) {
+  --chat-project-rail-inset: 3px;
+  padding: var(--chat-project-rail-inset);
+  border-radius: calc(var(--control-radius) + var(--chat-project-rail-inset));
   background-clip: content-box;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+}
+
+:root[data-ui-touch] .ui-icon-button[data-context='chat-project-rail-item'] {
+  --chat-project-rail-inset: var(--rail-touch-inset);
 }
 
 .ui-icon-button[data-context='code-rail-item']:focus-visible,
@@ -2538,8 +2552,8 @@ html[data-ui-touch] .cs .ui-pressable[data-context='chat-status-more'] {
   min-height: var(--control-height);
 }
 
-/* Подложка иконки заполняет всю доступную ширину боковой рейки без скругления.
-   Обе панели сохраняют прежние плоские цвета активного пункта и наведения. */
+/* Площадка занимает строку навигации и оставляет место значку со счётчиком.
+   Видимую подложку боковых реек рисует отдельный слой внутри площадки. */
 .shell [data-ui-shell-nav],
 .ui-icon-button[data-context='tool-rail-item'] {
   width: 100%;
@@ -2561,6 +2575,44 @@ html[data-ui-touch] .cs .ui-pressable[data-context='chat-status-more'] {
   cursor: pointer;
 }
 
+.shell .sidebar [data-ui-shell-nav],
+.ui-icon-button[data-context='tool-rail-item'],
+:root[data-ui-android] .ui-icon-button[data-context='code-rail-item'] {
+  --rail-cell-background: transparent;
+  --rail-cell-selected-background: var(--rail-selected-background);
+  --rail-highlight-inset: 1px 4px;
+  position: relative;
+  isolation: isolate;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+}
+
+:root[data-ui-touch] :is(.shell .sidebar [data-ui-shell-nav], .ui-icon-button[data-context='tool-rail-item']) {
+  --rail-highlight-inset: var(--rail-touch-inset);
+}
+
+:root[data-ui-android] .ui-icon-button[data-context='code-rail-item'] {
+  --rail-highlight-inset: var(--rail-touch-inset);
+  width: var(--code-rail-width, 44px);
+  height: var(--code-rail-width, 44px);
+  min-height: var(--code-rail-width, 44px);
+}
+
+:is(
+  .shell .sidebar [data-ui-shell-nav],
+  .ui-icon-button[data-context='tool-rail-item'],
+  :where(:root[data-ui-android]) .ui-icon-button[data-context='code-rail-item']
+)::before {
+  content: '';
+  position: absolute;
+  z-index: -1;
+  inset: var(--rail-highlight-inset);
+  border-radius: var(--control-radius);
+  background: var(--rail-highlight-fill, transparent);
+  pointer-events: none;
+  transition: background .12s;
+}
+
 /* Нижние вкладки телефона используют общий skin рейки, но вмещают подпись.
    Высота совпадает со строкой сетки оболочки и не зависит от типа указателя. */
 @media (max-width: 600px) {
@@ -2571,19 +2623,24 @@ html[data-ui-touch] .cs .ui-pressable[data-context='chat-status-more'] {
 }
 
 .shell [data-ui-shell-nav]:hover,
-.ui-icon-button[data-context='tool-rail-item']:hover:not(:disabled):not([aria-disabled='true']) {
-  background: var(--surface);
+.ui-icon-button[data-context='tool-rail-item']:hover:not(:disabled):not([aria-disabled='true']),
+:root[data-ui-android] .ui-icon-button[data-context='code-rail-item']:hover {
+  --rail-highlight-fill: var(--surface);
+  background: var(--rail-cell-background, var(--rail-highlight-fill));
   color: var(--ink);
 }
 
 .shell [data-ui-shell-nav].active,
-.ui-icon-button[data-context='tool-rail-item'].active:not(:disabled):not([aria-disabled='true']) {
-  background: color-mix(in srgb, var(--accent) 14%, transparent);
+.ui-icon-button[data-context='tool-rail-item'].active:not(:disabled):not([aria-disabled='true']),
+:root[data-ui-android] .ui-icon-button[data-context='code-rail-item'][aria-pressed='true'] {
+  --rail-highlight-fill: var(--rail-cell-selected-background, color-mix(in srgb, var(--accent) 14%, transparent));
+  background: var(--rail-cell-background, var(--rail-highlight-fill));
   color: var(--accent);
 }
 
 .shell [data-ui-shell-nav]:focus-visible,
-.ui-icon-button[data-context='tool-rail-item']:focus-visible {
+.ui-icon-button[data-context='tool-rail-item']:focus-visible,
+:root[data-ui-android] .ui-icon-button[data-context='code-rail-item']:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: -2px;
 }
@@ -2737,6 +2794,60 @@ html[data-ui-touch] .cs .ui-pressable[data-context='chat-status-more'] {
 .trusted-add .ui-button[data-role='settings-action'] {
   height: var(--field-height);
   min-height: var(--field-height);
+}
+
+/* Кнопки панели фильтров остаются компактными на Android. */
+:root[data-ui-android] :is(
+  .ui-button[data-chat-filter],
+  .ui-icon-button[data-chat-filter-toggle],
+  .ui-icon-button[data-chat-filter-reset]
+) {
+  height: var(--chat-list-filter-h);
+  min-height: var(--chat-list-filter-h);
+}
+
+:root[data-ui-android] .ui-icon-button:is([data-chat-filter-toggle], [data-chat-filter-reset]) {
+  width: var(--chat-list-filter-h);
+  min-width: var(--chat-list-filter-h);
+}
+
+/* Действия дока следуют высоте шапки Android, заданной на поверхности дока. */
+:root[data-ui-android] .tool-surface.is-dock .ui-button[data-context^='tool-dock-'] {
+  min-width: var(--tool-dock-action-size);
+  min-height: var(--tool-dock-action-size);
+}
+
+/* Шапка Android использует одну высоту для иконок и показателей.
+   Всплывающие панели и остальные сенсорные действия сохраняют общие размеры. */
+:root[data-ui-android] [data-ui-topbar] :is(
+  .ui-icon-button[data-role='rail'],
+  .ui-pressable[data-context='provider-status'],
+  .ui-pressable[data-context='topbar-network'],
+  .ui-pressable[data-context='topbar-metrics'],
+  .ui-pressable[data-context='application-update-mark'],
+  .ui-button[data-context='connection-trigger'],
+  .ui-button[data-context='board-timers-topbar'],
+  .ui-button[data-context='analysis-attention-topbar'],
+  .ui-button[data-context='pipeline-topbar']
+) {
+  height: var(--app-topbar-h);
+  min-height: var(--app-topbar-h);
+}
+
+:root[data-ui-android] [data-ui-topbar] :is(
+  .ui-icon-button[data-role='rail'],
+  .ui-pressable[data-context='provider-status'],
+  .ui-pressable[data-context='topbar-network']
+) {
+  width: var(--app-topbar-h);
+  min-width: var(--app-topbar-h);
+}
+
+@media (max-width: 1100px) {
+  :root[data-ui-android] [data-ui-topbar] .ui-button[data-context='connection-trigger'] {
+    width: var(--app-topbar-h);
+    min-width: var(--app-topbar-h);
+  }
 }
 
 /* Выбор этапа сохраняет семантику кнопки и общий масштаб строк каталога. */

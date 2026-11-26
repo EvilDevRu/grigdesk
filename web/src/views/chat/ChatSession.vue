@@ -3117,7 +3117,7 @@ function skipQuestion() {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  padding: 4px var(--chat-gutter);
+  padding: var(--chat-head-block-padding, 4px) var(--chat-gutter);
   border-bottom: 1px solid var(--line);
   min-height: var(--chat-head-h);
   justify-content: center;
@@ -3144,6 +3144,7 @@ function skipQuestion() {
 .tedit { flex: none; }
 .ctitle-edit { width: 100%; }
 .bar { display: flex; column-gap: var(--chat-head-gap); align-items: center; flex-wrap: nowrap; }
+.cs-top > :is(.hrow, .bar) { min-height: var(--chat-head-row-h, auto); }
 .spacer { flex: 1; }
 .sel { position: relative; }
 /* Задача делит верхний ряд с названием чата и стоит у папки. Ширина — по выбранному

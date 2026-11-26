@@ -1,5 +1,5 @@
 <template>
-  <aside v-if="dockCapable" class="tool-rail" :aria-label="t('core.panelTools')">
+  <aside v-if="dockCapable" class="tool-rail" data-ui-rail-scroll :aria-label="t('core.panelTools')">
     <UiIconButton v-for="item in railItems" :key="item.id"
                   :ref="(value) => setRailButton(item.id, value)" role="rail"
                   data-context="tool-rail-item"
@@ -643,10 +643,9 @@ onBeforeUnmount(() => {
 .tool-rail {
   grid-row: 2; grid-column: 3; z-index: 70; min-height: 0;
   display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 4px 0;
-  overflow-y: auto; scrollbar-width: none;
-  background: var(--sidebar); border-left: 1px solid var(--line);
+  overflow-y: auto; overflow-x: hidden; scrollbar-width: none;
+  background: var(--sidebar); box-shadow: inset 1px 0 0 var(--line);
 }
-.tool-rail-item { position: relative; }
 .rail-mark { display: grid; justify-items: center; align-content: center; gap: 1px; }
 .runtime-dot { position: absolute; right: 3px; bottom: 3px; width: 6px; height: 6px; border-radius: 50%;
   background: var(--good); box-shadow: 0 0 0 2px var(--sidebar); }

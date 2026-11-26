@@ -323,6 +323,15 @@ onBeforeUnmount(() => {
 .stage { flex: 1; min-width: 0; display: flex; }
 .stage :deep(.cs) { flex: 1; }
 
+/* В двухрядной раскладке шапки делят высоту и отступы рядов.
+   Когда над поиском появляется компактный выбор проекта, шапка списка растёт по содержимому. */
+@media (width > 1024px), (min-width: 900px) and (height > 600px) {
+  :root[data-ui-android] .agents {
+    --chat-head-row-h: max(36px, var(--toolbar-control-h));
+    --chat-head-block-padding: 4px;
+  }
+}
+
 /* Разделитель стоит ПОВЕРХ границы списка (отрицательные поля), поэтому собственного
    места в раскладке не занимает: без этого включение ресайза сдвинуло бы обе колонки. */
 .lsplit { flex: none; width: 9px; margin: 0 -4px; z-index: 2; position: relative;

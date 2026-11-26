@@ -25,6 +25,7 @@ The picker shows active projects. A direct link can open a file from an archived
 
 When you open Code or switch working copies, the loading layout follows the active tab.
 In Files, you can use the tree while Git badges load. Changes and Commits appear once Git data is available.
+On Android, a rounded blue highlight marks the active tab on the left rail, as in the sidebar.
 
 Search paths above the change tree; the funnel opens status filters.
 Tree actions collapses/expands directories or reveals the open file. Filtering shows results and clear controls.

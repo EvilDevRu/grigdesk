@@ -1,6 +1,6 @@
 <template>
   <div class="shell" :class="{ 'without-machine': !hasMachine }">
-    <aside v-if="hasMachine" class="sidebar">
+    <aside v-if="hasMachine" class="sidebar" data-ui-rail-scroll>
       <nav class="nav">
         <router-link v-for="item in nav" :key="item.to" :to="item.to" class="navitem" data-ui-shell-nav active-class="active"
                      :aria-label="navTitle(item)"
@@ -1223,7 +1223,7 @@ watch(connected, (value) => prov.noteUsageConnection(value), { immediate: true, 
 /* ── Топбар ── */
 .topbar {
   grid-row: 1; grid-column: 1 / -1;
-  display: flex; align-items: center; justify-content: flex-start; gap: 8px;
+  display: flex; align-items: center; justify-content: flex-start; gap: var(--app-topbar-gap);
   padding: 0;
   /* Нижняя линия не участвует в высоте: ось содержимого совпадает с серединой
      топбара и системных кнопок окна, а не поднимается на половину её толщины. */
@@ -1258,7 +1258,7 @@ watch(connected, (value) => prov.noteUsageConnection(value), { immediate: true, 
   display: flex;
   height: 100%;
   align-items: center;
-  gap: 8px;
+  gap: var(--app-topbar-gap);
   font-size: 12px;
   /* Текст центрируется по той же оси, что и иконки: при 1.4 строка 12px
      давала дробный сдвиг глифов вверх, особенно заметный при масштабе экрана. */

@@ -1,5 +1,10 @@
 # Chat list filters
 
+On Android, the Active / Archive switch and state buttons are compact.
+The filter fields are the same height as the search field.
+In the two-row tablet layout, the switch and filter icon line up with the model
+selector in the open conversation. The filters panel opens below them.
+
 The chat list shows active conversations; the archive is switched by the compact
 "Active / Archive" segment next to the search field. In the full list, the number
 of archived conversations appears beside "Archive". The counter is hidden
@@ -8,10 +13,11 @@ immediately after the tabs.
 
 ## Project
 
-Choose a project in the rail on the left. On narrow screens, use the "Chat project"
-selector above search. On phones, the selector replaces the project rail. The open
-conversation and its working folder stay in place. The top button with a list icon
-("All chats") returns to the full list. "No project" shows chats without a project.
+Choose a project in the rail on the left. A coloured background highlights its icon,
+and its name appears in the tooltip. On narrow screens, the "Chat project" selector above search shows the
+selected project's name. Use the top list icon or "All chats" in the selector to return
+to the full list. "No project" shows chats without a project. The search field, open
+conversation and its working folder stay in place.
 
 The plus at the bottom of the rail or next to the "Chat project" selector opens the
 "New project" dialog. Enter a name to generate the ID automatically. On phones,
@@ -31,7 +37,8 @@ its main repository. “No project” uses the user's home folder.
 
 ## Filters
 
-The funnel button expands a panel under the list header. It has no visible text label;
+The funnel button expands a panel under the list header. The search field stays in place.
+The button has no visible text label;
 hover to see the "Chat filters" tooltip. The number beside the funnel shows how many
 filters are active:
 

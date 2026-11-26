@@ -24,6 +24,10 @@ Official and Community describe origin, rather than a security assessment.
 
 ## Other working tools
 
+On Android tablets, an icon on the right rail opens the tool below the top bar.
+When the keyboard is open, the panel fits above it and you can swipe the rails
+without visible scrollbars.
+
 - Terminal opens a shell on the selected machine. Check folder and target: commands run as the server user.
 - SSH needs a configured connection and open live session. Enable Agent commands to expose it to every conversation,
   independently of project or working folder. Agents choose by project, label, role and session ID;
@@ -67,6 +71,7 @@ Missing, disabled or incompatible panel URLs explain why and link to the package
 The application does not install or enable packages automatically. Panels support narrow screens.
 Set panel shortcuts in Interface → Keyboard shortcuts; overrides and disabled assignments survive off/on and reinstall.
 Sidebar plugin icons match built-in section sizes; menus and tool tiles use their list's size.
+The selected section on the left and the open tool on the right have a coloured background.
 
 ## Limits and recovery
 

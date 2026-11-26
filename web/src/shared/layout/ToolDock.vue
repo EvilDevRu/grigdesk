@@ -177,6 +177,16 @@ defineExpose({ focusHeader: () => expandButton.value?.focus?.() });
   border-left: 1px solid var(--line-2); box-shadow: -18px 0 42px #0009;
   transition: width .18s ease-out, box-shadow .18s ease-out;
 }
+/* На Android док делит вторую строку с содержимым и рейками. Сама сетка
+   уже учитывает системные отступы и высоту, оставшуюся над клавиатурой. */
+:root[data-ui-android] .tool-surface.is-dock {
+  position: relative;
+  inset: auto;
+  grid-row: 2;
+  grid-column: 2;
+  justify-self: end;
+  --tool-dock-action-size: var(--app-topbar-h);
+}
 .tool-surface.is-dock.is-expanded { box-shadow: 0 18px 52px #000b; }
 .tool-surface.is-dock.is-resizing { transition: none; }
 .tool-body { height: 100%; min-width: 0; min-height: 0; overflow: hidden; }
