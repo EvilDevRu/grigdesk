@@ -91,11 +91,12 @@ export function buildGlmRoute(mode: GlmAccessMode): Record<string, unknown> {
   return {
     ...(mode === 'api' ? { baseURL: 'https://api.z.ai/api/paas/v4' } : {}),
     apiKeyEnv: 'GRIGDESK_GLM_ROUTE_KEY',
-    // Сеть до Z.ai нестабильна: dsh-llm-retry повторяет запрос к модели при обрыве, 429, 5xx и
-    // таймауте (коды по умолчанию). Это повтор запроса, а не хода: инструменты не выполнялись.
+    // Harness помечает кодом RATE_LIMIT и частоту, и окончательные отказы Z.ai по HTTP 429.
+    // Передаём их чату сразу, чтобы он прочитал бизнес-код и сам решил, нужен ли повтор.
     retryPolicy: {
       mode: 'normal',
       maxRetries: 10,
+      retryableCodes: ['EMPTY_RESPONSE', 'SERVER', 'TIMEOUT', 'TRANSPORT'],
     },
     // У glm-4.7 и glm-5-turbo нет reasoning_effort на wire: все уровни дают одно и то же
     // thinking enabled, поэтому выбор уровня не предлагается — только high.

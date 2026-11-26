@@ -26,13 +26,16 @@ test('маршрут coding-plan не задаёт baseURL, маршрут api �
   assert.equal(buildGlmRoute('api').baseURL, 'https://api.z.ai/api/paas/v4');
 });
 
-test('маршрут задаёт apiKeyEnv GRIGDESK_GLM_ROUTE_KEY и retryPolicy normal с maxRetries 10', () => {
+test('маршрут задаёт ключ GLM и повторы Harness для временных ошибок кроме RATE_LIMIT', () => {
   for (const mode of ['api', 'coding-plan']) {
     const route = buildGlmRoute(mode);
 
     assert.equal(route.apiKeyEnv, 'GRIGDESK_GLM_ROUTE_KEY');
-    // Повторяются только транзиентные коды dsh-llm-retry по умолчанию: обрыв, 429, 5xx, таймаут.
-    assert.deepEqual(route.retryPolicy, { mode: 'normal', maxRetries: 10 });
+    assert.deepEqual(route.retryPolicy, {
+      mode: 'normal',
+      maxRetries: 10,
+      retryableCodes: ['EMPTY_RESPONSE', 'SERVER', 'TIMEOUT', 'TRANSPORT'],
+    });
   }
 });
 

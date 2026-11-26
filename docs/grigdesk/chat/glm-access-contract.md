@@ -9,9 +9,10 @@
 
 Маршрут обычного API задаёт `baseURL` равным `https://api.z.ai/api/paas/v4`.
 Для Coding Plan поле `baseURL` отсутствует: используется встроенный адрес маршрута
-`zai` библиотеки pi-ai. Оба маршрута задают `apiKeyEnv: GRIGDESK_GLM_ROUTE_KEY`
-и `retryPolicy: { mode: normal, maxRetries: 10 }`: сеть до Z.ai нестабильна, транзиентные сбои
-запроса повторяются ([ход GLM](glm-turn-runtime.md)). Константа усилия без выбора — `high`.
+`zai` библиотеки pi-ai. Оба маршрута задают `apiKeyEnv: GRIGDESK_GLM_ROUTE_KEY` и до десяти
+внутренних повторов запроса для `TRANSPORT`, `SERVER`, `TIMEOUT` и `EMPTY_RESPONSE`.
+`RATE_LIMIT` сразу передаётся чату для проверки бизнес-кода Z.ai. Константа усилия
+без выбора — `high`. См. [ход GLM](glm-turn-runtime.md).
 
 Список `GLM_ADMISSION` пакета берётся из `deepseek/compatibility/glm.json`, заморожен и
 допускает режимы `api` и `coding-plan`. Сервер получает его из metadata актуального бинарника,

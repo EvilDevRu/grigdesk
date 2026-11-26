@@ -51,7 +51,12 @@ Open the same conversation and continue where it stopped.
 
 When GLM reports an exhausted Coding Plan quota, GrigDesk ends the turn without scheduling a one-minute continuation.
 Check the reset time in GLM limits and resume after recovery. The Z.ai response code identifies this failure
-even if Harness labels it a rate limit. Harness may perform its own retries before returning the final error.
+even if Harness labels it a rate limit.
+
+If Z.ai returns code `1311`, the model is unavailable on the current Coding Plan.
+GrigDesk shows the reason and ends the turn. Select an available model in the same conversation.
+An expired subscription, an account restriction, or a key type restriction also gets a specific message.
+GrigDesk can resume the same turn after a delay if the request rate is temporarily limited.
 
 If GLM reports that its mandatory policy check failed while writing a long document,
 an older GrigDesk version may have mishandled non-ASCII text. After installing a version

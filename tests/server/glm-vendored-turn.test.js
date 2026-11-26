@@ -129,13 +129,41 @@ test('настоящий ход: нехватка баланса даёт оди
   assert.equal(f.mock.requests.length, 1);
 });
 
-test('настоящий ход: обрыв соединения, обрыв потока и 429 повторяются тем же ходом', async (t) => {
+test('настоящий ход: отказ 1311 завершает ход после первого запроса', async (t) => {
+  const denial = httpError(
+    429, 'Your current subscription plan does not yet include access to this model', '1311',
+  );
+  const f = await fixture(t, {
+    respond: (_, index) => index === 0 ? denial : glmTextReply('неожиданный повтор'),
+  });
+
+  await assert.rejects(f.run(), {
+    code: 'glm_model_access_denied',
+    message: /HTTP 429, код 1311/u,
+  });
+  assert.equal(f.mock.requests.length, 1);
+});
+
+test('настоящий ход: настоящий лимит частоты 1302 передаётся чату после первого запроса', async (t) => {
+  const limit = httpError(429, 'Rate limit reached for requests', '1302');
+  const f = await fixture(t, {
+    respond: (_, index) => index === 0 ? limit : glmTextReply('неожиданный повтор'),
+  });
+
+  const result = await f.run();
+
+  assert.equal(result.deliveryFailure, true);
+  assert.equal(result.turnFailure.code, 'RATE_LIMIT');
+  assert.equal(result.turnRecovery.canContinue, true);
+  assert.equal(f.mock.requests.length, 1);
+});
+
+test('настоящий ход: обрыв соединения и обрыв потока повторяются тем же ходом', async (t) => {
   const observed = {};
 
   for (const [label, failures] of [
     ['reset', [{ kind: 'reset' }, { kind: 'reset' }]],
     ['disconnect', [{ kind: 'disconnect', deltas: [{ content: 'partial' }] }]],
-    ['429', [httpError(429, 'Rate limit reached for requests', '1302')]],
   ]) {
     await t.test(label, async (sub) => {
       const f = await fixture(sub, { scenarios: [...failures, glmTextReply('after-retry')] });
@@ -159,7 +187,6 @@ test('настоящий ход: обрыв соединения, обрыв п�
   assert.deepEqual(observed, {
     reset: recovered(3),
     disconnect: recovered(2),
-    429: recovered(2),
   });
 });
 

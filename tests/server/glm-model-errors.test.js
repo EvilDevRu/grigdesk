@@ -75,6 +75,30 @@ test('1113 с кодом Harness RATE_LIMIT сохраняет отдельно�
   assert.match(error.message, /не подтверждает исчерпание подписки/u);
 });
 
+test('окончательные ограничения доступа Z.ai показываются с конкретной причиной', () => {
+  const cases = [
+    ['1309', /срок.*Coding Plan истёк/iu],
+    ['1311', /не даёт доступа к выбранной модели/iu],
+    ['1313', /политик.*добросовестного использования/iu],
+    ['1314', /срок.*корпоративн.*истёк/iu],
+    ['1315', /ключ.*только для корпоративного Coding Plan/iu],
+  ];
+
+  for (const [code, reason] of cases) {
+    const failure = {
+      code: 'RATE_LIMIT',
+      message: `429 {"error":{"code":"${code}","message":"secret-key person@example.test"}}`,
+    };
+    const error = classifyGlmModelError(failure);
+
+    assert.equal(error?.code, 'glm_model_access_denied');
+    assert.ok(error.message.includes(`HTTP 429, код ${code}`));
+    assert.match(error.message, reason);
+    assert.doesNotMatch(error.message, /secret-key|person@example/u);
+    assert.match(classifyGlmModelError(failure, 'en').message, /HTTP 429, code/u);
+  }
+});
+
 test('частота, перегрузка и упоминание числа в тексте не означают исчерпанную квоту', () => {
   for (const code of ['1302', '1305', 'unknown']) {
     assert.equal(classifyGlmModelError({
@@ -84,6 +108,7 @@ test('частота, перегрузка и упоминание числа в
   }
 
   assert.equal(classifyGlmModelError({ code: 'RATE_LIMIT', message: '429 request 1310' }), null);
+  assert.equal(classifyGlmModelError({ code: 'RATE_LIMIT', message: '429 request 1311' }), null);
 });
 
 test('AUTH сохраняет публичный код, а транзиентные сбои остаются общему runner-у', () => {
@@ -93,7 +118,7 @@ test('AUTH сохраняет публичный код, а транзиентн
   assert.doesNotMatch(auth.message, /secret-key/u);
   assert.equal(classifyGlmModelError({
     code: 'AUTH',
-    message: '{"error":{"code":"1310"}}',
+    message: '{"error":{"code":"1311"}}',
   }).code, 'glm_auth_failed');
 
   for (const code of ['RATE_LIMIT', 'TRANSPORT', 'SERVER', 'TIMEOUT', 'PI_AI_ERROR', '']) {

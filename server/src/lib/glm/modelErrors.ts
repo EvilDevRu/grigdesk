@@ -8,6 +8,14 @@ const MESSAGE_KEYS: Readonly<Record<string, string>> = Object.freeze({
   QUOTA: 'core.glmModelQuotaUnavailable',
 });
 
+const ACCESS_MESSAGES = new Map([
+  ['1309', 'core.glmModelPlanExpired'],
+  ['1311', 'core.glmModelUnavailableOnPlan'],
+  ['1313', 'core.glmModelFairUseRestricted'],
+  ['1314', 'core.glmModelEnterprisePlanExpired'],
+  ['1315', 'core.glmModelEnterpriseKeyOnly'],
+]);
+
 // Эти бизнес-коды Z.ai означают исчерпанное окно, хотя HTTP 429 и Harness
 // могут обозначить их как RATE_LIMIT. Частота 1302 и перегрузка 1305 сюда не входят.
 const USAGE_LIMIT_CODES = new Set(['1308', '1310', '1316', '1317', '1318', '1319', '1320', '1321']);
@@ -20,6 +28,14 @@ export function classifyGlmModelError(failure: Record<string, unknown>, locale =
   const harnessKind = String(failure.code || '');
   const text = String(failure.message || '');
   const providerCode = /"code"\s*:\s*"?(\d+)"?\s*[,}]/u.exec(text)?.[1] ?? '';
+  const status = /^\s*([1-5]\d{2})(?:\s*:|\s+\{)/u.exec(text)?.[1];
+  const details = { http: status ? `HTTP ${status}, ` : '', code: providerCode };
+  const accessMessage = harnessKind === 'AUTH' ? undefined : ACCESS_MESSAGES.get(providerCode);
+
+  if (accessMessage) {
+    return glmAccessError('glm_model_access_denied', translate(accessMessage, details, locale));
+  }
+
   const usageLimit = harnessKind !== 'AUTH' && USAGE_LIMIT_CODES.has(providerCode);
   const kind = harnessKind !== 'AUTH' && (usageLimit || providerCode === '1113') ? 'QUOTA' : harnessKind;
   const code = GLM_MODEL_ERROR_CODES[kind];
@@ -31,10 +47,6 @@ export function classifyGlmModelError(failure: Record<string, unknown>, locale =
   const balanceUnavailable = kind === 'QUOTA' && providerCode === '1113';
   const key = usageLimit ? 'core.glmModelUsageLimitReached'
     : balanceUnavailable ? 'core.glmModelBalanceUnavailable' : MESSAGE_KEYS[kind]!;
-  const status = /^\s*([1-5]\d{2})(?:\s*:|\s+\{)/u.exec(text)?.[1];
 
-  return glmAccessError(code, translate(key, {
-    http: status ? `HTTP ${status}, ` : '',
-    code: providerCode,
-  }, locale));
+  return glmAccessError(code, translate(key, details, locale));
 }

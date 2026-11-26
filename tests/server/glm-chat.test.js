@@ -184,6 +184,25 @@ test('принятый ход, SSE, pending и F5 дают одну запись
   assert.equal(await f.prompts(), 1);
 });
 
+test('код 1311 приходит в чат как окончательный отказ в доступе к модели', async (t) => {
+  const f = await fixture(t, {
+    updates: [],
+    turnError: {
+      code: 'RATE_LIMIT',
+      message: '429 {"error":{"code":"1311","message":"Your plan does not include this model"}}',
+    },
+  });
+
+  const { accepted, records } = await deliver(f, 'turn-glm-access-denied');
+
+  assert.equal(accepted.statusCode, 202, accepted.body);
+  assert.equal(records.length, 1);
+  assert.equal(records[0].role, 'error');
+  assert.match(records[0].reply, /HTTP 429, код 1311/u);
+  assert.match(records[0].reply, /не даёт доступа к выбранной модели/u);
+  assert.equal(await f.prompts(), 1);
+});
+
 test('glm_ambiguous_outcome и полученные steps видны после переподключения без повтора', async (t) => {
   const f = await fixture(t, {
     hooks: true,
