@@ -8,7 +8,7 @@ Check the selected machine: server configuration and device preferences have dif
 
 ## What to do
 
-1. Open settings beside Help or through the application menu.
+1. Open settings with the gear icon in the top bar or through the application menu.
 2. Find a page using search or the section tree. Choose an executor's own card for its settings.
 3. Change values and read warnings. Drafts survive page navigation.
 4. Apply and wait for the response. Resolve any stated failure and retry.

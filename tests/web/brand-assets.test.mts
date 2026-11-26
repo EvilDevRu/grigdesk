@@ -136,7 +136,7 @@ test('GI-04: встроенные favicon и уведомление равны �
     text(`${brand}/grigdesk-favicon-tile.svg`));
 });
 
-test('GI-05: шапка и Android сохраняют полный L8 и исходную G', () => {
+test('GI-05: иконки приложения сохраняют полный L8 и исходную G', () => {
   const master = `${brand}/grigdesk-app-icon.svg`;
   const contours = paths(master);
   const originalG = paths(`${brand}/grigdesk-wordmark.svg`)[0]!.split('M371.83')[0];
@@ -173,8 +173,18 @@ test('GI-05: шапка и Android сохраняют полный L8 и исх�
   }
 
   assert.match(text(`${android}/values/ic_launcher_background.xml`), /#0B0D11/);
-  assert.match(text('web/src/shared/layout/AppShell.vue'),
-    /\.app-mark \.logo \{ width: 20px; height: 20px;/);
+});
+
+test('Общая верхняя панель показывает четыре буквы из фирменного мастера', () => {
+  const masterPath = paths(`${brand}/grigdesk-wordmark-light.svg`)[0]!;
+  const grigPath = masterPath.split('M1219.02')[0]!;
+  const wordmark = 'web/src/shared/GrigWordmark.vue';
+  const shell = text('web/src/shared/layout/AppShell.vue');
+
+  assert.equal(paths(wordmark)[0]!.replace(/\s+/g, ''), grigPath.replace(/\s+/g, ''));
+  assert.match(text(wordmark), /viewBox="0 0 1161 256"/);
+  assert.match(text(wordmark), /fill="#F2F3F5"/);
+  assert.equal([...shell.matchAll(/<GrigWordmark\b/g)].length, 2);
 });
 
 test('GI-06: повтор генератора не меняет байты ни одного результата', () => {

@@ -121,12 +121,12 @@
           data-context="application-update-mark" :aria-label="t('settings.appUpdateTitle')"
           v-tooltip.bottom="applicationUpdate.open ? null : t('settings.appUpdateTitle')"
           @click="applicationUpdate.open = true">
-          <span class="app-update-icon">
-            <GrigDeskMark class="logo" />
+          <span class="app-update-wordmark">
+            <GrigWordmark class="logo" />
             <span v-if="applicationUpdate.available" class="updot" aria-hidden="true"></span>
           </span>
         </UiPressable>
-        <GrigDeskMark v-else class="logo" />
+        <GrigWordmark v-else class="logo" />
       </span>
       <!-- Слот действий текущего экрана: сюда разделы телепортируют свои кнопки (TopbarActions) -->
       <PhoneShellPortal :phone="phoneLayout" :menu-open="phoneMenuOpen">
@@ -555,7 +555,7 @@ import PipelineTopbarPopover from '../../features/pipeline/PipelineTopbarPopover
 import ProviderIcon from '../ProviderIcon.vue';
 import ProviderUsageTransportNotice from '../../features/providers/ProviderUsageTransportNotice.vue';
 import { vSvgPixelSnap } from '../svgPixelSnap.ts';
-import GrigDeskMark from '../GrigDeskMark.vue';
+import GrigWordmark from '../GrigWordmark.vue';
 import ProviderUsageResources from '../../features/providers/ProviderUsageResources.vue';
 import ProviderUsagePlugins from '../../features/providers/ProviderUsagePlugins.vue';
 import PluginSlot from '../../plugins/PluginSlot.vue';
@@ -1245,10 +1245,15 @@ watch(connected, (value) => prov.noteUsageConnection(value), { immediate: true, 
   -webkit-app-region: no-drag;
 }
 .app-mark {
-  display: grid; place-items: center; flex: none; width: var(--app-rail-w); height: 100%;
+  --app-wordmark-width: 48px;
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: calc(var(--app-wordmark-width) + 16px);
+  height: 100%;
 }
-.app-update-icon { position: relative; display: grid; width: 20px; height: 20px; }
-.app-mark .logo { width: 20px; height: 20px; }
+.app-update-wordmark { position: relative; display: grid; }
+.app-mark .logo { width: var(--app-wordmark-width); height: auto; }
 /* Слот действий экрана — сразу после заголовка; статус уезжает вправо */
 .tb-slot { display: flex; align-items: center; gap: 8px; min-width: 0; overflow: hidden; }
 .tb-slot:empty { display: none; }
@@ -1441,9 +1446,4 @@ watch(connected, (value) => prov.noteUsageConnection(value), { immediate: true, 
   .content { scrollbar-gutter: auto; }
 }
 
-/* В самой узкой шапке уменьшается только поле вокруг знака приложения.
-   Все действия, включая мастер, сохраняют сенсорные площадки 44 px. */
-@media (max-width: 360px) {
-  .app-mark { width: 28px; }
-}
 </style>

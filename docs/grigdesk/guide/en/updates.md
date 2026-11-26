@@ -32,7 +32,7 @@ Signature, integrity and binary startup checks still run; you decide whether to 
 
 ## Application
 
-1. A yellow dot on the GrigDesk mark means an update is available. Click it or open updates in settings
+1. A yellow dot next to GRIG on the left of the top bar means an update is available. Click GRIG or open updates in settings
    for the same dialog with versions, channel, components and release notes. Hover or focus shows a tooltip;
    Enter or Space activates the mark.
 2. “Check for updates” contacts the website independently of the local server.
