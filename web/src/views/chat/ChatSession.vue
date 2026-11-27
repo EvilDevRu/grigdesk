@@ -394,7 +394,7 @@
          оповещение из стора (_saveFailed), а сама переписка держится снимком в браузере. -->
 
     <!-- Сообщения: ты — справа, агент — слева, ошибка — компактная плашка -->
-    <div ref="body" class="cs-body" @scroll.passive="onBodyScroll">
+    <div ref="body" class="cs-body" tabindex="-1" @scroll.passive="onBodyScroll">
       <div class="col flow">
         <div v-if="historyPage?.newer || historyPage?.error || sess?.historyWindow?.hasOlder"
              class="history-page-notice" role="status" aria-live="polite">
@@ -436,6 +436,9 @@
              :data-role="group.turn ? 'chat-turn' : undefined">
           <div v-for="{ key, message: m, index: i, steps, heading, compact, live, current, thinking } in group.rows"
                :key="key" :data-history-key="key" class="msg" :class="[m.role, { compact }]"
+               :data-role="m.kind === 'in-turn' ? 'chat-in-turn-message' : undefined"
+               :data-active-clarification="key === activeClarificationKey ? '' : undefined"
+               :tabindex="m.kind === 'in-turn' ? -1 : undefined"
                :style="m.role === 'assistant' ? group.brandStyle : null">
             <div v-if="m.attachments?.length" class="m-atts">
               <a v-for="a in m.attachments" :key="a.file" :href="api.url(a.url || '')" target="_blank" rel="noopener"
@@ -612,6 +615,11 @@
 
     <!-- Ввод: единый композер, кнопки внутри (📎 фото, 🎤 диктовка) -->
     <div class="cs-input">
+      <div v-if="activeClarificationKey && (!clarificationVisible || !atBottom)" class="clarification-nav">
+        <UiButton variant="outline" size="compact" data-role="chat-clarification-nav" @click="navigateClarification">
+          {{ clarificationVisible ? t('core.chatToFeedEnd') : t('core.chatToClarification') }}
+        </UiButton>
+      </div>
       <!-- Разделитель высоты поля ввода: стоит на верхней кромке (поверх линии),
            поэтому места в раскладке не занимает и ничего не сдвигает. -->
       <div class="cs-resize" role="separator" aria-orientation="horizontal" tabindex="0"
@@ -2049,6 +2057,7 @@ function scrollDown() {
     const finish = startChatPerformance('chat.scroll');
 
     body.value.scrollTop = body.value.scrollHeight;
+    syncClarificationVisibility();
     finish();
   }
 }
@@ -2195,6 +2204,58 @@ const NEAR_BOTTOM_PX = 120;
 const atBottom = ref(true);
 const prepending = ref(false);
 const historyPage = computed(() => chat.historyPaging?.[props.sid]);
+const activeClarificationKey = computed(() => timeline.value.findLast(({ message, current }) => (
+  current && message.kind === 'in-turn'
+))?.key);
+const clarificationVisible = ref(true);
+
+function clarificationElement(root: HTMLElement, key: string) {
+  const rows = root.querySelectorAll<HTMLElement>('[data-role="chat-in-turn-message"]');
+
+  return Array.from(rows).find((row) => row.dataset.historyKey === key);
+}
+
+/**
+ * После прокрутки сразу обновляем действие композера по новой видимой области.
+ * Событие scroll и наблюдатель могут приходить позже смены положения в DOM.
+ */
+function syncClarificationVisibility() {
+  const root = body.value;
+  const row = root?.querySelector('[data-active-clarification]');
+
+  if (!root || !row) {
+    return;
+  }
+
+  const bounds = root.getBoundingClientRect();
+  const box = row.getBoundingClientRect();
+
+  clarificationVisible.value = box.bottom > bounds.top && box.top < bounds.bottom;
+}
+
+// Следим за положением одной реплики: новые действия, раскрытие деталей и размер
+// окна могут убрать её из видимой области без ручной прокрутки.
+watch([body, activeClarificationKey], ([root, key], _previous, onCleanup) => {
+  clarificationVisible.value = true;
+
+  if (!root || !key || typeof IntersectionObserver === 'undefined') {
+    return;
+  }
+
+  const row = clarificationElement(root, key);
+
+  if (!row) {
+    return;
+  }
+
+  const observer = new IntersectionObserver(([entry]) => {
+    clarificationVisible.value = Boolean(entry?.isIntersecting);
+  }, { root });
+
+  observer.observe(row);
+  syncClarificationVisibility();
+  onCleanup(() => observer.disconnect());
+}, { flush: 'post' });
 
 /**
  * Старые сообщения добавляются над читаемой строкой с компенсацией DOM-якоря.
@@ -2223,9 +2284,17 @@ async function loadOlderHistory() {
  * После атомарного принятия новой порции возвращается обычная прокрутка вниз.
  */
 async function showLatestHistory() {
-  await chat.showLatestMessages(props.sid);
+  const sid = props.sid;
+
+  if (historyPage.value?.newer) {
+    await chat.showLatestMessages(sid);
+  }
+  if (props.sid !== sid || !body.value) {
+    return;
+  }
+
   atBottom.value = true;
-  chat.setChatViewport(props.sid, true);
+  chat.setChatViewport?.(sid, true);
   await nextTick();
   scrollDown();
 }
@@ -2243,6 +2312,7 @@ function onBodyScroll() {
 
   atBottom.value = el.scrollHeight - el.scrollTop - el.clientHeight <= NEAR_BOTTOM_PX;
   chat.setChatViewport?.(props.sid, atBottom.value);
+  syncClarificationVisibility();
 
   if (el.scrollTop <= 240 && sess.value?.historyWindow?.hasOlder
     && !historyPage.value?.loading && !historyPage.value?.error && !prepending.value) {
@@ -2256,7 +2326,51 @@ async function autoScroll() {
   }
 
   await nextTick();
-  scrollDown();
+
+  if (atBottom.value && !prepending.value) {
+    scrollDown();
+  }
+}
+
+/**
+ * Показываем начало уточнения, если его успели вытеснить действия того же хода.
+ * При ручном переходе передаём фокус реплике для чтения с клавиатуры.
+ */
+function revealClarification(key: string, focus = false) {
+  const root = body.value;
+  const row = root && clarificationElement(root, key);
+
+  if (!root || !row) {
+    return;
+  }
+
+  const box = row.getBoundingClientRect();
+  const bounds = root.getBoundingClientRect();
+
+  if (box.top < bounds.top || box.top >= bounds.bottom) {
+    root.scrollTop += box.top - bounds.top;
+    onBodyScroll();
+  }
+  if (focus) {
+    row.focus({ preventScroll: true });
+  }
+}
+
+/**
+ * Кнопка ведёт к уточнению, пока оно вне окна. Из места чтения
+ * она возвращает к концу ленты тем же путём, что и обновление истории.
+ */
+async function navigateClarification() {
+  const key = activeClarificationKey.value;
+
+  if (key && !clarificationVisible.value) {
+    revealClarification(key, true);
+
+    return;
+  }
+
+  await showLatestHistory();
+  body.value?.focus({ preventScroll: true });
 }
 
 watch(() => [
@@ -2334,24 +2448,42 @@ async function submit() {
     return;
   }
   if (sess.value.sending && inTurnComposer.value.ready) {
-    const accepted = await chat.sendInTurn(props.sid, text, atts);
+    const sid = props.sid;
+    const accepted = await chat.sendInTurnReceipt(sid, text, atts);
+    const sameChat = props.sid === sid && !!body.value;
 
     if (!accepted) {
-      inputErr.value = chat.inTurnError || t('core.chatNeUdalosOtpravitUtochnenie');
+      if (sameChat) {
+        inputErr.value = chat.inTurnError || t('core.chatNeUdalosOtpravitUtochnenie');
+      }
 
       return;
     }
-
-    inputErr.value = '';
-    input.value = '';
-    clearTimeout(draftTimer ?? undefined);
-    chat.setDraft(props.sid, '');
-
-    if (atts.length) {
-      chat.setDraftAttachments(props.sid, []);
+    if (sameChat) {
+      inputErr.value = '';
+      input.value = '';
+      clearTimeout(draftTimer ?? undefined);
     }
 
-    atBottom.value = true;
+    chat.setDraft(sid, '');
+
+    if (atts.length) {
+      chat.setDraftAttachments(sid, []);
+    }
+    if (!sameChat) {
+      return;
+    }
+
+    await nextTick();
+
+    if (props.sid === sid) {
+      const row = timeline.value.find(({ message }) => message.runId === accepted.runId
+        && message.messageId === accepted.messageId && message.kind === 'in-turn');
+
+      if (row) {
+        revealClarification(row.key);
+      }
+    }
 
     return;
   }
@@ -3376,6 +3508,14 @@ html[data-ui-touch] .touch-keyboard-hint { display: inline; }
   background: var(--surface-2);
 }
 .cs-input:focus-within { border-top-color: var(--line-2); }
+.clarification-nav {
+  position: absolute;
+  inset-inline-end: var(--chat-gutter);
+  bottom: calc(100% + 12px);
+  z-index: 3;
+  background: var(--surface);
+  border-radius: var(--control-radius);
+}
 /* Чипы вложений до отправки */
 .pend { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 8px; }
 .chip { display: flex; align-items: center; gap: 6px; background: var(--surface-2); border: 1px solid var(--line); border-radius: 8px; padding: 4px 6px; }

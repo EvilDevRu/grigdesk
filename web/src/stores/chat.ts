@@ -31,8 +31,9 @@ import type {
   WorkdirCandidate, WorkdirPreview, WorkdirProposal,
 } from '../shared/chatContracts.ts';
 import type { ChatHistorySnapshot } from '../shared/chatHistorySnapshot.ts';
-import type { ChatInTurnRun, InTurnEntry } from './chatInTurn.ts';
-import type { InTurnPage, InTurnAvailability } from '../../../shared/chat/chatInTurnContracts.ts';
+import type { ChatInTurnRun } from './chatInTurn.ts';
+import type { InTurnPage, InTurnAvailability, InTurnReceipt }
+  from '../../../shared/chat/chatInTurnContracts.ts';
 
 import { normalizeChatWorkdir, normalizeRecentWorkdirs, sameChatWorkdir }
   from '../../../shared/chat/chatWorkdir.ts';
@@ -3781,19 +3782,25 @@ export const useChatStore = defineStore('chat', {
      * Обычный POST и восстановление его потерянного ответа завершают одну попытку.
      * Полученный receipt материализуется до удаления сохранённого id отправки.
      */
-    _confirmInTurnReceipt(run: ChatInTurnRun, receipt: InTurnEntry) {
+    _confirmInTurnReceipt(run: ChatInTurnRun, receipt: InTurnReceipt) {
       mergeInTurnEntry(run, receipt);
       this._materializeInTurn(run);
       delete this.inTurnAttempts[run.chatKey];
 
-      return true;
+      return receipt;
+    },
+    async sendInTurn(chatKey: string, text: string, attachments: ChatAttachment[] = []) {
+      return Boolean(await this.sendInTurnReceipt(chatKey, text, attachments));
     },
     /**
      * Повтор текста в том же запуске использует прежний id, пока исход не подтверждён.
      * При потере ответа POST сначала ищем receipt, чтобы не отправить второй экземпляр.
      * Картинки входят в отпечаток попытки: тот же текст с другим файлом — новая реплика.
+     * Подтверждение также даёт композеру точную реплику для перехода в ленте.
      */
-    async sendInTurn(chatKey: string, text: string, attachments: ChatAttachment[] = []) {
+    async sendInTurnReceipt(
+      chatKey: string, text: string, attachments: ChatAttachment[] = [],
+    ): Promise<InTurnReceipt | null> {
       const run = this.inTurnRuns[chatKey];
       const value = String(text || '').trim();
       const files = attachments.map((a) => ({ file: a.file, name: a.name }));
@@ -3802,7 +3809,7 @@ export const useChatStore = defineStore('chat', {
       if (this.inTurnProtocol !== IN_TURN_PROTOCOL || !run?.active
         || !run.availability?.available || (!value && !files.length)
         || utf8Bytes(value) > IN_TURN_TEXT_LIMIT_BYTES) {
-        return false;
+        return null;
       }
 
       const prior = this.inTurnAttempts[chatKey];
@@ -3850,7 +3857,7 @@ export const useChatStore = defineStore('chat', {
           'core.chatNeUdalosOtpravitUtochnenie',
         );
 
-        return false;
+        return null;
       }
     },
     /**

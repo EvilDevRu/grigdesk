@@ -25,6 +25,11 @@ an unknown size does not mean access was denied.
 5. Stop interrupts work and shows “⏹ Turn stopped.” alongside completed actions.
    After a network interruption, inspect what already happened and the reason before resuming.
 
+Once a message sent into the current turn is confirmed, the feed shows your clarification
+among the agent’s actions. While the turn is running, use “Go to clarification” by the
+message field to find your latest clarification if it scrolls out of view. “Go to the end”
+returns to the current activity.
+
 Each conversation card shows a circular project avatar on the left and a model badge in the agent provider’s
 color on the right. A chat without a project shows a folder icon. In a conversation without a task,
 you can use the Project picker in the header.

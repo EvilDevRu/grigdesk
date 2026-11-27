@@ -1688,6 +1688,8 @@
   "chatHistoryOlderLoading": "Loading older messages…",
   "chatHistoryOlder": "Earlier messages",
   "chatHistoryLatest": "Go to new messages",
+  "chatToClarification": "Go to clarification",
+  "chatToFeedEnd": "Go to the end",
   "chatPagingUnsupported": "The server does not support paged chat loading",
   "chatPageInvalid": "The chat page is too large",
   "chatHistoryWindowInvalid": "Invalid history page",

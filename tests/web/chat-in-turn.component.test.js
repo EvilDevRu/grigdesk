@@ -89,7 +89,11 @@ async function mountChat(t, {
     },
     questionFor() { return null; }, isOnConveyor() { return false; },
     tabLabel() { return session.title; },
-    async sendInTurn(...args) { calls.inTurn.push(args); return accept; },
+    async sendInTurnReceipt(...args) {
+      calls.inTurn.push(args);
+
+      return typeof accept === 'function' ? accept() : accept ? { runId: run.runId } : null;
+    },
     async send(...args) { calls.following.push(args); return true; },
     async stop() { calls.stop += 1; },
   };
@@ -294,6 +298,77 @@ test('одна кнопка и Enter отправляют в активный х
   assert.deepEqual(calls.following, []);
   await wrapper.get('[data-context="chat-stop"]').trigger('click');
   assert.equal(calls.stop, 1);
+});
+
+test('после подтверждения лента показывает отправленное уточнение среди новых действий', async (t) => {
+  const confirmation = Promise.withResolvers();
+  const { browser, wrapper, session, run, flushPromises } = await mountChat(t, {
+    accept: () => confirmation.promise,
+  });
+  const body = wrapper.get('.cs-body').element;
+  const messageId = 'sent-clarification';
+  const key = `${run.runId}:user:${messageId}`;
+  let scrollTop = 1600;
+
+  Object.defineProperties(body, {
+    clientHeight: { value: 400 },
+    scrollHeight: { value: 2000 },
+    scrollTop: {
+      get: () => scrollTop,
+      set: (top) => {
+        scrollTop = Math.max(0, Math.min(1600, top));
+      },
+    },
+  });
+
+  const getBounds = browser.HTMLElement.prototype.getBoundingClientRect;
+
+  t.mock.method(browser.HTMLElement.prototype, 'getBoundingClientRect', function () {
+    if (this === body) {
+      return { top: 0, bottom: 400 };
+    }
+    if (this.dataset.historyKey === key) {
+      return { top: 750 - scrollTop, bottom: 800 - scrollTop };
+    }
+
+    return getBounds.call(this);
+  });
+
+  await wrapper.get('textarea').setValue('Тестовое уточнение');
+  await wrapper.get('[data-context="chat-send"]').trigger('click');
+  session.messages.push({
+    role: 'user',
+    kind: 'in-turn',
+    runId: run.runId,
+    messageId,
+    text: 'Тестовое уточнение',
+    sequence: 1,
+    receipt: { state: 'forwarded', acceptedAt: 2 },
+  });
+  session.steps.push({ k: 'note', text: 'Следующее действие', at: 3 });
+  await flushPromises();
+
+  const message = wrapper.get(`[data-history-key="${key}"]`).element;
+
+  assert.ok(message.getBoundingClientRect().bottom < 0);
+  confirmation.resolve({ runId: run.runId, messageId });
+  await flushPromises();
+  assert.equal(message.getBoundingClientRect().top, 0);
+  assert.equal(wrapper.get('textarea').element.value, '');
+
+  session.steps.push({ k: 'note', text: 'Ещё одно действие', at: 4 });
+  await flushPromises();
+  assert.equal(message.getBoundingClientRect().top, 0);
+
+  const navigation = '[data-role="chat-clarification-nav"]';
+
+  assert.equal(wrapper.get(navigation).text(), 'К концу ленты');
+  await wrapper.get(navigation).trigger('click');
+  await flushPromises();
+  assert.ok(message.getBoundingClientRect().bottom < 0);
+  assert.equal(wrapper.get(navigation).text(), 'К уточнению');
+  await wrapper.get(navigation).trigger('click');
+  assert.equal(message.getBoundingClientRect().top, 0);
 });
 
 test('прогресс не разбирает Markdown старых ответов, изменение текста разбирает один', async (t) => {

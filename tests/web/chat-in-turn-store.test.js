@@ -313,7 +313,10 @@ test('потерянный ответ POST восстанавливает ту �
     throw new Error('Ответ потерялся');
   };
   apiHarness.get = async () => ({ messages: { [sent.messageId]: receipt(1, sent.messageId) } });
-  assert.equal(await chat.sendInTurn(CHAT, 'уточнение 1'), true);
+  const confirmed = await chat.sendInTurnReceipt(CHAT, 'уточнение 1');
+
+  assert.equal(confirmed?.messageId, sent.messageId);
+  assert.equal(confirmed?.runId, RUN);
   assert.equal(chat.inTurnAttempts[CHAT], undefined);
   assert.equal(chat.sessions[0].messages.filter((message) => message.messageId === sent.messageId).length, 1);
 });

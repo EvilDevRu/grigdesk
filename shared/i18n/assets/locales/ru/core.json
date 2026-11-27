@@ -1708,6 +1708,8 @@
   "chatHistoryOlderLoading": "Загружаем старые сообщения…",
   "chatHistoryOlder": "Ранние сообщения",
   "chatHistoryLatest": "К новым сообщениям",
+  "chatToClarification": "К уточнению",
+  "chatToFeedEnd": "К концу ленты",
   "chatPagingUnsupported": "Сервер не поддерживает порционную загрузку чатов",
   "chatPageInvalid": "Слишком большая страница чатов",
   "chatHistoryWindowInvalid": "Некорректная порция истории",
