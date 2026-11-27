@@ -32,8 +32,8 @@ flowchart LR
 [клиентский вход](../server/client-listener.md), [привязка](../server/device-pairing.md),
 [Android](../mobile/client-app.md), [границы проверок](../testing/unified-client-checks.md).
 
-Прежнее приложение с посредником, модуль `:app` и `/api/mobile/v1` сохраняются отдельно.
-Новый модуль `:client` использует тот же Android applicationId, не создавая третьего пакета.
+Android-модуль `:client` использует applicationId `local.grigdesk.mobile`.
+Он подключается к общему API через клиентский TLS-вход напрямую или через посредника.
 
 На обеих платформах страница плагина удалённой машины в том же origin получает права окна.
 В Electron проверки главного фрейма остаются дополнительным ограничением прямых вызовов,

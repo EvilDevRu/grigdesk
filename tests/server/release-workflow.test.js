@@ -21,9 +21,7 @@ test('RW-1: workflow релиза запускается вручную, соб�
   assert.match(text, /server\/build\/node-runtime\.json/u);
   assert.ok(text.includes(pipelineEntry + ' --groups prepare-server,prepare-build,server'));
   assert.ok(text.includes(pipelineEntry + ' --groups prepare-web,prepare-build,web'));
-  assert.match(text, /npm --prefix mobile ci/);
-  assert.ok(text.indexOf('npm --prefix mobile ci')
-    < text.indexOf(pipelineEntry + ' --groups prepare-server'));
+  assert.doesNotMatch(text, /npm --prefix mobile ci/u);
   assert.match(text, /go-version: '1\.27\.4'/u);
   assert.match(text, /npm --prefix deepseek ci/);
   assert.match(text, /npm --prefix desktop ci/);

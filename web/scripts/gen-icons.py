@@ -17,7 +17,6 @@ from PIL import Image
 
 ROOT = Path(__file__).resolve().parents[2]
 BRAND = ROOT / 'docs/images/brand'
-ANDROID = ROOT / 'mobile/android/app/src/main/res'
 MASTERS = ('wordmark', 'wordmark-reversed', 'stacked', 'gd', 'gd-reversed',
            'gd-small', 'g-small', 'g-small-reversed', 'favicon-tile')
 OLD_MASTERS = ('favicon', 'icon', 'mark', 'mark-light', 'mark-mono', 'mark-small')
@@ -154,23 +153,20 @@ def generate() -> None:
     with Image.open(BRAND / 'grigdesk-app-icon-1024.png') as source:
         master = source.convert('RGBA')
 
-    outputs = {ROOT / 'desktop/build/icon.png': 512, ROOT / 'desktop/build/window-icon.png': 64,
-               ROOT / 'web/public/icon-96.png': 96}
-    for area in ('web', 'mobile'):
-        for size in (192, 512):
-            outputs[ROOT / area / 'public' / f'icon-{size}.png'] = size
-
-    for density, size in {'mdpi': 48, 'hdpi': 72, 'xhdpi': 96, 'xxhdpi': 144, 'xxxhdpi': 192}.items():
-        for suffix in ('', '_round'):
-            outputs[ANDROID / f'mipmap-{density}' / f'ic_launcher{suffix}.png'] = size
+    outputs = {
+        ROOT / 'desktop/build/icon.png': 512,
+        ROOT / 'desktop/build/window-icon.png': 64,
+        ROOT / 'web/public/icon-96.png': 96,
+        ROOT / 'web/public/icon-192.png': 192,
+        ROOT / 'web/public/icon-512.png': 512,
+    }
 
     for file, size in outputs.items():
         file.parent.mkdir(parents=True, exist_ok=True)
         master.resize((size, size), Image.LANCZOS).save(file, format='PNG')
 
     shutil.copyfile(ROOT / 'web/public/icon-512.png', ROOT / 'bin/grigdesk.png')
-    for area in ('web', 'mobile'):
-        shutil.copyfile(BRAND / 'grigdesk-maskable-512.png', ROOT / area / 'public/icon-maskable-512.png')
+    shutil.copyfile(BRAND / 'grigdesk-maskable-512.png', ROOT / 'web/public/icon-maskable-512.png')
 
     encoded = base64.b64encode((ROOT / 'web/public/icon-96.png').read_bytes()).decode('ascii')
     chunks = [encoded[index:index + 96] for index in range(0, len(encoded), 96)]
@@ -192,12 +188,9 @@ def generate() -> None:
     write(index, html)
 
     write(ROOT / 'web/src/shared/GrigDeskMark.vue', component('grigdesk-mark'))
-    write(ROOT / 'mobile/src/ui/UiBrandMark.vue', component('ui-brand-mark'))
-    foreground = android_foreground()
-    write(ANDROID / 'drawable/ic_launcher_foreground.xml', foreground)
     client = ROOT / 'mobile/android/client/src/main/res'
     shutil.copyfile(ROOT / 'web/public/icon-512.png', client / 'drawable-nodpi/client_icon.png')
-    write(client / 'drawable/ic_launcher_foreground.xml', foreground)
+    write(client / 'drawable/ic_launcher_foreground.xml', android_foreground())
     write(client / 'values/ic_launcher_background.xml',
           '<?xml version="1.0" encoding="utf-8"?>\n<resources>\n'
           '    <color name="ic_launcher_background">#0B0D11</color>\n</resources>\n')
@@ -208,9 +201,6 @@ def generate() -> None:
                 '</adaptive-icon>\n')
     write(client / 'mipmap-anydpi-v26/ic_launcher.xml', adaptive)
     write(client / 'mipmap-anydpi-v26/ic_launcher_round.xml', adaptive)
-    write(ANDROID / 'values/ic_launcher_background.xml',
-          '<?xml version="1.0" encoding="utf-8"?>\n<resources>\n'
-          '    <color name="ic_launcher_background">#0B0D11</color>\n</resources>\n')
     print('Иконки GrigDesk обновлены; favicon для встроенного использования:')
     print(uri)
 

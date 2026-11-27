@@ -81,7 +81,6 @@ export function nextDelay(attempt: number, random = Math.random): number {
 
 export class RelayLink {
   readonly relay: Relay;
-  private mobilePort: number;
   private clientTarget?: () => Promise<number>;
   private compatibility: 'unknown' | 'supported' | 'unsupported' = 'unknown';
   private vpnGate: (ip: string) => Promise<boolean>;
@@ -109,13 +108,11 @@ export class RelayLink {
 
   constructor(options: {
     relay: Relay;
-    mobilePort: number;
     clientTarget?: () => Promise<number>;
     vpnGate: (ip: string) => Promise<boolean>;
     changed?: () => void;
   }) {
     this.relay = options.relay;
-    this.mobilePort = options.mobilePort;
     this.clientTarget = options.clientTarget;
     this.vpnGate = options.vpnGate;
     this.changed = options.changed ?? (() => {});
@@ -253,7 +250,7 @@ export class RelayLink {
 
     try {
       const port = destination === 'client' && this.compatibility === 'supported'
-        ? await this.clientTarget?.() : destination ? undefined : this.mobilePort;
+        ? await this.clientTarget?.() : undefined;
 
       if (!port) {
         return;
@@ -280,8 +277,8 @@ export class RelayLink {
         local?.destroy();
       });
       await relayHello(remote, {
-        v: destination === 'client' ? 2 : 1,
-        ...(destination === 'client' ? { target: 'client' } : {}),
+        v: 2,
+        target: 'client',
         role: 'brain-data',
         token: this.relay.brainToken,
         id,

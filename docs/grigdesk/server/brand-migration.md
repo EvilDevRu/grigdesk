@@ -1,7 +1,7 @@
 # Переход с Кокпита на GrigDesk
 
 Код и сборки получают имя GrigDesk вместе. Настоящие данные переносит владелец из обычной
-консоли при закрытом окне и остановленных сервере, DevLink и заданиях. Проверки на фикстурах
+консоли при закрытом окне и остановленных сервере и заданиях. Проверки на фикстурах
 не означают, что установленная копия уже перенесена.
 
 ## Сначала папка данных
@@ -43,7 +43,7 @@ node tools/brandMove.mts --apply
 3. Замена префикса абсолютных путей в значениях `state/prefs.json`,
    `state/showcase-browser/browser.json` и `state/sandboxes/*.json`; ключи JSON не меняются.
 4. Обновление совместимых ссылок `.env` и `server/.state` в дереве кода.
-5. Перенос `~/.config/cockpit` в `~/.config/grigdesk`, вместе с подписью Android и DevLink.
+5. Перенос `~/.config/cockpit` в `~/.config/grigdesk`, вместе с подписью Android.
 
 Профиль окна `~/.config/Кокпит` переносит отдельно установщик окна в `~/.config/GrigDesk`.
 Регистр имени отличает данные окна от служебной папки.
@@ -79,9 +79,8 @@ node tools/brandMove.mts --drop-links
 
 Второй этап сменил оставшиеся внутренние имена: метки и протокол сборки DeepSeek/GLM
 (`.grigdesk.b<hash16>`, `grigdesk.settings`, `_grigdesk/settings/*`, `grigdesk-host-web-acp-v3`),
-ревизии профиля GLM, умолчания домашних папок исполнителей, протокол телефона
-(`urn:grigdesk:mobile:v1`, `X-GrigDesk-Operation-Created-At`, `grigdesklink`), значение рабочей
-папки `grigdesk`, имя арбитра `grigdesk-arbiter`, формат выгрузки маршрутов
+ревизии профиля GLM, умолчания домашних папок исполнителей, значение рабочей папки
+`grigdesk`, имя арбитра `grigdesk-arbiter`, формат выгрузки маршрутов
 `grigdesk-route-authoring`, код `grigdesk_too_old` и IndexedDB `grigdesk-studio3d-intents`.
 
 При переходе, с закрытым окном и без активных задач конвейера:

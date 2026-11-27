@@ -3,8 +3,6 @@ import path from 'node:path';
 
 import { MobileInputError } from './errors.ts';
 import { ensureBrainIdentity, renderRelayEnv } from './identity.ts';
-import { startMobileServer } from './mobileServer.ts';
-import type { MobileApp } from './mobileServer.ts';
 import { PairingCodes } from './pairing.ts';
 import { RelayHub } from './relayHub.ts';
 import { DeviceStore, RelayStore } from './store.ts';
@@ -12,40 +10,27 @@ import type { Relay } from './store.ts';
 import { RelayDeploymentService } from './relayDeployment/service.ts';
 import type { DeploymentOptions } from './relayDeployment/service.ts';
 
-type MobileServer = {
-  port: number;
-  close: () => Promise<void>;
-  disconnectDevice: (fp: string) => void;
-};
-
 type Hub = Pick<RelayHub, 'sync' | 'close' | 'status'>;
 
 type Options = {
   directory: string;
-  port: number;
   vpnGate: (ip: string) => Promise<boolean>;
-  name?: string;
-  version?: string;
   changed?: () => void;
   disconnectClient?: (fp: string) => void;
   log?: (event: string) => void;
-  registerRoutes?: (app: MobileApp) => void | Promise<void>;
-  recoverOperation?: Parameters<typeof startMobileServer>[0]['recoverOperation'];
   relayDeployment?: DeploymentOptions;
   makeHub?: (options: ConstructorParameters<typeof RelayHub>[0]) => Hub;
-  makeServer?: (options: Parameters<typeof startMobileServer>[0]) => Promise<MobileServer>;
 };
 
 /**
- * Владеет только мобильным входом и исходящими соединениями с посредниками.
- * Ошибка private store, ключа или порта не прерывает основной сервер GrigDesk.
+ * Владеет реестром устройств, личностью сервера и исходящими связями с посредниками.
+ * Ошибка хранилища или ключа не прерывает основной сервер GrigDesk.
  */
 export class MobileService {
   readonly devices: DeviceStore;
   readonly relays: RelayStore;
   readonly pairing: PairingCodes;
   private options: Options;
-  private server: MobileServer | null = null;
   private hub: Hub | null = null;
   private identity: Awaited<ReturnType<typeof ensureBrainIdentity>> | null = null;
   private error: string | null = null;
@@ -65,10 +50,10 @@ export class MobileService {
 
   /**
    * Поднимается после listen основного API, когда inject уже доступен адаптерам.
-   * До открытия TLS проверяет оба списка и согласованность пары ключ/сертификат.
+   * Перед запуском хаба проверяет оба списка и согласованность пары ключ/сертификат.
    */
   async start() {
-    if (this.server || this.hub) {
+    if (this.hub) {
       return;
     }
 
@@ -80,30 +65,7 @@ export class MobileService {
 
       this.error = null;
 
-      try {
-        this.server = await (this.options.makeServer ?? startMobileServer)({
-        identity: this.identity,
-        directory: this.options.directory,
-        deviceStore: this.devices,
-        pairing: this.pairing,
-        port: this.options.port,
-        serverName: this.options.name,
-        version: this.options.version,
-        registerRoutes: this.options.registerRoutes,
-        recoverOperation: this.options.recoverOperation,
-        log: this.options.log,
-      });
-      } catch (failure) {
-        if (!this.clientTarget) {
-          throw failure;
-        }
-
-        this.error = 'Прежний мобильный вход недоступен. Проверьте его порт и настройки.';
-        this.options.log?.('mobile_v1_start_failed');
-      }
-
       this.hub = (this.options.makeHub ?? ((options) => new RelayHub(options)))({
-        mobilePort: this.server?.port ?? 0,
         clientTarget: this.clientTarget,
         vpnGate: this.options.vpnGate,
         changed: this.options.changed,
@@ -133,7 +95,7 @@ export class MobileService {
       }
     } catch {
       await this.close();
-      this.error = 'Мобильный доступ не запущен. Проверьте настройки и порт.';
+      this.error = 'Мобильный доступ не запущен. Проверьте настройки и личность сервера.';
       this.options.log?.('mobile_start_failed');
     }
 
@@ -148,23 +110,20 @@ export class MobileService {
     try {
       return {
         server: {
-          up: !!this.server,
-          port: this.server?.port ?? this.options.port,
           fp: this.identity?.fp ?? null,
           error: this.error,
         },
         relays: (await this.relays.list()).map((relay) => ({
-              ...publicRelay(relay),
-              enabled: relay.enabled,
-              link: this.hub?.status().find((link) => link.id === relay.id) ?? {
-                compatibility: 'unknown' as const,
-                state: 'offline',
-                since: Date.now(),
-                lastError: null,
-                pipes: 0,
-              },
-            })),
-        devices: this.server ? await this.devices.list() : [],
+          ...publicRelay(relay),
+          enabled: relay.enabled,
+          link: this.hub?.status().find((link) => link.id === relay.id) ?? {
+            compatibility: 'unknown' as const,
+            state: 'offline',
+            since: Date.now(),
+            lastError: null,
+            pipes: 0,
+          },
+        })),
       };
     } catch {
       await this.close();
@@ -172,19 +131,16 @@ export class MobileService {
 
       return {
         server: {
-          up: false,
-          port: this.options.port,
           fp: this.identity?.fp ?? null,
           error: this.error,
         },
         relays: [],
-        devices: [],
       };
     }
   }
 
   /**
-   * Повреждённый deployment journal закрывает только мастер, сохраняя прежний mobile/direct.
+   * Повреждённый deployment journal закрывает только мастер, сохраняя ручную настройку и прямой доступ.
    * Экземпляр создаётся после загрузки identity и принадлежит серверному lifecycle.
    */
   deploymentService(): RelayDeploymentService {
@@ -207,7 +163,7 @@ export class MobileService {
 
   /**
    * Публикует новую конфигурацию после durable записи списка.
-   * Хаб не подключается, если отдельный TLS-вход недоступен.
+   * Для изменения списка хаб и личность сервера должны быть готовы.
    */
   async addRelay(input: Parameters<RelayStore['add']>[0]) {
     this.requireReady();
@@ -246,17 +202,8 @@ export class MobileService {
 
     const device = await this.devices.revoke(id);
 
-    this.server?.disconnectDevice(device.fp);
     this.options.disconnectClient?.(device.fp);
     this.options.changed?.();
-  }
-
-  /**
-   * Общий API устройств отзывает durable запись независимо от готовности мобильного входа.
-   * Этот адаптер закрывает только существующие v1-сокеты и не требует requireReady.
-   */
-  disconnectDevice(fp: string): void {
-    this.server?.disconnectDevice(fp);
   }
 
   /**
@@ -294,38 +241,7 @@ export class MobileService {
   }
 
   /**
-   * QR несёт пины обоих TLS-слоёв и только телефонный токен посредника.
-   * Одноразовый код выдаётся лишь для явной операции привязки.
-   */
-  async qr(id: string, pair: boolean) {
-    const relay = await this.relay(id);
-    const issued = pair ? this.pairing.issue() : null;
-    const payload = {
-      v: 1,
-      brain: {
-        name: this.options.name ?? 'GrigDesk',
-        fp: this.identity!.fp,
-      },
-      relay: {
-        ...publicRelay(relay),
-        token: relay.deviceToken,
-      },
-      ...(issued ? { pair: issued } : {}),
-    };
-    const text = `grigdesklink:1:${Buffer.from(JSON.stringify(payload)).toString('base64url')}`;
-
-    if (Buffer.byteLength(text) > 4096) {
-      throw new MobileInputError('qr_too_large', 'Данные посредника не помещаются в QR.');
-    }
-
-    return {
-      text,
-      expiresAt: issued?.exp ?? null,
-    };
-  }
-
-  /**
-   * Закрывает свои соединения и TLS-вход при общем shutdown или ошибке старта.
+   * Закрывает связи с посредниками и мастер при остановке или ошибке старта.
    * Повторное закрытие не затрагивает чужие процессы.
    */
   async close() {
@@ -333,16 +249,11 @@ export class MobileService {
     this.deployments = undefined;
     this.hub?.close();
     this.hub = null;
-
-    const server = this.server;
-
-    this.server = null;
-    await server?.close();
   }
 }
 
 /**
- * Общий безопасный вид посредника для настроек и QR.
+ * Общий безопасный вид посредника для настроек.
  * Секретные токены никогда не попадают в административный список.
  */
 function publicRelay(relay: Relay) {

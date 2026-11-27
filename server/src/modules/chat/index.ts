@@ -47,7 +47,6 @@ import { NativeSettingsError } from '../../lib/executorSettings/errors.ts';
 import { createWorkIpc } from '../../lib/executors/workIpc.ts';
 import { helperCommand } from '../../lib/runtimePaths.ts';
 import { getModelsRegistry } from '../../lib/modelsRegistry.ts';
-import { MobileChatControls } from '../../lib/chat/mobileControls.ts';
 import { resolveRequestedEffort } from '../../lib/modelEffort.ts';
 import {
   ChatHistoryError,
@@ -196,7 +195,7 @@ interface ChatTurnInput {
   // Устойчивый id отправки из окна: с ним ход принимается коротко и исполняется без
   // HTTP-соединения, а повтор с тем же id не запускает исполнителя второй раз.
   turnId?: unknown;
-  // Этот маркер передаёт только внутренний mobileChat, startTurnRoute его не читает.
+  // Серверная метка хранится в журнале; startTurnRoute не принимает её из HTTP-тела.
   mobileOwner?: MobileTurnOwner;
 }
 
@@ -5390,105 +5389,6 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
 
   // Свободный чат без задачи (корень фабрики).
   fastify.post<ChatRoute>('/api/chat', async (request, reply) => startTurnRoute(reply, request, null));
-
-  fastify.decorate('mobileChat', {
-    controls: new MobileChatControls({
-      history,
-      registry: () => modelsRegistry(config),
-      busy: (id) => Boolean(acceptedTurns.get(id) || savingChats.get(id) || deletingChats.has(id)
-        || activeRuns.has(id) || workdirTransitions.isBusy(id)
-        || turnLocks.isBusy({ chatKey: id }) || backgroundRuns.has(id)),
-      lock: (id, action) => turnLocks.run({ chatKey: id }, action),
-      reset: resetWorkspaceMemory,
-      changed: (id) => {
-        void broadcastChatStore(id);
-      },
-    }),
-    compactWindow: () => Math.max(0, Number(prefs.read().chatAutoCompactWindow) || 0),
-    defaults: () => history.readMetaRaw(),
-    /**
-     * Назначает server-owned history из доверенного адаптера устройства.
-     * Выбор модели и рабочей области всегда берётся из свежей durable записи чата.
-     */
-    async send(input) {
-      if (typeof input.message !== 'string' || !input.message.trim()
-        || !/^d[a-f0-9]{8,32}$/.test(input.owner.deviceId)
-        || !/^[A-Za-z0-9_-]{8,80}$/.test(input.owner.clientId)
-        || !/^[a-f0-9]{64}$/.test(input.owner.contentHash)) {
-        return { status: 400, body: { error: 'bad_text', message: 'Сообщение или id отправки повреждены.' } };
-      }
-
-      return acceptTurnAnswer({
-        chatKey: input.chatKey,
-        turnId: input.turnId,
-        message: input.message,
-        sentAt: input.sentAt,
-        mobileOwner: input.owner,
-      });
-    },
-    reconcile: (chatKey) => mobileHistory.reconcile(chatKey),
-    // Список телефона берёт шапки из кэша файлов: полная история для него не нужна.
-    heads: () => history.heads(),
-    /**
-     * Старый operation intent доказывается только записью с тем же владельцем и hash текста.
-     * Восстановление не вызывает admission; материализация сверяет уже принятый ход.
-     */
-    async recover(input) {
-      await turnLedger.load();
-
-      const entry = turnLedger.get(input.turnId);
-      const owner = entry?.mobileOwner;
-
-      if (!entry || !owner || entry.chatKey !== input.chatId || owner.deviceId !== input.deviceId
-        || owner.clientId !== input.clientId || owner.contentHash !== input.contentHash) {
-        return null;
-      }
-
-      await mobileHistory.reconcile(input.chatId);
-
-      return { state: turnLedger.get(input.turnId)!.state };
-    },
-    /**
-     * Стабильный id старой реплики назначается сервером один раз под общим history lock.
-     * Чтение сперва завершает materialization и не требует браузерного PUT.
-     */
-    async read(chatKey) {
-      await mobileHistory.reconcile(chatKey);
-
-      const record = await history.readOne(chatKey);
-
-      if (!record || (record.messages || []).every((message) => message.mobileId)) {
-        return record;
-      }
-
-      return history.patchExecution(chatKey, (current) => ({
-        messages: (current.messages || []).map((message) => message.mobileId
-          ? message : { ...message, mobileId: `m${randomUUID()}` }),
-      }), { durable: true });
-    },
-    /**
-     * Доставка читается из того же turn ledger и только для отправителя этого устройства.
-     * Чужой clientId выглядит неизвестным, не раскрывая другого телефона или разговора.
-     */
-    async deliveries(deviceId, chatKey, clientIds) {
-      await turnLedger.load();
-
-      const owned = new Map(turnLedger.mobileTurns(chatKey)
-        .filter((entry) => entry.mobileOwner?.deviceId === deviceId)
-        .map((entry) => [entry.mobileOwner!.clientId, entry]));
-
-      return clientIds.map((clientId) => {
-        const entry = owned.get(clientId);
-
-        return {
-          clientId,
-          turnId: entry?.turnId ?? null,
-          state: entry?.state ?? 'unknown',
-          outcome: entry?.outcome ?? null,
-        };
-      });
-    },
-  } satisfies NonNullable<FastifyInstance['mobileChat']>);
 
   /**
    * Состояние принятых ходов по их id: окно после F5 или долгого обрыва отличает

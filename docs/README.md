@@ -35,7 +35,7 @@
 - [Сервер и доступ](grigdesk/server/README.md) — запуск, авторизация, основной HTTP на loopback
   и отдельно включаемый клиентский TLS-вход.
 - [Приложение на телефоне](grigdesk/mobile/README.md) — полный клиент, локальная труба,
-  привязка, сборка APK и совместимость с прежним v1.
+  привязка и сборка APK.
 - [Видео и речь](grigdesk/media/README.md) — записи встреч, расшифровка, речь.
 - [Плагины](grigdesk/plugins/README.md) — SSH, документы, «Код», стенды, презентации.
 - [Тесты и проверка](grigdesk/testing/README.md) — happy-dom, Playwright, ловушки.

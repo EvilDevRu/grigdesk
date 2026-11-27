@@ -2,58 +2,11 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 
 import { normalizeContextUsage } from '../../../../shared/chat/chatContextUsage.ts';
-import type { ChatHead, ChatHistoryStore, StoredChat } from './historyStore.ts';
+import type { ChatHistoryStore, StoredChat } from './historyStore.ts';
 import type { InTurnHistory } from './inTurnHistory.ts';
 import { messageKey } from './messageIdentity.ts';
-import type { ChatTurnLedger, MobileTurnOwner, TurnEntry } from './turnLedger.ts';
+import type { ChatTurnLedger, TurnEntry } from './turnLedger.ts';
 import { EMPTY_WORKDIR_MEMORY } from './workdirTransition.ts';
-import type { MobileChatControls } from './mobileControls.ts';
-
-export type MobileChatInput = {
-  chatKey: string;
-  turnId: string;
-  message: string;
-  sentAt?: number;
-  owner: MobileTurnOwner;
-};
-
-export type MobileChatPort = {
-  controls?: MobileChatControls;
-  compactWindow?: () => number;
-  defaults?: () => Promise<unknown>;
-  send: (input: MobileChatInput) => Promise<{
-    status: number;
-    body: Record<string, unknown>;
-  }>;
-  reconcile: (chatKey?: string) => Promise<void>;
-  read: (chatKey: string) => Promise<StoredChat | null>;
-  heads: () => Promise<ChatHead[]>;
-  recover: (input: {
-    deviceId: string;
-    chatId: string;
-    clientId: string;
-    turnId: string;
-    contentHash: string;
-  }) => Promise<{ state: 'queued' | 'running' | 'done' } | null>;
-  deliveries: (
-    deviceId: string,
-    chatKey: string,
-    clientIds: string[],
-  ) => Promise<
-    Array<{
-      clientId: string;
-      turnId: string | null;
-      state: 'unknown' | 'queued' | 'running' | 'done';
-      outcome: string | null;
-    }>
-  >;
-};
-
-declare module 'fastify' {
-  interface FastifyInstance {
-    mobileChat?: MobileChatPort;
-  }
-}
 
 type Options = {
   history: ChatHistoryStore;

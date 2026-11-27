@@ -286,8 +286,6 @@ jobs:
         run: npm --prefix server ci
       - name: Зависимости web
         run: npm --prefix web ci
-      - name: Зависимости мобильных инструментов
-        run: npm --prefix mobile ci
       - name: Зависимости комплекта
         run: |
           npm --prefix deepseek ci
@@ -369,8 +367,6 @@ jobs:
         run: npm --prefix server ci
       - name: Зависимости web
         run: npm --prefix web ci
-      - name: Зависимости мобильных инструментов
-        run: npm --prefix mobile ci
       - name: Зависимости комплекта
         run: |
           npm --prefix deepseek ci
@@ -463,8 +459,6 @@ jobs:
         run: npm --prefix server ci
       - name: Зависимости web
         run: npm --prefix web ci
-      - name: Зависимости мобильных инструментов
-        run: npm --prefix mobile ci
       - name: Зависимости комплекта
         run: |
           npm --prefix deepseek ci

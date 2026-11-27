@@ -32,7 +32,7 @@ GrigDesk хранит настройки и рабочие данные вне �
 | `uiReleases` | `state/ui-releases` | Прежние UI-версии; новым сервером не используются |
 | `serverRuntime` | `runtimes/server` | Приватный кэш автономного сервера |
 | `deepseekRuntime` | `runtimes/deepseek` | Приватный кэш распакованных поставок DeepSeek |
-| `mobileApk` | `state/mobile-apk` | Подписанный APK, описание выпуска и журнал DevLink |
+| `mobileApk` | `state/mobile-apk` | Подписанный APK и описание выпуска |
 | `mediaVenv` | `state/media-venv` | Python для речи |
 | `mediaHf` | `state/hf` | Модели речи |
 | `mobile` | `mobile` | TLS-ключи и привязки телефона |
@@ -206,7 +206,7 @@ leases копий внешних CLI исполнителей: живые сес
   `~/.local/share/grigdesk/desktop`, каталог данных окна `~/.config/GrigDesk`: это клиентская
   программа.
 - Android SDK, JDK, настройки Android, Gradle и загрузки по умолчанию находятся в `dev/android/`
-  папки данных. Ключ подписи APK и состояние DevLink имеют отдельные пути.
+  папки данных. Ключ подписи APK имеет отдельный путь.
 - Сборки и ресурсы кода: `node_modules`, `web/dist`, legacy generation DeepSeek,
   `third_party`, `bin/grigdesk-relay`, `desktop/release`.
   Обновлятель готовит копию Git в `update-work/<хэш рабочей копии>` рядом с файлом состояния

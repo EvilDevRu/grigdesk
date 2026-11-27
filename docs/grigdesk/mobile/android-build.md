@@ -6,12 +6,11 @@
 [Правило блокировки](app-lock.md) принадлежит установке. Совместимость конкретного
 телефона принимается отдельно на устройстве.
 
-`mobile/toolchain.lock.json` фиксирует Capacitor 8.5.3, Java 21, Gradle 8.14.3, AGP 8.13.0,
+`mobile/toolchain.lock.json` фиксирует Java 21, Gradle 8.14.3, AGP 8.13.0,
 compile/target SDK 36, min SDK 30 и версии нативных библиотек. Архивы JDK, CLI tools
 и Gradle имеют SHA256. Скрипт не требует sudo и не меняет системную Java.
 
 ```bash
-npm --prefix mobile ci --include=dev
 tools/mobile deps
 tools/mobile doctor
 tools/mobile check
@@ -29,13 +28,13 @@ tools/mobile build
 `GRIGDESK_ANDROID_USER_HOME`, `GRIGDESK_ANDROID_GRADLE_HOME`, `GRIGDESK_MOBILE_DOWNLOADS`.
 Конкретные пути машины относятся к локальной документации.
 
-`check` запускает прежние мобильные unit/UI/contract тесты под memory guard, typecheck и
-подготовку прежнего :app (mobile build и cap sync), Gradle unit/lint обоих модулей. `build` собирает общий web атомарно через
+`check` запускает клиентские Node-тесты через сторож памяти, а также
+`:client:testDebugUnitTest` и `:client:lintDebug`. `build` собирает общий web атомарно через
 `tools/client-ui.mts` в client/src/main/assets/ui с api-version.json и release.json, затем
 `:client:assembleDebug`. Результат по умолчанию — `~/.grigdesk/dists/grigdesk-mobile-debug.apk`.
 Каталог `dists/` находится в папке данных, а `GRIGDESK_MOBILE_APK_DIR` переопределяет путь APK.
-В build/release Capacitor sync и web/dist не участвуют; старый :app остаётся только в проверках. Android-сборка не входит в общий
-`tests/run-all.sh` и не перезапускает рабочий GrigDesk.
+Для build/release интерфейс собирается в отдельный каталог. Android-сборка выполняется
+отдельно от общей регрессии `tests/run-all.sh` без перезапуска рабочего GrigDesk.
 
 ## Подписанный выпуск
 
@@ -48,5 +47,5 @@ GRIGDESK_ANDROID_KEY_ALIAS. Новый ключ автоматически не 
 Готовые `grigdesk-mobile-release.apk` и `grigdesk-mobile-release.json` сохраняются в
 `state/mobile-apk` папки данных или в явно заданном `GRIGDESK_MOBILE_APK_DIR`.
 Публикации, установки на устройство и раздачи обновления
-с сервером эта команда не выполняет. APK legacy-приложения и его протокол обновлений
-остаются отдельными. Прежний пакет того же applicationId перед установкой удаляет человек.
+через сервер выполняют отдельно. Пакет того же applicationId с большим versionCode
+потребует удаления перед установкой этой версии.

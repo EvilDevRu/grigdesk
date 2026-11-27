@@ -54,7 +54,6 @@ export async function verifyCandidate(
 
   const link = options.existing ? null : new RelayLink({
     relay: { ...options.relay, host: address },
-    mobilePort: 0,
     clientTarget: options.clientTarget,
     vpnGate: options.vpnGate,
   });

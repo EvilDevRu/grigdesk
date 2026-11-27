@@ -11,18 +11,12 @@ import path from 'node:path';
 import { computeNodeStatuses } from '../../server/src/lib/factoryGraph.ts';
 import { readFactoryAttemptLedger } from '../../server/src/lib/factoryAttemptLedger.ts';
 import { FactoryStateAdapter } from '../../server/src/adapters/factoryState.ts';
-import https from 'node:https';
-import tls from 'node:tls';
 
 import authPlugin from '../../server/src/plugins/auth.ts';
 import trackerModule from '../../server/src/modules/tracker/index.ts';
 import mobileModule from '../../server/src/modules/mobile/index.ts';
 import { MobileService } from '../../server/src/lib/mobile/service.ts';
-import { registerMobileFacade } from '../../server/src/lib/mobile/facade/index.ts';
-import { ActionTokens } from '../../server/src/lib/mobile/actionTokens.ts';
-import { recoverChatOperation } from '../../server/src/lib/mobile/chatTurns.ts';
-import { chatAppFixture, controlledExecutor, saveChat } from '../server/helpers/chat-turns.js';
-import { makeCert } from '../relay/helpers.js';
+import { chatAppFixture, controlledExecutor } from '../server/helpers/chat-turns.js';
 
 import factoryModule from '../../server/src/modules/factory/index.ts';
 
@@ -373,9 +367,10 @@ export async function advanceFactory(fx, sequence = 9) {
   await chmod(file, 0o400);
 }
 
-// Настоящие auth/chat/factory/B24/mobile модули работают во временных каталогах.
-// Подменяются внешние LLM/портал/CLI, доверенная история и TLS остаются настоящими.
 /**
+ * Настоящий административный API работает во временных каталогах.
+ * Подменяются внешние исполнитель, портал и CLI; доступ выдаётся тестовым CLI-токеном.
+ *
  * @param {{ after: (callback: () => Promise<void> | void) => unknown }} t
  * @param {{ rootDirectory?: string | null }} options
  */
@@ -491,7 +486,6 @@ export async function createMobileSeed(t, { rootDirectory = null } = {}) {
       await app.register(trackerModule, { tracker: b24 });
 
       // Каталог стенда соответствует управляемому исполнителю и не запускает discovery.
-      // Новые формы читают эти DTO через настоящий мобильный фасад и два TLS-слоя.
       app.get('/api/providers', async () => ({
         providers: [{
           id: 'test-provider',
@@ -509,46 +503,9 @@ export async function createMobileSeed(t, { rootDirectory = null } = {}) {
       }));
       app.get('/api/projects', async () => ({ projects: [] }));
 
-      const callApi = async (method, url, payload) => {
-        const response = await app.inject({
-          method,
-          url,
-          payload,
-          headers: { 'x-grigdesk-internal': 'test' },
-        });
-
-        return {
-          statusCode: response.statusCode,
-          body: response.json(),
-        };
-      };
-
       service = new MobileService({
         directory: path.join(fx.root, 'mobile'),
-        port: 0,
         vpnGate: async () => true,
-        registerRoutes: (mobile) =>
-          registerMobileFacade(mobile, {
-            callApi,
-            callRaw: async (method, url) => {
-              const response = await app.inject({
-                method,
-                url,
-                headers: { 'x-grigdesk-internal': 'test' },
-              });
-
-              return {
-                statusCode: response.statusCode,
-                headers: response.headers,
-                payload: response.rawPayload,
-              };
-            },
-            chat: app.mobileChat,
-            tokens: new ActionTokens(),
-            apkDirectory: path.join(fx.root, 'apk'),
-            subscribe: (listener) => app.sse.subscribe(listener),
-          }),
-        recoverOperation: (device, proof) => recoverChatOperation(app.mobileChat, device, proof),
       });
       await app.register(mobileModule, { service });
     },
@@ -582,95 +539,16 @@ export async function createMobileSeed(t, { rootDirectory = null } = {}) {
 
   const status = await service.status();
 
-  assert.equal(status.server.up, true, JSON.stringify(status));
-
-  const client = await makeCert(fx.root, 'phone');
-  const identity = service.identity;
-  const device = await service.devices.add({
-    fp: client.fp,
-    name: 'Синтетический телефон',
-  });
+  assert.equal(typeof status.server.fp, 'string', JSON.stringify(status));
+  assert.equal(Array.isArray(status.relays), true);
 
   return {
     ...fx,
     ...controlled,
     core: core.app,
     service,
-    client,
-    identity,
-    device,
     cliToken,
-    port: status.server.port,
     tasks,
     graph,
   };
-}
-
-// HTTPS-запрос к отдельному loopback входу проверяет пин перед прикладными байтами.
-// Реальный клиентский сертификат участвует в каждом HTTP и запрет redirect не обходится.
-export async function requestMobile(seed, path, method = 'GET', body, headers = {}) {
-  const socket = tls.connect({
-    host: '127.0.0.1',
-    port: seed.port,
-    minVersion: 'TLSv1.3',
-    rejectUnauthorized: false,
-    key: seed.client.keyPem,
-    cert: seed.client.certPem,
-  });
-
-  await new Promise((resolve, reject) => {
-    socket.once('secureConnect', resolve);
-    socket.once('error', reject);
-  });
-  assert.equal(
-    socket.getPeerX509Certificate().fingerprint256.replaceAll(':', '').toLowerCase(),
-    seed.identity.fp,
-  );
-
-  const agent = new https.Agent();
-
-  agent.createConnection = () => socket;
-
-  return new Promise((resolve, reject) => {
-    const request = https.request(
-      {
-        hostname: '127.0.0.1',
-        port: seed.port,
-        path,
-        method,
-        agent,
-        headers: {
-          'content-type': 'application/json',
-          ...headers,
-        },
-      },
-      (response) => {
-        const parts = [];
-
-        response.on('data', (part) => parts.push(part));
-        response.on('end', () => {
-          agent.destroy();
-
-          const bytes = Buffer.concat(parts);
-          let value = null;
-
-          try {
-            value = JSON.parse(bytes.toString('utf8'));
-          } catch {
-            /* Бинарный media/APK. */
-          }
-
-          resolve({
-            status: response.statusCode,
-            headers: response.headers,
-            body: value,
-            bytes,
-          });
-        });
-      },
-    );
-
-    request.on('error', reject);
-    request.end(body === undefined ? undefined : JSON.stringify(body));
-  });
 }

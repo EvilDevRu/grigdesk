@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
+import { writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
+import path from 'node:path';
 import test from 'node:test';
 
 import authPlugin from '../../server/src/plugins/auth.ts';
@@ -10,33 +12,27 @@ import { temporary } from '../relay/helpers.js';
 const Fastify = createRequire(new URL('../../server/package.json', import.meta.url))('fastify');
 
 /**
- * Защищённые настройки работают с настоящими private stores и генератором QR.
+ * Защищённые настройки работают с настоящими закрытыми хранилищами.
  * Только сеть заменена, чтобы проверка не подключалась к чужим посредникам.
  */
-async function admin(t, unavailable = false) {
+async function admin(t, corrupt = false) {
   const directory = await temporary(t);
   const disconnected = [];
   const events = [];
+
+  if (corrupt) {
+    await writeFile(path.join(directory, 'relays.json'), 'повреждённый JSON');
+  }
+
   const service = new MobileService({
     directory,
-    port: 8144,
     vpnGate: async () => false,
     makeHub: () => ({
       sync() {},
       close() {},
       status: () => [],
     }),
-    makeServer: async () => {
-      if (unavailable) {
-        throw new Error('synthetic occupied port');
-      }
-
-      return {
-        port: 8144,
-        close: async () => {},
-        disconnectDevice: (fp) => disconnected.push(fp),
-      };
-    },
+    disconnectClient: (fp) => disconnected.push(fp),
     changed: () => events.push('mobile-changed'),
   });
   const app = Fastify({ logger: false });
@@ -70,14 +66,13 @@ async function admin(t, unavailable = false) {
   };
 }
 
-test('MB-18…MB-22, MB-31: настройки закрыты, QR/env не кэшируются, отзыв отключает TLS', async (t) => {
+test('MB-18…MB-22, MB-31: настройки закрыты, env защищён, QR удалён, отзыв отключает клиент', async (t) => {
   const { call, service, disconnected, events } = await admin(t);
 
   for (const [method, url] of [
     ['GET', '/api/mobile/status'],
     ['POST', '/api/mobile/relays'],
     ['GET', '/api/mobile/relays/r12345678/env'],
-    ['POST', '/api/mobile/relays/r12345678/qr'],
     ['DELETE', '/api/mobile/relays/r12345678'],
     ['POST', '/api/mobile/devices/d12345678/revoke'],
   ]) {
@@ -96,7 +91,11 @@ test('MB-18…MB-22, MB-31: настройки закрыты, QR/env не кэ�
   const stored = (await service.relays.list())[0];
   const status = await call('GET', '/api/mobile/status');
 
-  assert.equal(status.json().server.up, true);
+  assert.equal(status.statusCode, 200);
+  assert.equal(status.json().server.up, undefined);
+  assert.equal(status.json().server.port, undefined);
+  assert.equal(status.json().devices, undefined);
+  assert.match(status.json().server.fp, /^[a-f0-9]{64}$/u);
   assert.equal(JSON.stringify(status.json()).includes(stored.brainToken), false);
   assert.equal(JSON.stringify(status.json()).includes(stored.deviceToken), false);
 
@@ -108,22 +107,13 @@ test('MB-18…MB-22, MB-31: настройки закрыты, QR/env не кэ�
   assert.equal(env.body.includes(stored.deviceToken), false);
 
   const qr = await call('POST', `/api/mobile/relays/${relay.id}/qr`, { pair: true });
-  const value = qr.json();
-  const decoded = JSON.parse(Buffer.from(value.text.slice('grigdesklink:1:'.length), 'base64url'));
 
-  assert.match(value.svg, /^<svg/);
-  assert.equal(decoded.relay.token, stored.deviceToken);
-  assert.equal(decoded.brain.fp.length, 64);
-  assert.equal(typeof decoded.pair.code, 'string');
-  assert.equal(qr.headers['cache-control'], 'no-store');
-
-  const relayQr = (await call('POST', `/api/mobile/relays/${relay.id}/qr`, { pair: false })).json();
-
-  assert.equal(relayQr.expiresAt, null);
+  assert.equal(qr.statusCode, 404);
 
   const device = await service.devices.add({
     name: 'Телефон',
     fp: 'a'.repeat(64),
+    scope: 'client',
   });
 
   assert.equal((await call('POST', `/api/mobile/devices/${device.id}/revoke`)).statusCode, 200);
@@ -133,15 +123,11 @@ test('MB-18…MB-22, MB-31: настройки закрыты, QR/env не кэ�
   assert.ok(events.length >= 3);
 });
 
-test('MB-31: отказ отдельного мобильного входа оставляет основной API живым', async (t) => {
+test('MB-31: повреждённые настройки посредников видны в статусе', async (t) => {
   const { call } = await admin(t, true);
   const status = await call('GET', '/api/mobile/status');
 
   assert.equal(status.statusCode, 200);
-  assert.equal(status.json().server.up, false);
-  assert.equal(
-    status.json().server.error,
-    'Мобильный доступ не запущен. Проверьте настройки и порт.',
-  );
+  assert.equal(typeof status.json().server.error, 'string');
   assert.equal((await call('POST', '/api/mobile/relays', {})).statusCode, 503);
 });

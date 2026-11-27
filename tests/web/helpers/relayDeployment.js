@@ -90,7 +90,7 @@ export async function relayUi(t, options = {}) {
   };
   const status = {
     name: 'Сервер А',
-    server: { up: true, fp },
+    server: { fp, error: null },
     direct: { state: 'disabled', addresses: [] },
     relays: [relay],
     devices: [],
@@ -132,7 +132,10 @@ export async function relayUi(t, options = {}) {
       };
     }
 
-    if (['/api/devices/access', '/api/mobile/status', '/api/devices'].includes(url)) {
+    if (url === '/api/mobile/status') {
+      return { server: status.server, relays: status.relays };
+    }
+    if (['/api/devices/access', '/api/devices'].includes(url)) {
       return structuredClone(status);
     }
 

@@ -71,11 +71,8 @@ export const config = {
   // Адрес фиксирован; окружение выбирает лишь номер порта.
   port: Number(process.env.GRIGDESK_PORT) || 8140,
   host: '127.0.0.1',
-  // Отдельный TLS-вход мобильного контракта также принимает только loopback.
   // Ключи и привязки отделены от истории чатов и веб-сессий.
   mobileDir: process.env.GRIGDESK_MOBILE_DIR || dataPath(dataHome, 'mobile'),
-  mobilePort: Number(process.env.GRIGDESK_MOBILE_PORT) || 8144,
-  mobileApkDir: process.env.GRIGDESK_MOBILE_APK_DIR || dataPath(dataHome, 'mobileApk'),
   clientAccess: readClientConfig(),
   serverName: process.env.GRIGDESK_SERVER_NAME || os.hostname(),
   // Бюджет остановки целиком: слив ходов чата, закрытие сессий исполнителей и сокетов.

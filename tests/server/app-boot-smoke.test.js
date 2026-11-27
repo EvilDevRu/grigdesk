@@ -33,7 +33,7 @@ function freePort() {
 
 // Всё состояние сервера уводится во временный каталог: проверка запуска не имеет
 // права трогать живой GrigDesk — ни переписку, ни модели, ни состояние фабрики.
-function isolatedEnv(root, port, mobilePort = port + 1) {
+function isolatedEnv(root, port) {
   return {
     PATH: '/usr/bin:/bin',
     HOME: path.join(root, 'home'),
@@ -42,8 +42,6 @@ function isolatedEnv(root, port, mobilePort = port + 1) {
     GRIGDESK_PORT: String(port),
     GRIGDESK_WINDOW_KEY_PATH: path.join(root, 'window-auth/window-key'),
     GRIGDESK_MOBILE_DIR: path.join(root, 'mobile'),
-    GRIGDESK_MOBILE_PORT: String(mobilePort),
-    GRIGDESK_MOBILE_APK_DIR: path.join(root, 'mobile-apk'),
     GRIGDESK_HOST: '0.0.0.0',
     GRIGDESK_TRUST_PROXY: '127.0.0.1',
     GRIGDESK_CHATS_DIR: path.join(root, 'chats'),
@@ -272,18 +270,13 @@ test('DW-K7: boot с невалидным родителем ключа оста
 
 /**
  * Настоящий app.ts запускается с чистым либо повреждённым мобильным состоянием.
- * Отказ отдельного TLS listener не должен мешать локальному входу и остальным API.
+ * Отказ настройки посредников не должен мешать локальному входу и остальным API.
  */
-test('мобильный вход поднимается отдельно, его отказ не роняет GrigDesk', { timeout: 120_000 }, async (t) => {
-  for (const mode of ['ready', 'occupied', 'corrupt']) {
+test('отказ мобильных настроек не роняет GrigDesk', { timeout: 120_000 }, async (t) => {
+  for (const mode of ['ready', 'corrupt']) {
     await t.test(mode, async (scope) => {
       const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-mobile-boot-'));
       const port = await freePort();
-      let mobilePort = mode === 'occupied' ? port : await freePort();
-
-      while (mode !== 'occupied' && mobilePort === port) {
-        mobilePort = await freePort();
-      }
 
       if (mode === 'corrupt') {
         await mkdir(path.join(root, 'mobile'), { recursive: true });
@@ -291,7 +284,7 @@ test('мобильный вход поднимается отдельно, ег�
       }
 
       const child = spawn(process.execPath, [INSTALLED_APP], {
-        env: isolatedEnv(root, port, mobilePort),
+        env: isolatedEnv(root, port),
         stdio: ['ignore', 'pipe', 'pipe'],
       });
       let log = '';
@@ -332,7 +325,7 @@ test('мобильный вход поднимается отдельно, ег�
           });
           const status = await response.json();
 
-          if (response.status === 200 && (status.server.up || status.server.error)) {
+          if (response.status === 200 && (status.server.fp || status.server.error)) {
             mobile = status;
             break;
           }
@@ -345,16 +338,13 @@ test('мобильный вход поднимается отдельно, ег�
       }
 
       assert.ok(mobile, 'Не получили статус мобильного сервиса: ' + log);
-      assert.equal(mobile.server.up, mode === 'ready');
       assert.equal((await fetch(address + '/api/health', { headers })).status, 200);
       assert.equal((await fetch(address + '/api/chat/active', { headers })).status, 200);
       assert.equal((await fetch(address + '/api/mobile/status')).status, 401);
 
       if (mode === 'ready') {
-        const sockets = await listeningAddresses(child.pid, mobilePort);
-        const expected = `0100007F:${mobilePort.toString(16).toUpperCase().padStart(4, '0')}`;
-
-        assert.deepEqual(sockets, { tcp: [expected], tcp6: [] });
+        assert.match(mobile.server.fp, /^[a-f0-9]{64}$/u);
+        assert.equal(mobile.server.error, null);
       } else {
         assert.equal(typeof mobile.server.error, 'string');
       }

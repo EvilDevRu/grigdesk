@@ -8,8 +8,7 @@
 Причина — web-поток DSH (`session/follow`) переводился в шаги ленты в `serverTurn.ts`
 в обход словаря инструментов `steps.ts`, по которому работает ACP-поток:
 
-- `tool/call` давал шаг с полями `tool`, `kind` и `text`. Лента, мобильный фасад,
-  Telegram и выжимка остановленного хода читают `name` и `title`.
+- `tool/call` давал шаг с полями `tool`, `kind` и `text`. Лента, Telegram и выжимка остановленного хода читают `name` и `title`.
 - Итог брал id и исход из `message.toolCallId` и `message.isError`. У настоящего
   `tool/result` этих полей нет: `ToolResultMessage` несёт id вызова в `source.callId`
   и в единственном блоке `tool-result` (`toolCallId`), а `isError` — в этом блоке.

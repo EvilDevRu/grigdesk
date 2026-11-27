@@ -10,8 +10,7 @@ import { clientFixture, clientRequest } from './helpers/clientAccess.js';
  * Подмена статуса даёт проверить выключенный и неоднозначный вход без открытия сетевых портов.
  */
 async function fixture(t, options = {}) {
-  const mobileDisconnected = [];
-  const result = await clientFixture(t, {
+  return clientFixture(t, {
     register: async ({ app, devices, pairing, identity, listener }) => {
       await app.register(devicesModule, {
         devices,
@@ -20,12 +19,9 @@ async function fixture(t, options = {}) {
         name: 'Имя машины',
         address: options.address ?? null,
         listener: () => options.state ? { state: () => options.state } : listener(),
-        disconnectMobile: (fp) => mobileDisconnected.push(fp),
       });
     },
   });
-
-  return { ...result, mobileDisconnected };
 }
 
 test('устройства: session допускается, CLI/internal получают session_required', async (t) => {
@@ -148,7 +144,6 @@ test('устройства: список скрывает пины/коды, hel
   });
 
   assert.equal(response.statusCode, 200);
-  assert.deepEqual(f.mobileDisconnected, [f.client.fp]);
   assert.equal((await clientRequest(f, '/api/private')).status, 403);
 });
 

@@ -26,7 +26,7 @@
         {{ t('settings.phoneConfigureRelay') }}
       </UiDisclosureButton>
       <div v-if="relayOpen" :id="relayControls" class="server-access__relays">
-        <MobileAccess :key="owner" hide-devices />
+        <MobileAccess :key="owner" />
         <p>{{ t('settings.automaticLoginUsingThisComputerSLocal') }}</p>
       </div>
     </SettingsSection>

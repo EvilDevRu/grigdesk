@@ -423,7 +423,6 @@
         "server-install": "Server dependencies",
         "qwen-test-cli": "Qwen CLI for tests",
         "web-install": "Web dependencies",
-        "mobile-install": "Mobile client dependencies",
         "deepseek-runtime": "DeepSeek runtime",
         "deepseek-vendor": "DeepSeek sources",
         "server-browser": "Chromium for tests",

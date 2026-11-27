@@ -1,6 +1,5 @@
 node_modules/
 web/dist/
-mobile/dist/
 desktop/dist/
 desktop/.dist-staging-*/
 desktop/release/

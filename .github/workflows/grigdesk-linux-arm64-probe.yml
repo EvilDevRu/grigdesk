@@ -43,7 +43,6 @@ jobs:
             bubblewrap ffmpeg ripgrep python3-pil xvfb libfuse2t64 unzip p7zip-full
           npm --prefix server ci --ignore-scripts --no-audit --no-fund
           npm --prefix web ci --ignore-scripts --no-audit --no-fund
-          npm --prefix mobile ci --ignore-scripts --no-audit --no-fund
           npm --prefix deepseek ci --ignore-scripts --no-audit --no-fund
           npm --prefix desktop ci --ignore-scripts --no-audit --no-fund
           node server/node_modules/esbuild/install.js

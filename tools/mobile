@@ -1,19 +1,18 @@
 #!/usr/bin/env bash
 # Сборка приложения на телефоне без sudo и без изменения системного Java/SDK.
-# Команды: deps, doctor, check, build, release, devlink. Пути можно перенести в разрешённый каталог.
+# Команды: deps, doctor, check, build, release. Пути можно перенести в разрешённый каталог.
 set -euo pipefail
 
 MOBILE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 MOBILE_COMMAND="${1:-doctor}"
 source "$MOBILE_ROOT/deploy/lib/runtime-env.sh"
-# Перенос нужен только командам, которые пишут: остановить и проверить DevLink можно и до него.
-if [[ "$MOBILE_COMMAND" == build || "$MOBILE_COMMAND" == release
-  || ( "$MOBILE_COMMAND" == devlink && "${2:-status}" == start ) ]]; then
+# Сборка требует готовой раскладки папки данных.
+if [[ "$MOBILE_COMMAND" == build || "$MOBILE_COMMAND" == release ]]; then
   grigdesk_require_migrated "$MOBILE_ROOT"
 fi
 MOBILE_DATA_HOME=$(grigdesk_data_home) || exit 1
 MOBILE_TOOLCHAIN="$MOBILE_DATA_HOME/dev/android"
-if [[ "$MOBILE_COMMAND" == build || "$MOBILE_COMMAND" == release || "$MOBILE_COMMAND" == devlink ]]; then
+if [[ "$MOBILE_COMMAND" == build || "$MOBILE_COMMAND" == release ]]; then
   if [[ "$MOBILE_COMMAND" == build ]]; then
     MOBILE_APK_DIR="${GRIGDESK_MOBILE_APK_DIR:-$MOBILE_DATA_HOME/dists}"
   else
@@ -121,14 +120,11 @@ install_deps() {
 # Он не скачивает зависимости и возвращает отказ при неполной среде.
 # Jar Gradle Wrapper сверяется с lock: этот бинарник из git исполняется при каждой сборке.
 doctor() {
-  local result=0 java_version cap_version wrapper_jar wrapper_hash
+  local result=0 java_version wrapper_jar wrapper_hash
   java_version="$(java -version 2>&1)" || result=1
   printf '%s\n' "$java_version"
   [[ "$java_version" == *'version "21.'* ]] || result=1
   node --version || result=1
-  cap_version="$(cd "$MOBILE_ROOT/mobile" && ./node_modules/.bin/cap --version)" || result=1
-  printf 'Capacitor %s\n' "$cap_version"
-  [[ "$cap_version" == "$(lock_field capacitor)" ]] || result=1
   [[ -x "$ANDROID_HOME/platform-tools/adb" ]] || result=1
   [[ -f "$ANDROID_HOME/platforms/android-36/android.jar" ]] || result=1
   [[ -x "$ANDROID_HOME/build-tools/36.0.0/aapt2" ]] || result=1
@@ -170,15 +166,9 @@ check() {
   gradle_archive
   NODE_TEST_MAX_RSS_MB=4096 bash "$MOBILE_ROOT/tests/run-node-tests-safe.sh" --test \
     --test-concurrency=2 "$MOBILE_ROOT"/tests/mobile/*.test.js
-  npm --prefix "$MOBILE_ROOT/mobile" run typecheck
-  npm --prefix "$MOBILE_ROOT/mobile" run build
-  (
-    cd "$MOBILE_ROOT/mobile"
-    ./node_modules/.bin/cap sync android
-  )
   (
     cd "$MOBILE_ROOT/mobile/android"
-    ./gradlew --no-daemon --max-workers=2 :app:testDebugUnitTest :app:lintDebug :client:testDebugUnitTest :client:lintDebug
+    ./gradlew --no-daemon --max-workers=2 :client:testDebugUnitTest :client:lintDebug
   )
 }
 
@@ -190,74 +180,7 @@ build() {
   GRIGDESK_MOBILE_APK_DIR="$MOBILE_APK_DIR" node "$MOBILE_ROOT/tools/mobile-client.mts" build
 }
 
-# DevLink — браузерный телефон для разработки поверх настоящего посредника и мозга.
-# Отдельный user-юнит переживает ход агента и перезапуск GrigDesk; входы только на 127.0.0.1.
-devlink() {
-  local action="${1:-status}" unit=grigdesk-mobile-devlink offset deadline
-  local log="${GRIGDESK_MOBILE_DEVLINK_LOG:-$MOBILE_APK_DIR/devlink.log}"
-  local port="${GRIGDESK_MOBILE_DEVLINK_PORT:-8150}"
-
-  case "$action" in
-    start)
-      if systemctl --user is-active --quiet "$unit"; then
-        echo "DevLink уже запущен: http://127.0.0.1:$port/"
-        return 0
-      fi
-
-      mkdir -p "$(dirname "$log")"
-      touch "$log"
-      offset="$(stat -c %s "$log")"
-      systemctl --user reset-failed "$unit" >/dev/null 2>&1 || true
-      systemd-run --user --quiet --unit="$unit" -p KillMode=control-group \
-        -p "StandardOutput=append:$log" -p "StandardError=append:$log" \
-        --working-directory="$MOBILE_ROOT" --setenv=PATH="$PATH" --setenv=HOME="$HOME" \
-        --setenv=GRIGDESK_MOBILE_DEVLINK_PORT="$port" --setenv=GRIGDESK_HOME="$MOBILE_DATA_HOME" \
-        ${GRIGDESK_MOBILE_DEVLINK_DIR:+--setenv=GRIGDESK_MOBILE_DEVLINK_DIR="$GRIGDESK_MOBILE_DEVLINK_DIR"} \
-        node "$MOBILE_ROOT/tools/mobile-phone/devlink.mts"
-      deadline=$((SECONDS + 180))
-
-      while ((SECONDS < deadline)); do
-        if tail -c +"$((offset + 1))" "$log" | grep -q '"ev":"devlink_ready"'; then
-          echo "DevLink запущен: http://127.0.0.1:$port/"
-          return 0
-        fi
-
-        if ! systemctl --user is-active --quiet "$unit"; then
-          break
-        fi
-
-        sleep 1
-      done
-
-      tail -c +"$((offset + 1))" "$log" | tail -n 20 >&2
-      echo 'DevLink не запустился; журнал выше.' >&2
-      return 1
-      ;;
-    stop)
-      systemctl --user stop "$unit" 2>/dev/null || true
-      systemctl --user reset-failed "$unit" >/dev/null 2>&1 || true
-      echo 'DevLink остановлен.'
-      ;;
-    status)
-      if systemctl --user is-active --quiet "$unit"; then
-        echo "DevLink работает: http://127.0.0.1:$port/"
-      else
-        echo 'DevLink не запущен.'
-      fi
-
-      tail -n 5 "$log" 2>/dev/null || true
-      ;;
-    *)
-      echo 'Команды: tools/mobile devlink start|stop|status' >&2
-      return 1
-      ;;
-  esac
-}
-
 case "$MOBILE_COMMAND" in
-  devlink)
-    devlink "${2:-status}"
-    ;;
   deps)
     install_deps
     ;;
@@ -276,7 +199,7 @@ case "$MOBILE_COMMAND" in
     GRIGDESK_MOBILE_APK_DIR="$MOBILE_APK_DIR" node "$MOBILE_ROOT/tools/mobile-client.mts" release
     ;;
   *)
-    echo 'Команды: tools/mobile deps|doctor|check|build|release|devlink' >&2
+    echo 'Команды: tools/mobile deps|doctor|check|build|release' >&2
     exit 1
     ;;
 esac

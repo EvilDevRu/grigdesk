@@ -18,7 +18,7 @@ import { makeCert } from '../../relay/helpers.js';
 const requireFromServer = createRequire(new URL('../../../server/package.json', import.meta.url));
 const Fastify = requireFromServer('fastify');
 /**
- * Стенд повторяет связку devicesModule → owner → прежний onListen без запуска рабочего app.
+ * Стенд повторяет связку devicesModule → owner → onListen без запуска рабочего app.
  * Синтетические сети и DNS передаются только зависимостями owner, не через HTTP-настройки.
  */
 export async function phoneFixture(t, options = {}) {
@@ -29,7 +29,6 @@ export async function phoneFixture(t, options = {}) {
   const stranger = await makeCert(directory, 'stranger');
   const mobile = new MobileService({
     directory,
-    port: 0,
     vpnGate: async () => true,
     ...options.mobileOptions,
   });
@@ -116,7 +115,6 @@ export async function phoneFixture(t, options = {}) {
     identity: () => identity,
     address: config.clientAccess.address,
     name: config.serverName,
-    disconnectMobile: (fp) => mobile.disconnectDevice(fp),
     access: {
       root: app,
       mobile,

@@ -6,7 +6,7 @@ import { installUiBrowser } from './helpers/ui-components.js';
 
 process.env.NODE_ENV = 'test';
 
-test('MW-01…MW-05: посредники, QR, отзыв с подтверждением и обновление через общую SSE-шину', async (t) => {
+test('MW-01…MW-05: загрузка, посредники add/env/delete, ошибка, SSE; v1 QR и телефонов нет', async (t) => {
   await installUiBrowser(t);
 
   const { mount, flushPromises, DOMWrapper } =
@@ -14,8 +14,7 @@ test('MW-01…MW-05: посредники, QR, отзыв с подтвержд�
   const requests = [];
   let event;
   let confirmed = false;
-  let expiredQr = false;
-  let qrError = false;
+  let failLoad = false;
   let releaseStatus;
   let statusGate = new Promise((resolve) => {
     releaseStatus = resolve;
@@ -29,51 +28,35 @@ test('MW-01…MW-05: посредники, QR, отзыв с подтвержд�
   };
   const status = {
     server: {
-      up: true,
-      port: 8144,
+      fp: 'b'.repeat(64),
       error: null,
     },
-    relays: [
-      {
-        ...relay,
-        link: {
-          state: 'waiting_vpn',
-          since: 1,
-          pipes: 0,
-          lastError: null,
-        },
+    relays: [{
+      ...relay,
+      link: {
+        state: 'waiting_vpn',
+        since: 1,
+        pipes: 0,
+        lastError: null,
       },
-    ],
-    devices: [
-      {
-        id: 'd12345678',
-        name: 'Телефон',
-        revokedAt: null,
-        lastSeenAt: 1,
-      },
-      {
-        id: 'd87654321',
-        name: 'Старый телефон',
-        revokedAt: 1,
-      },
-    ],
+    }],
   };
 
   globalThis.__mobileSettingsApi = {
+    /**
+     * До разрешения промиса удерживает загрузку для проверки каркаса.
+     * Затем возвращает текущий снимок и позволяет имитировать отказ сети.
+     */
     async get(url) {
-      requests.push({
-        method: 'GET',
-        url,
-      });
-
+      requests.push({ method: 'GET', url });
       await statusGate;
+
+      if (failLoad) {
+        throw new Error('сеть недоступна');
+      }
 
       return status;
     },
-    /**
-     * Админский stub записывает точное решение интерфейса для проверки запроса.
-     * Pair и QR посредника имеют разные сроки действия и не взаимозаменяются.
-     */
     async post(url, body) {
       requests.push({
         method: 'POST',
@@ -81,17 +64,17 @@ test('MW-01…MW-05: посредники, QR, отзыв с подтвержд�
         body,
       });
 
-      if (url.endsWith('/qr') && qrError) {
-        throw new Error('Не удалось получить QR');
-      }
+      return { relay };
+    },
+    async downloadGet(url) {
+      requests.push({ method: 'GET', url });
 
-      return url.endsWith('/qr')
-        ? {
-            svg: '<svg xmlns="http://www.w3.org/2000/svg"/>',
-            text: 'grigdesklink:1:test',
-            expiresAt: body.pair ? Date.now() + (expiredQr ? -1000 : 600000) : null,
-          }
-        : { relay };
+      return { blob: new Blob(['relay.env']) };
+    },
+    async del(url) {
+      requests.push({ method: 'DELETE', url });
+
+      return { ok: true };
     },
   };
   globalThis.__mobileSettingsSubscribe = (listener) => {
@@ -120,23 +103,24 @@ test('MW-01…MW-05: посредники, QR, отзыв с подтвержд�
   const body = new DOMWrapper(document.body);
 
   t.after(() => wrapper.unmount());
+
+  // Загрузка: busy, skeleton, кнопка добавления заблокирована.
   await flushPromises();
   assert.equal(wrapper.find('.mobile-access').attributes('aria-busy'), 'true');
-  assert.equal(wrapper.findAll('.mobile-card').length, 2);
-  assert.equal(wrapper.findAll('.mobile-skeleton').length, 3);
+  assert.equal(wrapper.findAll('.mobile-skeleton').length >= 1, true);
   assert.equal(wrapper.find('[data-testid="mobile-open-add"]').attributes('disabled') !== undefined, true);
   releaseStatus();
   await flushPromises();
-  assert.equal(wrapper.find('.mobile-access').attributes('aria-busy'), 'false');
-  assert.match(wrapper.text(), /Приложение на телефоне/);
+
+  // v1-поверхности отсутствуют; одна карточка посредников.
+  assert.equal(wrapper.find('[data-testid="mobile-phone-qr"]').exists(), false);
+  assert.equal(wrapper.find('[data-testid="mobile-revoke"]').exists(), false);
+  assert.equal(wrapper.text().includes('Привязанные телефоны'), false);
+  assert.equal(wrapper.findAll('.mobile-card').length, 1);
   assert.match(wrapper.text(), /Подключение через посредника/);
-  assert.match(wrapper.text(), /Привязанные телефоны/);
   assert.match(wrapper.text(), /Ждёт VPN/);
-  assert.equal(wrapper.text().includes('Старый телефон'), false);
-  await wrapper.find('[aria-controls="mobile-revoked-devices"]').trigger('click');
-  assert.match(wrapper.text(), /Старый телефон/);
-  assert.equal(wrapper.findAll('[data-testid="mobile-revoke"]').length, 1);
-  assert.equal(wrapper.find('#mobile-relay-name').exists(), false);
+
+  // Валидация порта: 0 не отправляет запрос.
   await wrapper.find('[data-testid="mobile-open-add"]').trigger('click');
   await body.find('#mobile-relay-name').setValue('Новый');
   await body.find('#mobile-relay-host').setValue('192.168.1.20');
@@ -151,68 +135,42 @@ test('MW-01…MW-05: посредники, QR, отзыв с подтвержд�
     host: '192.168.1.20',
     port: 443,
   });
-  assert.equal(wrapper.find('.mobile-install pre').text(), 'set -a\n. ./relay.env\nset +a\n./grigdesk-relay');
-  assert.doesNotMatch(wrapper.text(), /docker compose/u);
-  assert.equal(body.find('[role="dialog"]').exists(), false);
-  await wrapper.find('[data-testid="mobile-phone-qr"]').trigger('click');
+  // Подсказка установки relay.env остаётся (блок mobile-install).
+  assert.equal(wrapper.find('.mobile-install pre').exists(), true);
+
+  // Скачивание relay.env.
+  await wrapper.findAll('button').find((b) => b.text() === 'Скачать relay.env').trigger('click');
   await flushPromises();
-  assert.equal(document.body.querySelectorAll('[role="dialog"]').length, 1);
-  assert.equal(body.find('#mobile-qr-text').exists(), false);
-  await body.find('[aria-controls="mobile-qr-manual"]').trigger('click');
-  assert.equal(body.find('#mobile-qr-text').element.value, 'grigdesklink:1:test');
-  assert.deepEqual(requests.find((item) => item.url.endsWith('/qr')).body, { pair: true });
-  await body.find('[data-testid="mobile-copy-qr"]').trigger('click');
-  await flushPromises();
-  assert.match(body.text(), /Код скопирован/);
-  await body.findAll('button').find((button) => button.text() === 'Закрыть').trigger('click');
-  await flushPromises();
-  assert.equal(body.find('#mobile-qr-text').exists(), false);
-  await wrapper.find('[data-testid="mobile-revoke"]').trigger('click');
-  await flushPromises();
-  assert.equal(
-    requests.some((item) => item.url.endsWith('/revoke')),
-    false,
-  );
+  assert.equal(requests.some((item) => item.url.endsWith('/env')), true);
+
+  // Удаление посредника подтверждается общим диалогом.
   confirmed = true;
-  await wrapper.find('[data-testid="mobile-revoke"]').trigger('click');
+  await wrapper.findAll('button').find((b) => b.text() === 'Удалить посредника').trigger('click');
   await flushPromises();
-  assert.equal(requests.filter((item) => item.url.endsWith('/revoke')).length, 1);
+  assert.equal(requests.filter((item) => item.method === 'DELETE').length, 1);
 
-  const before = requests.filter((item) => item.method === 'GET').length;
-
-  statusGate = new Promise((resolve) => {
-    releaseStatus = resolve;
-  });
+  // Ошибка загрузки и повтор.
+  failLoad = true;
   event('mobile-changed', {});
   await flushPromises();
-  assert.equal(wrapper.findAll('.mobile-skeleton').length, 0);
-  assert.equal(wrapper.findAll('[data-testid="mobile-revoke"]').length, 1);
-  releaseStatus();
+  assert.match(wrapper.text(), /сеть недоступна/);
+  failLoad = false;
+  await wrapper.findAll('button').find((b) => b.text() === 'Повторить загрузку').trigger('click');
   await flushPromises();
-  assert.equal(requests.filter((item) => item.method === 'GET').length, before + 1);
+  assert.equal(wrapper.find('.mobile-access').attributes('aria-busy'), 'false');
 
-  expiredQr = true;
-  await wrapper.find('[data-testid="mobile-phone-qr"]').trigger('click');
+  // Ошибка хаба/личности видна в danger-блоке; v1-warning «ещё не запущен» отсутствует.
+  status.server.error = 'Хаб не запущен';
+  event('mobile-changed', {});
   await flushPromises();
-  assert.match(body.text(), /Срок действия QR-кода истёк/);
-  assert.equal(body.find('[role="dialog"] img').exists(), false);
-  assert.equal(body.find('[data-testid="mobile-copy-qr"]').attributes('disabled') !== undefined, true);
-  expiredQr = false;
-  await body.find('[data-testid="mobile-refresh-qr"]').trigger('click');
+  assert.match(wrapper.get('.ui-inline-message--danger').text(), /Хаб не запущен/);
+  assert.equal(wrapper.text().includes('Мобильный доступ ещё не запущен'), false);
+
+  // Пустое состояние посредников не обещает QR.
+  status.server.error = null;
+  status.relays = [];
+  event('mobile-changed', {});
   await flushPromises();
-  assert.equal(body.find('[role="dialog"] img').exists(), true);
-  await body.findAll('button').find((button) => button.text() === 'Закрыть').trigger('click');
-  await wrapper.findAll('button').find((button) => button.text() === 'QR посредника').trigger('click');
-  await flushPromises();
-  assert.equal(requests.filter((item) => item.url.endsWith('/qr')).at(-1).body.pair, false);
-  assert.equal(body.find('[role="dialog"]').text().includes('Код действует'), false);
-  await body.findAll('button').find((button) => button.text() === 'Закрыть').trigger('click');
-  qrError = true;
-  await wrapper.find('[data-testid="mobile-phone-qr"]').trigger('click');
-  await flushPromises();
-  assert.match(body.find('[role="dialog"] [role="alert"]').text(), /Не удалось получить QR/);
-  qrError = false;
-  await body.findAll('button').find((button) => button.text() === 'Повторить загрузку QR').trigger('click');
-  await flushPromises();
-  assert.equal(body.find('[role="dialog"] img').exists(), true);
+  assert.match(wrapper.text(), /Статус посредника появится здесь/);
+  assert.equal(wrapper.text().includes('QR для телефона'), false);
 });

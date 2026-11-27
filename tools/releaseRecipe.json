@@ -7,7 +7,7 @@
       "argv": [
         "bash",
         "-c",
-        "npm --prefix server ci && npm --prefix web ci && npm --prefix mobile ci && npm --prefix deepseek ci && npm --prefix desktop ci --ignore-scripts && node desktop/node_modules/esbuild/install.js"
+        "npm --prefix server ci && npm --prefix web ci && npm --prefix deepseek ci && npm --prefix desktop ci --ignore-scripts && node desktop/node_modules/esbuild/install.js"
       ],
       "timeoutMs": 1800000
     },
@@ -42,17 +42,6 @@
         "npm",
         "--prefix",
         "web",
-        "ci"
-      ],
-      "timeoutMs": 1800000
-    },
-    {
-      "id": "mobile-install",
-      "group": "prepare-web",
-      "argv": [
-        "npm",
-        "--prefix",
-        "mobile",
         "ci"
       ],
       "timeoutMs": 1800000
@@ -424,7 +413,7 @@
       "argv": [
         "bash",
         "-c",
-        "npm --prefix server ci && npm --prefix web ci && npm --prefix mobile ci && npm --prefix deepseek ci && npm --prefix desktop ci --ignore-scripts && node desktop/node_modules/esbuild/install.js"
+        "npm --prefix server ci && npm --prefix web ci && npm --prefix deepseek ci && npm --prefix desktop ci --ignore-scripts && node desktop/node_modules/esbuild/install.js"
       ],
       "timeoutMs": 1800000
     },

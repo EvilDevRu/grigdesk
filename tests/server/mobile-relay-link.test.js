@@ -1,15 +1,11 @@
 import assert from 'node:assert/strict';
-import https from 'node:https';
+import net from 'node:net';
 import test from 'node:test';
 import tls from 'node:tls';
 
-import { ensureBrainIdentity } from '../../server/src/lib/mobile/identity.ts';
-import { startMobileServer } from '../../server/src/lib/mobile/mobileServer.ts';
-import { PairingCodes } from '../../server/src/lib/mobile/pairing.ts';
 import { nextDelay, normalizeRelayIp, RelayLink } from '../../server/src/lib/mobile/relayLink.ts';
-import { DeviceStore } from '../../server/src/lib/mobile/store.ts';
-import { dialRelay, relayHello } from '../../server/src/lib/mobile/transport.ts';
-import { makeCert, relayFixture, temporary } from '../relay/helpers.js';
+import { dialRelay } from '../../server/src/lib/mobile/transport.ts';
+import { connect, hello, makeCert, relayFixture, temporary } from '../relay/helpers.js';
 
 /**
  * Ждёт наблюдаемое состояние вместо фиксированной задержки сети.
@@ -44,101 +40,6 @@ test('MB-15/MB-16: backoff и точная классификация IPv4, IPv6
   assert.throws(() => normalizeRelayIp('224.0.0.1'));
 });
 
-test('MB-13: внешний TLS → посредник → внутренний TLS → мобильный hello', async (t) => {
-  const directory = await temporary(t);
-  const cert = await makeCert(directory, 'relay');
-  const { port } = await relayFixture(t, cert);
-
-  const identity = await ensureBrainIdentity(directory);
-  const devices = new DeviceStore(directory);
-  const mobile = await startMobileServer({
-    identity,
-    directory,
-    deviceStore: devices,
-    pairing: new PairingCodes({ devices }),
-    port: 0,
-  });
-
-  t.after(() => mobile.close());
-
-  let gates = 0;
-  const link = new RelayLink({
-    relay: {
-      id: 'r12345678',
-      host: '127.0.0.1',
-      port,
-      fp: cert.fp,
-      brainToken: 'brain-token',
-    },
-    mobilePort: mobile.port,
-    vpnGate: async () => {
-      gates += 1;
-
-      return true;
-    },
-  });
-
-  t.after(() => link.stop());
-  link.start();
-  await waitFor(() => link.status().state === 'online');
-
-  const outer = await dialRelay({
-    ip: '127.0.0.1',
-    port,
-    fp: cert.fp,
-  });
-
-  await relayHello(outer, {
-    v: 1,
-    role: 'device',
-    token: 'device-token',
-  });
-
-  const inner = tls.connect({
-    socket: outer,
-    rejectUnauthorized: false,
-    minVersion: 'TLSv1.3',
-  });
-
-  await new Promise((resolve, reject) => {
-    inner.once('secureConnect', resolve);
-    inner.once('error', reject);
-  });
-  assert.equal(
-    inner.getPeerX509Certificate().fingerprint256.replaceAll(':', '').toLowerCase(),
-    identity.fp,
-  );
-
-  const agent = new https.Agent();
-
-  agent.createConnection = () => inner;
-
-  const answer = await new Promise((resolve, reject) => {
-    const request = https.get(
-      {
-        host: '127.0.0.1',
-        path: '/api/mobile/v1/hello',
-        agent,
-      },
-      (response) => {
-        let text = '';
-
-        response.on('data', (chunk) => {
-          text += chunk;
-        });
-        response.on('end', () => resolve(JSON.parse(text)));
-      },
-    );
-
-    request.once('error', reject);
-  });
-
-  agent.destroy();
-  outer.destroy();
-  assert.equal(answer.api, 1);
-  assert.equal(gates, 0);
-});
-
 test('MB-14/MB-16: отказ VPN исключает connect, несовпадающий пин исключает hello', async (t) => {
   const blocked = new RelayLink({
     relay: {
@@ -148,7 +49,6 @@ test('MB-14/MB-16: отказ VPN исключает connect, несовпада
       fp: 'a'.repeat(64),
       brainToken: 'secret',
     },
-    mobilePort: 1,
     vpnGate: async () => false,
   });
 
@@ -182,4 +82,79 @@ test('MB-14/MB-16: отказ VPN исключает connect, несовпада
     }),
   );
   assert.equal(bytes, 0);
+});
+
+test('MB-17: incoming без target не открывает локальный порт, client-v2 идёт в clientTarget', async (t) => {
+  const directory = await temporary(t);
+  const cert = await makeCert(directory, 'relay');
+  const { port } = await relayFixture(t, cert);
+
+  let v1Hits = 0;
+  const trap = net.createServer(() => {
+    v1Hits += 1;
+  });
+
+  await new Promise((resolve) => trap.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise((resolve) => trap.close(resolve)));
+
+  let clientHits = 0;
+  const target = net.createServer(() => {
+    clientHits += 1;
+  });
+
+  await new Promise((resolve) => target.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise((resolve) => target.close(resolve)));
+
+  const link = new RelayLink({
+    relay: {
+      id: 'r12345678',
+      host: '127.0.0.1',
+      port,
+      fp: cert.fp,
+      brainToken: 'brain-token',
+    },
+    mobilePort: trap.address().port,
+    clientTarget: async () => target.address().port,
+    vpnGate: async () => true,
+  });
+
+  t.after(() => link.stop());
+  link.start();
+  await waitFor(() => link.status().state === 'online');
+  assert.equal(link.status().compatibility, 'supported');
+
+  // Устройство v1 (без target): hello пишем без ожидания ACK — после правки мозг
+  // не открывает пару и посредник не отвечает устройству до BrainTimeout.
+  const oldDevice = await connect(port, cert.fp);
+  const legacyHello = {
+    v: 1,
+    role: 'device',
+    token: 'device-token',
+  };
+
+  t.after(() => oldDevice.destroy());
+  oldDevice.write(`${JSON.stringify(legacyHello)}\n`);
+
+  // Детерминированно ждём: на базе ловушка получает соединение быстро; после правки
+  // соединения нет — выжидаем дедлайн и проверяем отсутствие.
+  const deadline = Date.now() + 3000;
+
+  while (v1Hits === 0 && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+
+  assert.equal(v1Hits, 0);
+
+  // Устройство нового клиента (target client): соединение доходит до clientTarget.
+  const newDevice = await connect(port, cert.fp);
+
+  t.after(() => newDevice.destroy());
+  await hello(newDevice, {
+    v: 2,
+    target: 'client',
+    role: 'device',
+    token: 'device-token',
+  });
+  await waitFor(() => clientHits >= 1);
+  assert.equal(v1Hits, 0);
 });

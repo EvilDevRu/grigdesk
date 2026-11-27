@@ -6,7 +6,10 @@ import { UiDialogHost } from '../../../../web/src/ui.ts';
 import '../../../../web/src/styles/index.css';
 
 const app = createApp({
-  render: () => [h(MobileAccess), h(UiDialogHost)],
+  render: () => [
+    h('section', { 'data-ui-touch': '' }, [h(MobileAccess)]),
+    h(UiDialogHost),
+  ],
 });
 
 app.use(createPinia());

@@ -153,7 +153,7 @@ CLI и ярлык: `tests/server/{desktop-install-script,launch-script,shortcut-
 ## Сохранённые модули прежнего клиента
 
 identity.ts и selfSignedCert.ts теперь обслуживают ключ полного клиента: EC P-256,
-самоподписанный сертификат и electronSealer. node-link/PhoneEmulator проверяют прежний v1.
+самоподписанный сертификат и electronSealer.
 Mobile renderer, preload и прежние IPC/media entrypoints не возвращаются.
 
 ## Команды проверок

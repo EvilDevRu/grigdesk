@@ -41,8 +41,8 @@
         {{ t('settings.retryLoading') }}
       </UiButton>
     </UiInlineMessage>
-    <UiInlineMessage v-if="status && !status.server.up" tone="warning">
-      {{ status.server.error || t('settings.mobileAccessHasNotStartedYet') }}
+    <UiInlineMessage v-if="status && status.server.error" tone="danger">
+      {{ resolveUiText(status.server.error) }}
     </UiInlineMessage>
     <section class="mobile-card" aria-labelledby="mobile-relays-title">
       <header class="mobile-card-head">
@@ -71,7 +71,6 @@
               <span class="mobile-skeleton-line mobile-skeleton-name" />
               <span class="mobile-skeleton-line mobile-skeleton-address" />
             </div>
-            <span class="mobile-skeleton-button mobile-connect" />
             <span class="mobile-skeleton-button mobile-skeleton-icon mobile-relay-settings" />
           </div>
         </div>
@@ -99,17 +98,6 @@
               </div>
               <span class="mobile-address">{{ relay.host }}:{{ relay.port }}</span>
             </div>
-            <UiButton data-context="workspace-form-wrap"
-              class="mobile-connect"
-              data-role="settings-action"
-              data-testid="mobile-phone-qr"
-              variant="solid"
-              tone="accent"
-              :disabled="busy || !status.server.up"
-              @click="showQr(relay, true)"
-            >
-              {{ t('settings.phoneConnectLegacy') }}
-            </UiButton>
             <UiIconButton
               v-tooltip="t('settings.relaySettings')"
               class="mobile-relay-settings"
@@ -148,19 +136,6 @@
           >
             <div class="mobile-row">
               <div class="mobile-identity">
-                <b>{{ t('settings.phoneAlreadyPaired') }}</b>
-                <p>{{ t('settings.addThisAddressInTheApplicationAs') }}</p>
-              </div>
-              <UiButton data-context="workspace-form-wrap"
-                data-role="settings-action"
-                :disabled="busy"
-                @click="showQr(relay, false)"
-              >
-                {{ t('settings.relayQR') }}
-              </UiButton>
-            </div>
-            <div class="mobile-row">
-              <div class="mobile-identity">
                 <b>{{ t('settings.relayInstallation') }}</b>
                 <p>{{ t('settings.downloadTheSettingsFileToStartOn') }}</p>
               </div>
@@ -194,97 +169,6 @@
             </div>
           </div>
         </article>
-      </div>
-    </section>
-    <section v-if="!hideDevices" class="mobile-card" aria-labelledby="mobile-devices-title">
-      <header class="mobile-card-head">
-        <div>
-          <h4 id="mobile-devices-title">
-            {{ t('settings.pairedPhones') }}
-            <span class="mobile-count">{{ status ? activeDevices.length : '—' }}</span>
-          </h4>
-          <p>{{ t('settings.devicesAllowedToAccessThisGrigDesk') }}</p>
-        </div>
-      </header>
-      <div class="mobile-device-list">
-        <div
-          v-if="!status"
-          class="mobile-devices mobile-skeleton"
-          :class="{ 'is-loading': loading }"
-          aria-hidden="true"
-        >
-          <div
-            v-for="row in 2"
-            :key="row"
-            class="mobile-device mobile-row"
-          >
-            <div class="mobile-identity">
-              <span class="mobile-skeleton-line mobile-skeleton-name" />
-              <span class="mobile-skeleton-line mobile-skeleton-address" />
-            </div>
-            <span class="mobile-skeleton-button" />
-          </div>
-        </div>
-        <SettingsEmpty
-          v-else-if="!activeDevices.length"
-          class="mobile-empty"
-          :heading="t('settings.noPhonesPairedYet')"
-          :text="t('settings.clickConnectPhoneForTheRelayAnd')"
-        />
-        <div v-else class="mobile-devices">
-          <div
-            v-for="device in activeDevices"
-            :key="device.id"
-            class="mobile-device mobile-row"
-          >
-            <div class="mobile-identity">
-              <b>{{ device.name }}</b>
-              <span class="mobile-device-status">{{ t('settings.accessAllowed') }}</span>
-            </div>
-            <UiButton data-context="workspace-form-wrap"
-              data-role="settings-action"
-              variant="ghost"
-              tone="danger"
-              data-testid="mobile-revoke"
-              :aria-label="t('settings.revokeAccess2', { deviceName: device.name })"
-              :disabled="busy"
-              @click="revoke(device)"
-            >
-              {{ t('settings.revokeAccess') }}
-            </UiButton>
-          </div>
-        </div>
-      </div>
-      <div class="mobile-history">
-        <div
-          v-if="!status"
-          class="mobile-skeleton mobile-history-placeholder"
-          aria-hidden="true"
-        >
-          <span class="mobile-skeleton-line mobile-skeleton-address" />
-        </div>
-        <UiDisclosureButton
-          v-else-if="revokedDevices.length"
-          v-model:open="historyOpen"
-          controls="mobile-revoked-devices"
-        >
-          {{ t('settings.revokedPhones') }} {{ revokedDevices.length }}
-        </UiDisclosureButton>
-        <p v-else class="mobile-history-empty">{{ t('settings.noRevokedPhones') }}</p>
-        <div
-          v-if="historyOpen && revokedDevices.length"
-          id="mobile-revoked-devices"
-          class="mobile-devices"
-        >
-          <div
-            v-for="device in revokedDevices"
-            :key="device.id"
-            class="mobile-device mobile-row"
-          >
-            <b>{{ device.name }}</b>
-            <span class="mobile-badge">{{ t('settings.accessRevoked') }}</span>
-          </div>
-        </div>
       </div>
     </section>
     <UiDialog
@@ -363,12 +247,6 @@
         </UiButton>
       </template>
     </UiDialog>
-    <MobilePairingDialog
-      v-if="qrTarget"
-      :relay="qrTarget.relay"
-      :pair="qrTarget.pair"
-      @close="qrTarget = null"
-    />
   </section>
 </template>
 
@@ -382,7 +260,6 @@ import {
   confirmDialog,
   UiButton,
   UiDialog,
-  UiDisclosureButton,
   UiField,
   UiIconButton,
   UiInlineMessage,
@@ -393,7 +270,6 @@ import {
 } from '../../ui';
 import { api } from '../../shared/apiClient.ts';
 import { useSse } from '../../composables/useSse.ts';
-import MobilePairingDialog from './MobilePairingDialog.vue';
 import SettingsEmpty from './SettingsEmpty.vue';
 
 type Relay = {
@@ -407,19 +283,12 @@ type Relay = {
   };
 };
 
-type Device = {
-  id: string;
-  name: string;
-  revokedAt: number | null;
-};
-
 type Status = {
   server: {
-    up: boolean;
+    fp: string | null;
     error: string | null;
   };
   relays: Relay[];
-  devices: Device[];
 };
 
 const status = ref<Status | null>(null);
@@ -432,18 +301,12 @@ const error = ref<UiText>('');
 const loadError = ref<UiText>('');
 const busy = ref(false);
 
-defineProps<{ hideDevices?: boolean }>();
-
 const created = ref('');
 const addOpen = ref(false);
 const expandedRelay = ref('');
-const historyOpen = ref(false);
-const qrTarget = ref<{ relay: Relay; pair: boolean } | null>(null);
 const loading = ref(false);
 let disposed = false;
 
-const activeDevices = computed(() => status.value?.devices.filter((device) => !device.revokedAt) || []);
-const revokedDevices = computed(() => status.value?.devices.filter((device) => device.revokedAt) || []);
 const canAdd = computed(() => Boolean(
   form.value.name.trim() && form.value.host.trim()
   && Number.isInteger(form.value.port) && Number(form.value.port) >= 1 && Number(form.value.port) <= 65535,
@@ -451,7 +314,7 @@ const canAdd = computed(() => Boolean(
 
 /**
  * Перечитывает настройки через общий клиент без собственного SSE-соединения.
- * Ответ после unmount не возвращает секретный QR или старый статус на экран.
+ * Ответ после unmount не обновляет уже закрытую страницу настроек.
  */
 async function load() {
   if (loading.value || disposed) {
@@ -464,7 +327,7 @@ async function load() {
   try {
     const value = (await api.get('/api/mobile/status')) as Status;
 
-    if (!value?.server || !Array.isArray(value.relays) || !Array.isArray(value.devices)) {
+    if (!value?.server || !Array.isArray(value.relays)) {
       if (!disposed) {
         loadError.value = messageRef('settings.couldNotLoadConnectionsTryAgain');
       }
@@ -561,10 +424,6 @@ function openAdd() {
   addOpen.value = true;
 }
 
-function showQr(relay: Relay, pair: boolean) {
-  qrTarget.value = { relay, pair };
-}
-
 /**
  * Скачивает env по защищённому GET, затем удаляет временный браузерный URL.
  * Содержимое файла не попадает в локальные настройки или журнал.
@@ -593,26 +452,6 @@ async function removeRelay(relay: Relay) {
   ) {
     await action(async () => {
       await api.del(`/api/mobile/relays/${relay.id}`);
-    });
-  }
-}
-
-/**
- * Отзыв телефона подтверждается общим danger-dialog, затем перечитывает список.
- * Сервер завершает живые соединения только после durable записи отзыва.
- */
-async function revoke(device: Device) {
-  const text = messageRef('settings.revokeAccessForANewQRWill', { deviceName: device.name });
-
-  if (
-    await confirmDialog(text, {
-      danger: true,
-      okText: messageRef('settings.revokeAccess'),
-      touchTargets: true,
-    })
-  ) {
-    await action(async () => {
-      await api.post(`/api/mobile/devices/${device.id}/revoke`);
     });
   }
 }
@@ -696,14 +535,6 @@ onUnmounted(() => {
   margin: 0;
   font-size: 13px;
 }
-.mobile-count {
-  padding: 0.125rem 0.45rem;
-  border-radius: 6px;
-  background: var(--surface-2);
-  color: var(--ink-mid);
-  font-size: 0.75rem;
-  font-weight: 500;
-}
 .mobile-relays {
   display: grid;
   gap: 0.75rem;
@@ -718,12 +549,11 @@ onUnmounted(() => {
 }
 .mobile-relay-summary {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 0.75rem;
 }
-.mobile-relay-summary > .mobile-identity,
-.mobile-device > .mobile-identity {
+.mobile-relay-summary > .mobile-identity {
   min-height: 3.25rem;
   align-content: center;
 }
@@ -811,40 +641,6 @@ onUnmounted(() => {
   font-size: 0.75rem;
   line-height: 1.6;
 }
-.mobile-devices {
-  padding: 0;
-}
-.mobile-device-list {
-  min-height: 0;
-}
-.mobile-device {
-  min-width: 0;
-  padding: 1rem 0;
-  border-top: 1px solid var(--line);
-  overflow-wrap: anywhere;
-}
-.mobile-device-status {
-  color: var(--ink-mid);
-  font-size: 12px;
-}
-.mobile-history {
-  padding: 8px 0;
-  border-top: 1px solid var(--line);
-}
-.mobile-history .mobile-devices {
-  padding: 0;
-  color: var(--ink-mid);
-  font-size: 12px;
-}
-.mobile-history-empty,
-.mobile-history-placeholder {
-  display: flex;
-  align-items: center;
-  min-height: var(--control-height);
-}
-.mobile-card .mobile-history-empty {
-  margin: 0;
-}
 .mobile-skeleton-line,
 .mobile-skeleton-button {
   display: block;
@@ -906,25 +702,8 @@ onUnmounted(() => {
   .mobile-relays {
     padding: 0 0 12px;
   }
-  .mobile-relay-summary {
-    grid-template-columns: minmax(0, 1fr) auto;
-  }
-  .mobile-connect {
-    grid-column: 1 / -1;
-  }
-  .mobile-skeleton-button.mobile-connect {
-    width: 100%;
-  }
-  .mobile-relay-settings {
-    grid-column: 2;
-    grid-row: 1;
-  }
   .mobile-identity {
     flex-basis: auto;
-  }
-  .mobile-device {
-    align-items: flex-start;
-    flex-direction: column;
   }
   .mobile-heading {
     align-items: flex-start;

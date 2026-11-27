@@ -81,7 +81,6 @@ test('CD-DH-1 вся раскладка данных вместе с фабри�
     mobileDir: 'mobile', 
     chatBindingsDir: 'chats/.bindings',
     userPluginsDataDir: 'state/plugins', 
-    mobileApkDir: 'state/mobile-apk',
     modelsPath: 'state/models.json',
     usageForecastPath: 'state/usage-forecast.json',
     claudeAuthPath: 'state/claude-auth.json',

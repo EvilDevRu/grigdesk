@@ -84,9 +84,8 @@ export async function phoneHarness(t, options = {}) {
     }
     if (url === '/api/mobile/status') {
       return {
-        server: { up: true },
+        server: { fp: null, error: null },
         relays: [],
-        devices: []
       };
     }
     if (url === '/api/devices/access/direct' && method === 'PUT') {

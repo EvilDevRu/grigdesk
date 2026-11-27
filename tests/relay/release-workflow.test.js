@@ -31,7 +31,7 @@ test('RL-45: посредник выпускается через общий wor
     const jobSource = yaml.stringify(job);
 
     for (const command of [
-      'npm --prefix server ci', 'npm --prefix web ci', 'npm --prefix mobile ci',
+      'npm --prefix server ci', 'npm --prefix web ci',
       'npm --prefix deepseek ci',
       'npm --prefix desktop ci',
     ]) {

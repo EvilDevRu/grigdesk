@@ -5,7 +5,7 @@ import path from 'node:path';
 
 import { createServer } from '../../../web/node_modules/vite/dist/node/index.js';
 import vue from '../../../web/node_modules/@vitejs/plugin-vue/dist/index.mjs';
-import { chromium } from '../../../mobile/node_modules/playwright-core/index.mjs';
+import { chromium } from '../../../desktop/node_modules/playwright-core/index.mjs';
 import { artifactsPath } from '../../../shared/runtime/dataHome.ts';
 import { createMobileSeed } from '../../helpers/mobileSeed.mjs';
 import { inspectFrame } from './rules.mjs';
@@ -127,7 +127,7 @@ async function main() {
         const data = await response.json();
 
         data.relays.forEach((item, index) => {
-          item.link.state = statuses[index];
+          item.link.state = statuses[index] ?? item.link.state;
           item.link.lastError = statuses[index] === 'error' ? 'Посредник недоступен' : null;
         });
         await route.fulfill({
@@ -139,32 +139,20 @@ async function main() {
       }
     });
     await page.goto(`http://127.0.0.1:${vite.httpServer.address().port}`);
-    await page.locator('[data-testid=mobile-revoke]').waitFor();
+    await page.locator('.mobile-relay:not(.mobile-skeleton .mobile-relay)').first().waitFor();
     await frame(page, 'lists', width, height);
+    await page.locator('[data-testid=mobile-open-add]').click();
     await page.locator('#mobile-relay-name').fill('Новый домашний посредник');
     await page.locator('#mobile-relay-host').fill('127.0.0.1');
     await page.locator('[data-testid=mobile-add-relay]').click();
     await page.locator('.mobile-install').waitFor();
     await frame(page, 'add', width, height);
-    await page.locator('[data-testid=mobile-phone-qr]').first().click();
-    await page.locator('[role=dialog]').waitFor();
-    await frame(page, 'qr', width, height);
-    await page
-      .getByRole('button', {
-        name: 'Закрыть',
-        exact: true,
-      })
-      .last()
-      .click();
-    await page.locator('[data-testid=mobile-revoke]').click();
-    await page.locator('[role=dialog],[role=alertdialog]').waitFor();
-    await frame(page, 'revoke', width, height);
-    await page
-      .getByRole('button', {
-        name: 'Отмена',
-        exact: true,
-      })
-      .click();
+
+    const added = page.locator('.mobile-relay').filter({ has: page.locator('.mobile-install') });
+
+    await added.getByRole('button', { name: 'Удалить посредника', exact: true }).click();
+    await page.getByRole('button', { name: 'Удалить', exact: true }).click();
+    await added.waitFor({ state: 'detached' });
     await page.close();
   }
 

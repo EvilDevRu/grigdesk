@@ -57,7 +57,6 @@ async function fixture(t) {
     'shared/client/apiVersion.ts',
     'shared/node/hash.ts',
     'shared/runtime/uiRelease.ts',
-    'tools/mobile-phone/release.mts',
     'mobile/toolchain.lock.json',
     'mobile/android/gradle/wrapper/gradle-wrapper.jar',
   ]) {
@@ -66,6 +65,9 @@ async function fixture(t) {
     await mkdir(path.dirname(target), { recursive: true });
     await copyFile(path.join(root, file), target);
   }
+
+  delete lock.capacitor;
+  await writeFile(path.join(project, 'mobile/toolchain.lock.json'), JSON.stringify(lock));
 
   await cp(path.join(root, 'shared/i18n'), path.join(project, 'shared/i18n'), { recursive: true });
   await mkdir(signing, { recursive: true });
@@ -90,11 +92,6 @@ async function fixture(t) {
     [path.join(sdk, 'platform-tools/adb'), 'exit 0'],
     [path.join(sdk, 'build-tools/36.0.0/aapt2'), 'exit 0'],
     [path.join(sdk, 'cmdline-tools/latest/bin/sdkmanager'), 'exit 0'],
-    [
-      path.join(project, 'mobile/node_modules/.bin/cap'),
-      'if [[ "$1" == --version ]]; then echo 8.5.3; exit 0; fi\n' +
-        'printf "cap:%s\\n" "$PWD" >> "$GRIGDESK_FAKE_LOG"',
-    ],
     [
       path.join(commands, 'npm'),
       'printf "npm:%s\\n" "$PWD" >> "$GRIGDESK_FAKE_LOG"\n' +
@@ -162,6 +159,7 @@ test('MB-24: shell синтаксис и явные команды сборки/
   }
 
   assert.doesNotMatch(script, /^\s*sudo\b/m);
+  assert.doesNotMatch(script, /devlink|cap sync|:app:|npm --prefix .*mobile.* run/u);
   assert.match(script, /tools\/mobile-client\.mts.*release/);
   assert.match(release, /GRIGDESK_ANDROID_STORE_FILE/);
   assert.match(release, /apksigner/);
@@ -199,50 +197,20 @@ test('GP-03/MB-24: явный прежний ключ, сбой :client Gradle �
 
 test('GP-01: приложение имеет новый пакет, версию 0.1.0 и versionCode 100', async () => {
   const pkg = JSON.parse(await readFile(path.join(root, 'mobile/package.json'), 'utf8'));
-  const gradle = await readFile(path.join(root, 'mobile/android/app/build.gradle'), 'utf8');
+  const client = await readFile(path.join(root, 'mobile/android/client/build.gradle'), 'utf8');
 
   assert.equal(pkg.version, '0.1.0');
 
   const [major, minor, patch] = pkg.version.split('.').map(Number);
 
   assert.equal(major * 10000 + minor * 100 + patch, 100);
-  assert.match(gradle, /namespace = "local\.grigdesk\.mobile"/);
-  assert.match(gradle, /applicationId "local\.grigdesk\.mobile"/);
-  assert.match(gradle, /versionCode mobileCode/);
-
-  const client = await readFile(path.join(root, 'mobile/android/client/build.gradle'), 'utf8');
-
   assert.match(client, /namespace 'local\.grigdesk\.client'/);
   assert.match(client, /applicationId 'local\.grigdesk\.mobile'/);
   assert.match(client, /versionCode parts\[0\] \* 10000 \+ parts\[1\] \* 100 \+ parts\[2\]/);
 });
 
 
-
-test('GP-04: рост versionCode сверяется только с выпусками GrigDesk', async (t) => {
-  const fx = await fixture(t);
-  const output = path.join(fx.env.GRIGDESK_HOME, 'state/mobile-apk');
-  const run = () => execute(process.execPath, ['tools/mobile-phone/release.mts'], {
-    cwd: fx.project, env: { ...fx.env, GRIGDESK_FAKE_FAIL: 'gradle' },
-  });
-
-  // Номер прежнего приложения (другой applicationId) больше, но выпуск 0.1.0 не останавливает.
-  await rm(path.join(output, 'grigdesk-mobile.json'));
-  await writeFile(path.join(output, 'unrelated-mobile.json'), '{"versionCode":109}');
-  await assert.rejects(run(), (error) => /кодом 19/.test(error.stderr));
-  assert.match(await readFile(fx.logs, 'utf8'), /gradle:/);
-
-  await rm(fx.logs);
-  await writeFile(path.join(output, 'grigdesk-mobile.json'), '{"versionCode":100}');
-  await assert.rejects(run(), (error) => {
-    assert.match(error.stderr, /Номер версии должен быть больше/);
-
-    return true;
-  });
-  assert.equal(await readFile(fx.logs, 'utf8').catch(() => ''), '');
-});
-
-test('MB-24: незелёный doctor останавливает сборку до npm/cap/Gradle', async (t) => {
+test('MB-24: незелёный doctor останавливает сборку до npm/Gradle', async (t) => {
   const fx = await fixture(t);
 
   await assert.rejects(
@@ -273,7 +241,7 @@ test('MB-24: doctor сверяет gradle-wrapper.jar с отпечатком и
   assert.match(stdout, /gradle-wrapper\.jar: OK/);
 });
 
-test('MB-24: подменённый gradle-wrapper.jar останавливает сборку до npm/cap/Gradle', async (t) => {
+test('MB-24: подменённый gradle-wrapper.jar останавливает сборку до npm/Gradle', async (t) => {
   const fx = await fixture(t);
   const jar = path.join(fx.project, 'mobile/android/gradle/wrapper/gradle-wrapper.jar');
 

@@ -20,7 +20,6 @@ export interface DevicesOptions {
   identity: () => { fp: string } | Promise<{ fp: string }>;
   address: string | null;
   name: string;
-  disconnectMobile: (fp: string) => void;
 }
 
 /**
@@ -139,7 +138,6 @@ export default async function devicesModule(app: FastifyInstance, options: Devic
 
     markRevoked(device.fp);
     options.listener()?.disconnect(device.fp);
-    options.disconnectMobile(device.fp);
 
     return { ok: true };
   });

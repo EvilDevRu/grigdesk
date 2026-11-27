@@ -3,7 +3,6 @@
 Модуль `:client` использует общий web-интерфейс и общий подробный журнал:
 [открытия и API](../web/performance-surfaces.md),
 [блокировки интерфейса](../web/chat-performance-logging.md).
-Прежнее отдельное приложение `:app` не меняется.
 
 Android upstream после pinned TLS передаёт необязательный `X-GrigDesk-Request` и
 Server-Timing сервера. При наличии штатной метрики `grigdesk` добавляется

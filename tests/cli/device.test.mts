@@ -66,8 +66,6 @@ async function commandFixture(t: TestContext, disabled = false) {
       async close() {
       },
     }),
-    disconnectMobile() {
-    },
   });
   await app.listen({ host: '127.0.0.1', port: 0 });
 

@@ -23,6 +23,7 @@ async function openSettings(t) {
     '/api/system/web-rebuild': { rebuild: { status: 'idle' } },
     '/api/chat/sessions': data.sessions,
     '/api/mobile/status': data.mobile,
+    '/api/mobile/deployments': { jobs: [] },
     '/api/devices': {
       listener: { state: 'online', addresses: ['desk.example:8145'] },
       devices: [],
@@ -248,15 +249,16 @@ test('V06: дерево — одна раскрытая группа и подп
 test('V07: пустые состояния одного вида и без второго заголовка', async (t) => {
   const fixture = await openSettings(t);
 
-  await showPage(fixture, 'connections.devices', '[data-settings-devices] .devices-empty');
+  await showPage(fixture, 'connections.devices', '.devices-panel .devices-empty');
 
-  const devices = await fixture.page.locator('[data-settings-devices] .devices-empty')
+  const devices = await fixture.page.locator('.devices-panel .devices-empty')
     .evaluate((element) => ({
       shared: element.classList.contains('settings-empty'),
       border: getComputedStyle(element).borderTopStyle,
     }));
 
-  await showPage(fixture, 'connections.mobile', '.mobile-empty');
+  await fixture.page.getByRole('button', { name: 'Настроить ретранслятор', exact: true }).click();
+  await fixture.page.locator('.mobile-empty').waitFor();
 
   const mobile = await fixture.page.locator('[data-role="settings-modal"]').evaluate((modal) => ({
     shared: [...modal.querySelectorAll('.mobile-empty')]
@@ -272,7 +274,7 @@ test('V07: пустые состояния одного вида и без вт�
     },
     mobile: {
       shared: true,
-      count: 2,
+      count: 1,
       heading: true,
     },
   });

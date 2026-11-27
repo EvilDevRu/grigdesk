@@ -28,9 +28,6 @@ import { startClientListener } from './lib/clientAccess/listener.ts';
 import type { ClientListener } from './lib/clientAccess/listener.ts';
 import { createClientBootstrap, registerClientPairRoute } from './lib/clientAccess/bootstrap.ts';
 import devicesModule from './modules/devices/index.ts';
-import { ActionTokens } from './lib/mobile/actionTokens.ts';
-import { recoverChatOperation } from './lib/mobile/chatTurns.ts';
-import { registerMobileFacade } from './lib/mobile/facade/index.ts';
 import { relayVpnGate } from './lib/mobile/vpn.ts';
 import mobileModule from './modules/mobile/index.ts';
 import { grigDeskCliPath } from './lib/cliPath.ts';
@@ -1473,34 +1470,11 @@ async function build(desktopParent: DesktopParent | null) {
     try { body = res.json(); } catch { /* не-JSON ответа у этих ручек не бывает */ }
     return { statusCode: res.statusCode, body };
   };
-  const internalCallRaw = async (method: string, url: string) => {
-    const res = await fastify.inject({
-      method,
-      url,
-      headers: { 'x-grigdesk-internal': internalToken },
-    } as InjectOptions);
-
-    return {
-      statusCode: res.statusCode,
-      headers: res.headers,
-      payload: res.rawPayload,
-    };
-  };
   const pultCallApi = internalCallApi;
   const mobile = new MobileService({
     directory: config.mobileDir,
-    port: config.mobilePort,
     relayDeployment: { transport: sshTransport, hostKeys: sshHostKeys },
     vpnGate: relayVpnGate,
-    registerRoutes: (app) => registerMobileFacade(app, {
-      callApi: internalCallApi,
-      callRaw: internalCallRaw,
-      chat: fastify.mobileChat!,
-      tokens: new ActionTokens(),
-      apkDirectory: config.mobileApkDir,
-      subscribe: (listener) => fastify.sse?.subscribe?.(listener) ?? (() => {}),
-    }),
-    recoverOperation: (device, proof) => recoverChatOperation(fastify.mobileChat!, device, proof),
     changed: () => fastify.sse?.broadcast?.('mobile-changed', { at: Date.now() }),
     disconnectClient: (fp) => clientListener?.disconnect(fp),
     log: (event) => fastify.log.warn({ event }, 'мобильный доступ: изменение состояния'),
@@ -1528,7 +1502,6 @@ async function build(desktopParent: DesktopParent | null) {
     identity: async () => clientIdentity ??= await ensureBrainIdentity(config.mobileDir),
     address: config.clientAccess.address,
     name: config.serverName,
-    disconnectMobile: (fp) => mobile.disconnectDevice(fp),
     access: Object.assign({ root: fastify }, { mobile, config }),
   });
   fastify.addHook('onListen', async () => {

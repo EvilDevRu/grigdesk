@@ -13,6 +13,7 @@ export function inspectFrame() {
 
     return (
       rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none'
+      && !element.closest('.ui-visually-hidden')
     );
   };
   const describe = (element) => element.tagName.toLowerCase() + '.' + element.className;

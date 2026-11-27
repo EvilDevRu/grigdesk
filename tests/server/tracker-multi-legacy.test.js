@@ -5,9 +5,6 @@ import { createRequire } from 'node:module';
 import path from 'node:path';
 
 import { Analyzer } from '../../server/src/lib/analysis/analyzer.ts';
-import { registerTrackerRoutes } from '../../server/src/lib/mobile/facade/tracker.ts';
-import { ActionTokens } from '../../server/src/lib/mobile/actionTokens.ts';
-import { mobileFacadeFixture } from './helpers/mobile-facade.js';
 import { inboxConsumerFixture, REVISION } from './helpers/trackerInbox.js';
 import { multiFixture } from './helpers/trackerMulti.js';
 import { selectTracker, trackerCalls } from './helpers/trackerFixture.js';
@@ -48,7 +45,7 @@ test('MD-LEGACY: прежние DTO, default, auth и SSE alias сохраняю
   }
 });
 
-test('MD-CONSUMERS: Inbox, analyzer и mobile без цели используют default B', async (t) => {
+test('MD-CONSUMERS: Inbox и analyzer без цели используют default B', async (t) => {
   const fixture = await multiFixture(t);
   const analyzer = Object.create(Analyzer.prototype);
 
@@ -64,19 +61,8 @@ test('MD-CONSUMERS: Inbox, analyzer и mobile без цели использую
     revision: REVISION,
     messageRefs: [inbox.messageRef],
   });
-  const mobile = await mobileFacadeFixture(t, (app) => registerTrackerRoutes(app, {
-    tokens: new ActionTokens(),
-    callApi: async (method, url, payload) => {
-      const response = await fixture.request(method, url, payload);
-
-      return { statusCode: response.statusCode, body: response.json() };
-    },
-  }));
-  const response = await mobile.app.inject('/api/mobile/v1/tracker/tasks/42');
 
   assert.equal(created.taskId, '43');
-  assert.equal(response.statusCode, 200, response.body);
-  assert.equal(response.json().task.title, 'fixture-b');
   assert.deepEqual(await trackerCalls(fixture.config, 'fixture-a'), []);
   assert.equal((await trackerCalls(fixture.config, 'fixture-b'))
     .filter((call) => call.method === 'createTask').length, 1);

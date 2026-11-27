@@ -423,7 +423,6 @@
         "server-install": "Зависимости сервера",
         "qwen-test-cli": "Qwen CLI для тестов",
         "web-install": "Зависимости веба",
-        "mobile-install": "Зависимости мобильного клиента",
         "deepseek-runtime": "Среда DeepSeek",
         "deepseek-vendor": "Исходники DeepSeek",
         "server-browser": "Chromium для тестов",

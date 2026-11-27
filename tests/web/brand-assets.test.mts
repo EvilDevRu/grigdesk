@@ -9,28 +9,18 @@ import { fileURLToPath } from 'node:url';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const brand = 'docs/images/brand';
-const android = 'mobile/android/app/src/main/res';
 const masters = ['wordmark', 'wordmark-reversed', 'stacked', 'gd', 'gd-reversed', 'gd-small',
   'g-small', 'g-small-reversed', 'favicon-tile', 'app-icon', 'wordmark-light', 'wordmark-graphite'];
-const densities = {
-  mdpi: 48,
-  hdpi: 72,
-  xhdpi: 96,
-  xxhdpi: 144,
-  xxxhdpi: 192,
-};
 const files = [
   ...masters.map((name) => `${brand}/grigdesk-${name}.svg`),
   `${brand}/grigdesk-app-icon-1024.png`, `${brand}/grigdesk-maskable-512.png`,
   'desktop/build/icon.png', 'desktop/build/window-icon.png', 'bin/grigdesk.png',
   'web/public/icon-96.png',
-  ...['web', 'mobile'].flatMap((area) => ['192', '512', 'maskable-512']
-    .map((size) => `${area}/public/icon-${size}.png`)),
-  ...Object.keys(densities).flatMap((density) => ['', '_round']
-    .map((suffix) => `${android}/mipmap-${density}/ic_launcher${suffix}.png`)),
-  `${android}/drawable/ic_launcher_foreground.xml`, `${android}/values/ic_launcher_background.xml`,
+  'web/public/icon-192.png',
+  'web/public/icon-512.png',
+  'web/public/icon-maskable-512.png',
   'web/src/shared/notificationIcon.ts', 'web/index.html',
-  'web/src/shared/GrigDeskMark.vue', 'mobile/src/ui/UiBrandMark.vue',
+  'web/src/shared/GrigDeskMark.vue',
   'mobile/android/client/src/main/res/drawable-nodpi/client_icon.png',
   'mobile/android/client/src/main/res/drawable/ic_launcher_foreground.xml',
   'mobile/android/client/src/main/res/values/ic_launcher_background.xml',
@@ -95,12 +85,10 @@ test('GI-02: все растры имеют утверждённые разме�
   const sizes: Array<[string, number]> = [
     ['desktop/build/icon.png', 512], ['desktop/build/window-icon.png', 64],
     ['web/public/icon-96.png', 96], ['bin/grigdesk.png', 512],
-    ...['web', 'mobile'].flatMap((area): Array<[string, number]> => [
-      [`${area}/public/icon-192.png`, 192], [`${area}/public/icon-512.png`, 512],
-      [`${area}/public/icon-maskable-512.png`, 512],
-    ]),
-    ...Object.entries(densities).flatMap(([density, size]): Array<[string, number]> =>
-      ['', '_round'].map((suffix) => [`${android}/mipmap-${density}/ic_launcher${suffix}.png`, size])),
+    ['web/public/icon-192.png', 192],
+    ['web/public/icon-512.png', 512],
+    ['web/public/icon-maskable-512.png', 512],
+    ['mobile/android/client/src/main/res/drawable-nodpi/client_icon.png', 512],
   ];
 
   for (const [file, size] of sizes) {
@@ -144,25 +132,24 @@ test('GI-05: иконки приложения сохраняют полный L
   assert.equal(contours.length, 3);
   assert.equal(contours[2], originalG);
 
-  for (const file of ['web/src/shared/GrigDeskMark.vue', 'mobile/src/ui/UiBrandMark.vue']) {
-    assert.deepEqual(componentPaths(file), contours, file);
-    assert.match(text(file), /translate\(24 12\)/);
-    assert.match(text(file), /translate\(35.264 54.763\) scale\(0.51\)/);
-
-    for (const color of ['#9A7DF5', '#292C46', '#FFFFFF']) {
-      assert.ok(text(file).includes(`fill="${color}"`));
-    }
-  }
-
+  const webMark = 'web/src/shared/GrigDeskMark.vue';
+  const webMarkSource = text(webMark);
   const client = 'mobile/android/client/src/main';
-  const foreground = text(`${android}/drawable/ic_launcher_foreground.xml`);
+  const foreground = text(`${client}/res/drawable/ic_launcher_foreground.xml`);
+
+  assert.deepEqual(componentPaths(webMark), contours, webMark);
+  assert.match(webMarkSource, /translate\(24 12\)/);
+  assert.match(webMarkSource, /translate\(35.264 54.763\) scale\(0.51\)/);
+
+  for (const color of ['#9A7DF5', '#292C46', '#FFFFFF']) {
+    assert.ok(webMarkSource.includes(`fill="${color}"`));
+  }
 
   assert.deepEqual([...foreground.matchAll(/android:pathData="([^"]+)"/g)].map((match) => match[1]),
     contours);
   assert.match(foreground, /android:scaleX="0.20"/);
   assert.match(foreground, /android:translateX="28.4"/);
   assert.match(foreground, /android:scaleX="0.51"/);
-  assert.equal(text(`${client}/res/drawable/ic_launcher_foreground.xml`), foreground);
   assert.ok(read(`${client}/res/drawable-nodpi/client_icon.png`).equals(read('web/public/icon-512.png')));
   assert.match(text(`${client}/AndroidManifest.xml`), /android:icon="@mipmap\/ic_launcher"/);
   assert.match(text(`${client}/AndroidManifest.xml`), /android:roundIcon="@mipmap\/ic_launcher_round"/);
@@ -172,7 +159,7 @@ test('GI-05: иконки приложения сохраняют полный L
       /@drawable\/ic_launcher_foreground/);
   }
 
-  assert.match(text(`${android}/values/ic_launcher_background.xml`), /#0B0D11/);
+  assert.match(text(`${client}/res/values/ic_launcher_background.xml`), /#0B0D11/);
 });
 
 test('Общая верхняя панель показывает четыре буквы из фирменного мастера', () => {
@@ -197,4 +184,24 @@ test('GI-06: повтор генератора не меняет байты ни
 
   assert.equal(result.status, 0, result.stderr);
   assert.deepEqual(hashes(), before);
+});
+
+test('GI-07: генератор не создаёт ресурсы прежнего приложения', () => {
+  const run = spawnSync('python3', ['-I', 'web/scripts/gen-icons.py'], {
+    cwd: root,
+    encoding: 'utf8',
+    timeout: 30000,
+  });
+
+  assert.equal(run.status, 0, run.stderr);
+
+  for (const rel of [
+    'mobile/android/app/src/main/res',
+    'mobile/public/icon-192.png',
+    'mobile/public/icon-512.png',
+    'mobile/public/icon-maskable-512.png',
+    'mobile/src/ui/UiBrandMark.vue',
+  ]) {
+    assert.equal(existsSync(path.join(root, rel)), false, rel);
+  }
 });

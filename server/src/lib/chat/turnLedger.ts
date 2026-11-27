@@ -38,7 +38,7 @@ export interface TurnEntry {
   workspace?: ResolvedWorkdir;
   permissionMode?: string;
   modeSelection?: ChatModeSelection;
-  // Назначает только серверный порт mobileChat; HTTP-тело не переносит это поле.
+  // Серверная метка сохранённых ходов; обычное тело HTTP-запроса её не назначает.
   mobileOwner?: MobileTurnOwner;
   runId?: string;
   mobileHistoryEpoch?: number;

@@ -203,10 +203,10 @@
   },
   "mobile": {
     "server": {
-      "up": true
+      "fp": null,
+      "error": null
     },
-    "relays": [],
-    "devices": []
+    "relays": []
   },
   "sessions": {
     "enabled": true,

@@ -28,8 +28,9 @@ Verify the SSH fingerprint against a trusted source, review Ubuntu/Debian x64 wi
 The VPS needs neither Docker nor Node.
 
 `grigdesk-ctl relay status` reports connection states for configured relays.
-For manual installation, download `relay.env` and follow the relay card instructions
-to run the `grigdesk-relay` executable on the relay host.
+For manual installation, expand **Configure relay** on the **Server access** page,
+add the relay address, and download `relay.env`. Follow the card instructions to run
+`grigdesk-relay` on the relay host. Pair the phone from the shared device access page.
 After channel verification, obtain QR and wait separately for the phone to connect.
 You may close and later reopen the same job; do not delete configuration for a temporary connection failure.
 In the console, use the arrow keys to select a job or “Use a new VPS”, then press Enter.
@@ -61,7 +62,7 @@ Update a remote server using its CLI. Connection loss never permits an automatic
 Temporary shell unavailability preserves the machine and retries its state, with a message in the interface language.
 Create expired pairings again and keep QR/strings private.
 A changed server identity requires owner verification.
-Selecting remote does not itself stop the local server. The older mobile client uses a separate protocol.
+Selecting remote does not itself stop the local server.
 A verified relay channel and connected phone are separate results: a running service and QR do not prove phone connection.
 Preserve records, keys and devices during temporary failures; deleting configuration is a separate action.
 Keep the previous relay identity when replacing a VPS.

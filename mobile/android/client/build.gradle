@@ -1,6 +1,6 @@
 apply plugin: 'com.android.application'
 
-// Номер общий с прежним приложением; до выпуска остаётся 0.1.0.
+// Версия Android-приложения берётся из mobile/package.json.
 def mobileVersion = new groovy.json.JsonSlurper().parse(file('../../package.json')).version
 def parts = mobileVersion.tokenize('.').collect { Integer.parseInt(it) }
 if (parts.size() != 3 || parts[1] > 99 || parts[2] > 99) {

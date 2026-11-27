@@ -60,9 +60,8 @@ test('Подключения и система в общей сессии', asyn
     }
     if (String(url) === '/api/mobile/status') {
       return new Response(JSON.stringify({
-        server: { up: true },
+        server: { fp: null, error: null },
         relays: [],
-        devices: [],
       }));
     }
     if (String(url) === '/api/chat/sessions') {

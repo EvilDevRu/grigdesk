@@ -27,4 +27,4 @@ Release сборка/lint не подтверждают физическую б�
 GRIGDESK_ANDROID_STORE_PASSWORD, GRIGDESK_ANDROID_KEY_PASSWORD и GRIGDESK_ANDROID_KEY_ALIAS.
 Результаты —grigdesk-mobile-release.apk и grigdesk-mobile-release.json в папке APK.
 Версия 0.1.0 и versionCode100 до первого выпуска не повышаются. Эта команда не публикует
-обновление через сервер и не создаёт новый ключ. Прежний :app проверяется отдельно в check.
+обновление через сервер и не создаёт новый ключ.

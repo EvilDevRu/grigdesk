@@ -32,7 +32,7 @@ export async function stopDarwinVerificationServer(receipt: InstallationReceipt,
   if (process.platform !== 'darwin' || receipt.mode === 'remote' || !binding
     || Object.keys(binding).sort().join(',') !== 'installationId,port,registration'
     || binding.installationId !== installationId || !Number.isSafeInteger(binding.port)
-    || binding.port <= 0 || binding.port > 65535 || [8140, 8144].includes(binding.port)
+    || binding.port <= 0 || binding.port > 65535 || binding.port === 8140
     || (await serverSettings(receipt)).port !== binding.port) {
     throw new Error('dist_verification_service_scope_invalid');
   }

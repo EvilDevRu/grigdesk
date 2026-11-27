@@ -25,10 +25,9 @@
 - веб: PNG 96/192/512 и maskable 512, встроенный favicon из SVG и base64 для уведомлений;
 - окно: `desktop/build/icon.png` 512 и `window-icon.png` 64;
 - команду: `bin/grigdesk.png`, побайтную копию веб-значка 512;
-- телефон: PNG 192/512, maskable 512, Android mipmap 48/72/96/144/192;
-- Android adaptive foreground: полный L8 на холсте 108 dp с графитовым фоном;
-- актуальный Android :client: client_icon.png и adaptive-ресурсы для обычного и круглого значка;
-- `GrigDeskMark.vue` и `UiBrandMark.vue`: полный цветной L8 из мастера app-icon.
+- Android `:client`: client_icon.png и адаптивный фон и контуры L8 на холсте 108 dp
+  для обычного и круглого значка;
+- `GrigDeskMark.vue`: полный цветной L8 из мастера app-icon.
 
 В `GrigWordmark.vue` первые четыре буквы из светлого мастера сохраняют исходные
 контуры и заливку `#F2F3F5`. Ширина надписи в шапке — 48 CSS px, боковые поля — по 8 px.

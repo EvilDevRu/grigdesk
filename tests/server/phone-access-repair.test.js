@@ -3,7 +3,6 @@ import { once } from 'node:events';
 import https from 'node:https';
 import net from 'node:net';
 import test from 'node:test';
-import { MobileService } from '../../server/src/lib/mobile/service.ts';
 import { clientFailureText, connectionDetailText } from '../../shared/client/clientShell.ts';
 import { connect, hello, makeCert, relayFixture, temporary } from '../relay/helpers.js';
 import { clientRequest } from './helpers/clientAccess.js';
@@ -173,43 +172,6 @@ for (const host of ['RELAY.Example', '2001:db8::1']) {
     }
   });
 }
-
-test('PHONE-R4: отказ старого входа виден, повторный start без второго hub', async (t) => {
-  const directory = await temporary(t);
-  const logs = [];
-  let hubs = 0;
-  const mobile = new MobileService({
-    directory,
-    port: 0,
-    log: (event) => logs.push(event),
-    makeServer: async () => {
-      throw new Error('EADDRINUSE');
-    },
-    makeHub: () => {
-      hubs += 1;
-
-      return {
-        sync() {},
-        status() {
-          return [];
-        },
-        close() {},
-      };
-    },
-  });
-
-  mobile.setClientTarget(async () => 12345);
-  t.after(() => mobile.close());
-  await mobile.start();
-  await mobile.start();
-
-  const status = await mobile.status();
-
-  assert.equal(status.server.up, false);
-  assert.match(status.server.error ?? '', /Прежний мобильный вход недоступен/);
-  assert.ok(logs.includes('mobile_v1_start_failed'));
-  assert.equal(hubs, 1);
-});
 
 test('PHONE-R5: неудачная сборка QR не оставляет действующий код', async (t) => {
   const f = await ready(t);

@@ -1,8 +1,7 @@
 # Полное приложение Android
 
 Модуль :client имеет applicationId local.grigdesk.mobile, namespace local.grigdesk.client и
-общую версию mobile/package.json — 0.1.0. Он использует WebView без Capacitor; прежние :app,
-mobile/src и мобильный протокол v1 сохранены отдельно.
+версию из mobile/package.json — 0.1.0. Приложение использует нативный WebView.
 
 Язык установки и собственных сообщений описан в [контракте локали](interface-language.md).
 Он не меняет документ WebView при выборе языка.

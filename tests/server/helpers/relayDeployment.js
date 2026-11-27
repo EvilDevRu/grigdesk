@@ -43,17 +43,11 @@ export async function deploymentFixture(t, options = {}) {
   const hostKeys = await createHostKeyStore({ file: path.join(directory, 'known-hosts.json') });
   const mobile = new (options.Service ?? MobileService)({
     directory,
-    port: 0,
     vpnGate: async () => true,
     makeHub: () => ({
       sync() { },
       close() { },
       status: () => []
-    }),
-    makeServer: async () => ({
-      port: 8144,
-      close: async () => { },
-      disconnectDevice() { }
     }),
     changed: (event) => events.push(event),
     log: (event) => logs.push(event),

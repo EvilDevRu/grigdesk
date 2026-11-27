@@ -140,52 +140,6 @@ for (const speed of [undefined, null, 'standard']) {
   });
 }
 
-test('SPEED-MOBILE-NEXT: смена на несовместимую модель не блокирует следующий ход', async (t) => {
-  const control = controlledExecutor();
-  const models = { 'test-provider': [
-    {
-      id: 'test-model',
-      efforts: [],
-      chatSpeedModes: ['standard', 'fast'],
-    },
-    {
-      id: 'slow-model',
-      efforts: [],
-      chatSpeedModes: ['standard'],
-    },
-  ] };
-  const { app } = await chatAppFixture(t, {
-    executor: control.executor,
-    modelsRegistry: async () => models,
-  });
-
-  await saveChat(app, 'speed-mobile-next');
-  await choose(app, 'speed-mobile-next', 'fast');
-
-  const current = (await app.inject('/api/chat/store/chat/speed-mobile-next')).json().chat;
-  const modelRef = { provider: 'test-provider', model: 'slow-model' };
-  const changed = await app.mobileChat.controls.configure(current.id, {
-    expectedRevision: current.revision,
-    modelRef,
-    effort: '',
-    reset: true,
-  });
-
-  assert.equal(changed.speed, 'standard');
-
-  const response = await app.inject({
-    method: 'POST',
-    url: '/api/chat',
-    payload: turnBody(current.id, 'speed-mobile-next-0001', 'привет', { modelRef }),
-  });
-
-  assert.equal(response.statusCode, 202);
-  await control.waitForRuns(1);
-  assert.equal(control.runs[0].options.model, 'slow-model');
-  control.runs[0].release();
-});
-
-
 test('SPEED-CORRUPT: повреждённая durable скорость отказывает до model prompt', async (t) => {
   const control = controlledExecutor();
   const { app, config, events } = await chatAppFixture(t, { executor: control.executor });

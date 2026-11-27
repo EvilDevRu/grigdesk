@@ -6,9 +6,6 @@ import test from 'node:test';
 
 import factoryModule from '../../server/src/modules/factory/index.ts';
 import { Analyzer } from '../../server/src/lib/analysis/analyzer.ts';
-import { registerTrackerRoutes } from '../../server/src/lib/mobile/facade/tracker.ts';
-import { ActionTokens } from '../../server/src/lib/mobile/actionTokens.ts';
-import { mobileFacadeFixture } from './helpers/mobile-facade.js';
 import { inboxConsumerFixture, REVISION } from './helpers/trackerInbox.js';
 import { selectTracker, trackerCalls, trackerFixture, writeTracker } from './helpers/trackerFixture.js';
 
@@ -136,7 +133,7 @@ test('TRACKER-SWITCH-02: смена driver во время Inbox подгото�
     assert.deepEqual(inbox.calls.decide, []);
   });
 
-test('TRACKER-CONSUMERS-01: analyzer и mobile используют выбранный B через общий facade', async (t) => {
+test('TRACKER-CONSUMERS-01: analyzer и Inbox используют выбранный трекер B', async (t) => {
   const fixture = await trackerFixture(t, {
     setup: async (config) => {
       await writeTracker(config, 'fixture-a');
@@ -165,19 +162,5 @@ test('TRACKER-CONSUMERS-01: analyzer и mobile используют выбран
   assert.equal(created.taskId, '43');
   assert.equal((await trackerCalls(fixture.config, 'fixture-b'))
     .filter((call) => call.method === 'createTask').length, 1);
-
-
-  const mobile = await mobileFacadeFixture(t, (app) => registerTrackerRoutes(app, {
-    tokens: new ActionTokens(),
-    callApi: async (method, url, payload) => {
-      const response = await fixture.request(method, url, payload);
-
-      return { statusCode: response.statusCode, body: response.json() };
-    },
-  }));
-  const response = await mobile.app.inject('/api/mobile/v1/tracker/tasks/42');
-
-  assert.equal(response.statusCode, 200);
-  assert.equal(response.json().task.title, 'fixture-b');
   assert.deepEqual(await trackerCalls(fixture.config, 'fixture-a'), []);
 });
