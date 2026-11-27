@@ -1,43 +1,39 @@
 import assert from 'node:assert/strict';
-import { access, lstat, mkdir, readFile, symlink, truncate, writeFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { access, lstat, mkdir, readFile, realpath, symlink, truncate, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import test from 'node:test';
 
 import { acquireCliLease, inspectCliLeases } from '../../server/src/lib/providerInstall/leases.ts';
-import { prepareExternalCliRuntime } from '../../server/src/lib/providerInstall/externalCliRuntime.ts';
 import { createQwenInTurn } from '../../server/src/lib/qwen/inTurn.ts';
 import { readQwenImages } from '../../server/src/lib/qwen/images.ts';
 import { CHAT_IMAGE_MAX_BYTES } from '../../server/src/lib/chat/chatImages.ts';
+import { qwenNativeFixture } from '../helpers/qwenNativeFixture.mjs';
+import { runQwenPreviewStream } from '../helpers/qwenPreviewStream.mjs';
 import {
   QWEN_KEY, QWEN_TEST_PNG, qwenAdapter, qwenFixture, qwenImage,
-  rejectedTurn, runInput, selectedModel, successful, until,
+  rejectedTurn, runInput, selectedModel, successful,
 } from '../helpers/qwenFixture.mjs';
 
-test('Qwen: PNG передаётся байтами; несовместимый CLI отказывает до prompt', async (t) => {
-  const fixture = await qwenFixture(t);
+test('Qwen Preview.2: PNG проходит через ACP до запроса модели', async (t) => {
+  const fixture = await qwenNativeFixture(t);
   const adapter = await qwenAdapter({ runnable: true });
   const image = await qwenImage(fixture);
+
+  fixture.settings.modelProviders.openai[0].generationConfig.modalities = { image: true };
+  await fixture.writeSettings(fixture.settings);
+
   const input = runInput(fixture, 'shared-model(openai)', {
     attachmentsDir: image.root,
     attachmentPaths: [image.file],
     message: '',
   });
   const result = await adapter.run(input);
-  const prompt = (await fixture.records()).find((entry) => entry.frame?.method === 'session/prompt');
+  const wire = JSON.stringify(fixture.requests);
 
-  assert.equal(result.reply, 'Новый ответ');
-  assert.deepEqual(prompt.frame.params.prompt[1], {
-    type: 'image',
-    mimeType: 'image/png',
-    data: QWEN_TEST_PNG.toString('base64'),
-  });
-  await fixture.fake({ images: false });
-
-  const before = (await fixture.records()).filter((entry) => entry.frame?.method === 'session/prompt').length;
-
-  await assert.rejects(adapter.run(input), /CLI не поддерживает изображения/);
-  assert.equal((await fixture.records()).filter((entry) => entry.frame?.method === 'session/prompt').length,
-    before);
+  assert.match(result.reply, /Ответ настоящего CLI/);
+  assert.ok(wire.includes(`data:image/png;base64,${QWEN_TEST_PNG.toString('base64')}`));
+  assert.equal(wire.includes(image.file), false);
 });
 
 test('Qwen: границы картинок, сигнатура, размер, отсутствие файла и отмена', async (t) => {
@@ -101,29 +97,29 @@ async function absent(file) {
 }
 
 test('qwen-linked-env-and-project-settings-stay-masked', async (t) => {
-  const fixture = await qwenFixture(t);
+  const fixture = await qwenNativeFixture(t);
   const adapter = await qwenAdapter({ runnable: true });
   const envTarget = path.join(fixture.root, 'private-env');
   const settingsTarget = path.join(fixture.root, 'private-qwen');
   const envLink = path.join(fixture.workspace, '.env');
   const settingsLink = path.join(fixture.workspace, '.qwen');
   const hiddenSettings = path.join(settingsLink, 'settings.json');
+  const resultFile = path.join(fixture.workspace, 'observed-env');
 
   await writeFile(envTarget, 'PRIVATE_ENV_CANARY');
   await mkdir(settingsTarget);
   await writeFile(path.join(settingsTarget, 'settings.json'), '{"private":"PRIVATE_SETTINGS_CANARY"}');
   await symlink(envTarget, envLink);
   await symlink('../private-qwen', settingsLink);
-  await fixture.fake({ readMasks: [envLink, hiddenSettings] });
+  fixture.actions.push({
+    name: 'Bash',
+    args: { command: `test ! -e '${hiddenSettings}' && cat '${envLink}' > '${resultFile}'` },
+  });
 
-  const result = await adapter.run(runInput(fixture, 'shared-model(openai)'));
-  const masks = (await fixture.records()).filter((entry) => entry.event === 'mask');
+  const result = await adapter.run(runInput(fixture, 'shared-model(openai)', { permissionMode: 'yolo' }));
 
-  assert.equal(result.reply, 'Новый ответ');
-  assert.deepEqual(masks.map((entry) => [entry.file, entry.text, entry.code]), [
-    [envLink, '{}', undefined],
-    [hiddenSettings, undefined, 'ENOENT'],
-  ]);
+  assert.match(result.reply, /Ответ настоящего CLI/);
+  assert.equal(await readFile(resultFile, 'utf8'), '{}');
   assert.equal(await readFile(envTarget, 'utf8'), 'PRIVATE_ENV_CANARY');
   assert.match(await readFile(path.join(settingsTarget, 'settings.json'), 'utf8'), /PRIVATE_SETTINGS_CANARY/);
   assert.equal((await lstat(envLink)).isSymbolicLink(), true);
@@ -131,10 +127,9 @@ test('qwen-linked-env-and-project-settings-stay-masked', async (t) => {
 });
 
 test('qwen-early-sandbox-exit-keeps-cause-and-releases-reader', async (t) => {
-  const fixture = await qwenFixture(t);
+  const fixture = await qwenFixture(t, { native: true });
   const adapter = await qwenAdapter({ runnable: true });
   const wrapper = path.join(fixture.root, 'failed-bwrap');
-  const runtime = await prepareExternalCliRuntime(adapter, fixture.config, fixture.env);
 
   await writeFile(wrapper, '#!/bin/sh\n'
     + 'echo "synthetic sandbox startup failure $QWEN_TEST_KEY" >&2\nexit 1\n', { mode: 0o700 });
@@ -147,265 +142,118 @@ test('qwen-early-sandbox-exit-keeps-cause-and-releases-reader', async (t) => {
   assert.doesNotMatch(reason, /\/proc\/\d+\/stat/, 'Исчезновение child не подменяет причину запуска');
 
   const leases = await inspectCliLeases({
-    directory: runtime.process.leaseDirectory,
+    directory: path.join(fixture.dataHome, 'provider-cli-leases'),
     providerId: 'qwen',
-    resourceKey: runtime.process.resourceKey,
   });
 
   assert.equal(leases.length, 0, 'После раннего выхода копия CLI доступна для следующего запуска');
 });
 
-test('qwen-acp-steps-and-final', async (t) => {
-  const fixture = await qwenFixture(t);
+test('Qwen Preview.2: сохранение сессии предшествует ленте инструментов и ответа', async (t) => {
+  const fixture = await qwenNativeFixture(t);
   const adapter = await qwenAdapter({ runnable: true });
-  const model = await selectedModel(adapter, fixture);
   const inputFile = path.join(fixture.workspace, 'input.txt');
   const steps = [];
   let saved = false;
 
   await writeFile(inputFile, 'Содержимое разрешённого файла');
-  await fixture.fake({ tool: { name: 'read_file', args: { file_path: inputFile } } });
+  fixture.actions.push({ name: 'Read', args: { file_path: inputFile } });
 
-  const result = await adapter.run(runInput(fixture, model, {
-    onSessionCreated: async (id) => {
+  const result = await adapter.run(runInput(fixture, 'shared-model(openai)', {
+    permissionMode: 'yolo',
+    onSessionCreated(id) {
       assert.ok(id);
-      assert.equal((await fixture.records()).some((item) => item.frame?.method === 'session/prompt'), false);
+      assert.equal(fixture.requests.length, 0);
       saved = true;
     },
-    onStep: (step) => {
+    onStep(step) {
       if (['think', 'text', 'tool', 'res'].includes(step.k)) {
-        assert.equal(saved, true, 'Сессия должна быть сохранена до публикации шага');
+        assert.equal(saved, true);
       }
 
       steps.push(step);
     },
   }));
 
-  assert.equal(successful(result), true, JSON.stringify(result));
-  assert.equal(result.reply, 'Новый ответ');
-  assert.ok(result.sessionId);
+  assert.match(result.reply, /Ответ настоящего CLI/);
+  assert.deepEqual(steps, result.steps);
   assert.ok(['think', 'text', 'tool', 'res'].every((kind) => steps.some((step) => step.k === kind)));
 
-  const tools = steps.filter((step) => step.k === 'tool');
-  const results = steps.filter((step) => step.k === 'res');
+  const tool = steps.find((step) => step.k === 'tool');
+  const outcome = steps.find((step) => step.k === 'res');
 
-  assert.equal(tools.length, 1);
-  assert.equal(results.length, 1);
-  assert.ok(tools[0].id, 'Идентификатор инструмента не должен быть пустым');
-  assert.equal(tools[0].id, results[0].id, 'Результат относится к тому же инструменту');
-  assert.equal(results[0].ok, true, 'Лента должна показывать успешный инструмент без отметки ошибки');
-  assert.equal(results[0].error, false);
-
-  const handshake = (await fixture.records()).find((item) => item.event === 'handshake');
-
-  assert.equal(handshake.matched, true, 'Native private-parent nonce должен совпадать');
-  assert.equal(handshake.guard, 'required-v1');
-  assert.equal(handshake.provider, 'attached-v1');
-
-  const modes = await adapter.modes(fixture.config);
-
-  assert.deepEqual(modes.map((mode) => mode.id).sort(), ['auto', 'default', 'plan', 'yolo']);
-
-  const modeCases = [['default', 'default'], ['auto', 'auto'], ['plan', 'plan'], ['yolo', 'yolo']];
-
-  for (const [mode, expected] of modeCases) {
-    await fixture.fake();
-    await adapter.run(runInput(fixture, model, { permissionMode: mode }));
-
-    const records = await fixture.records();
-    const spawn = records.filter((item) => item.event === 'spawn').at(-1);
-    const modeFrame = records.filter((item) => item.instance === spawn.instance
-      && item.frame?.method === 'session/set_mode').at(-1);
-    const nativeMode = modeFrame?.frame.params.modeId
-      ?? spawn.argv[spawn.argv.indexOf('--approval-mode') + 1];
-
-    assert.equal(nativeMode, expected, `Режим GrigDesk ${mode} должен применять native ${expected}`);
-  }
-
-  const failures = [
-    { options: { brokenJson: true }, reason: /ACP|JSON|EOF|поток|процесс|протокол/i },
-    { options: { eof: true }, reason: /ACP|EOF|закрыт|заверш|процесс|exit|closed/i },
-    { options: { error: `synthetic upstream failure ${QWEN_KEY}`, stderr: QWEN_KEY },
-      reason: /synthetic upstream failure/ },
-  ];
-
-  for (const failure of failures) {
-    await fixture.fake(failure.options);
-
-    const reason = await rejectedTurn(() => adapter.run(runInput(fixture, model)));
-
-    assert.match(reason, failure.reason);
-    assert.equal(reason.includes(QWEN_KEY), false);
-  }
+  assert.ok(tool.id);
+  assert.equal(outcome.id, tool.id);
+  assert.equal(outcome.ok, true);
 });
 
-test('qwen-resume-exact-session', async (t) => {
-  const fixture = await qwenFixture(t);
+test('Qwen Preview.2: resume использует прежнюю память, смена ключа меняет её identity', async (t) => {
+  const fixture = await qwenNativeFixture(t);
   const adapter = await qwenAdapter({ runnable: true });
   const model = await selectedModel(adapter, fixture);
-  const first = await adapter.run(runInput(fixture, model));
-  const steps = [];
-
-  assert.equal(successful(first), true);
-  assert.ok(first.sessionId);
+  const message = 'Сохрани первую реплику для проверки resume.';
+  const first = await adapter.run(runInput(fixture, model, { message }));
+  const offset = fixture.requests.length;
+  const binding = await adapter.sessionBinding.authProfileId(fixture.config);
 
   const second = await adapter.run(runInput(fixture, model, {
     sessionId: first.sessionId,
     message: 'Продолжи.',
-    onStep: (step) => steps.push(step),
   }));
-  const records = await fixture.records();
-  const loads = records.filter((item) => item.frame?.method === 'session/load');
-  const prompts = records.filter((item) => item.frame?.method === 'session/prompt');
 
   assert.equal(second.sessionId, first.sessionId);
-  assert.equal(second.reply, 'Новый ответ');
-  assert.equal(loads.length, 1);
-  assert.equal(loads[0].frame.params.sessionId, first.sessionId);
-  assert.equal(prompts.length, 2);
-
-  const processIds = prompts.map((item) => item.instance);
-
-  assert.ok(new Set(processIds).size >= 2);
-  assert.equal(JSON.stringify(steps).includes('OLD_REPLAY'), false, 'Replay не является новым ответом');
-  assert.equal(typeof adapter.sessionBinding?.authProfileId, 'function');
-
-  const binding = await adapter.sessionBinding.authProfileId(fixture.config);
+  assert.match(JSON.stringify(fixture.requests.slice(offset)), /Сохрани первую реплику/);
 
   process.env.QWEN_TEST_KEY = 'synthetic-rotated-key';
 
   const changed = await adapter.sessionBinding.authProfileId(fixture.config);
+  const before = fixture.requests.length;
 
-  assert.notEqual(changed, binding, 'Смена ключа должна отделять native память');
+  assert.notEqual(changed, binding);
   assert.equal(changed.includes('synthetic-rotated-key'), false);
-
-  const before = prompts.length;
-
-  await rejectedTurn(() => adapter.run(runInput(fixture, model, {
-    sessionId: '../foreign-session', chatKey: 'foreign-chat',
+  await assert.rejects(adapter.run(runInput(fixture, model, { sessionId: first.sessionId })), /identity/);
+  await assert.rejects(adapter.run(runInput(fixture, model, {
+    sessionId: '../foreign-session',
+    chatKey: 'foreign-chat',
   })));
-
-  const afterForeign = (await fixture.records()).filter((item) => item.frame?.method === 'session/prompt');
-
-  assert.equal(afterForeign.length, before);
+  assert.equal(fixture.requests.length, before);
 });
 
-test('qwen-abort-no-late-effect', async (t) => {
-  const fixture = await qwenFixture(t);
+test('Qwen Preview.2: отмена до запуска и во время ответа освобождает процесс', async (t) => {
+  const fixture = await qwenNativeFixture(t);
   const adapter = await qwenAdapter({ runnable: true });
   const model = await selectedModel(adapter, fixture);
-  const preAborted = new AbortController();
 
-  preAborted.abort();
-
-  const before = (await fixture.records()).filter((item) => item.event === 'spawn').length;
-
-  await assert.rejects(adapter.run(runInput(fixture, model, { signal: preAborted.signal })), (error) => {
-    assert.equal(error.stopped, true);
-    assert.deepEqual(error.steps, []);
-
-    return true;
-  });
-  assert.equal((await fixture.records()).filter((item) => item.event === 'spawn').length, before);
-  await fixture.fake({ hold: true });
+  await assert.rejects(adapter.run(runInput(fixture, model, { signal: AbortSignal.abort() })),
+    { stopped: true });
+  assert.equal(fixture.requests.length, 0);
+  fixture.actions.push({ hold: true });
 
   const controller = new AbortController();
-  const live = [];
-
-  t.after(() => controller.abort());
-
-  const outcome = adapter.run(runInput(fixture, model, {
-    signal: controller.signal,
-    onStep: (step) => live.push(step),
-  }));
-  const finished = outcome.then(() => 'finished', () => 'failed');
-  const reached = until(async () => (await fixture.records())
-    .some((entry) => entry.frame?.method === 'session/prompt') ? 'prompt' : '', 'активный prompt');
-
-  assert.equal(await Promise.race([reached, finished]), 'prompt');
-
-  const holders = await inspectCliLeases({
-    directory: path.join(fixture.dataHome, 'provider-cli-leases'), providerId: 'qwen',
-  });
-  const processIds = holders.flatMap((holder) => [holder.childPid, holder.sessionId]).filter(Boolean);
-
-  assert.ok(processIds.length, 'Остановка проверяется по host PID, а не PID внутри bwrap');
-  controller.abort();
-
-  let stopped;
-
-  await assert.rejects(outcome, (error) => {
-    stopped = error;
+  const running = adapter.run(runInput(fixture, model, { signal: controller.signal }));
+  const stopped = assert.rejects(running, (error) => {
     assert.equal(error.stopped, true);
     assert.ok(error.sessionId);
-    assert.deepEqual(error.steps, live, 'Сохранённая лента содержит выпущенный при остановке хвост');
-    assert.equal(error.steps.at(-1).text, 'Начало');
 
     return true;
   });
 
-  await until(() => {
-    return processIds.every((pid) => {
-      try {
-        process.kill(pid, 0);
+  await fixture.held;
+  controller.abort();
+  await stopped;
 
-        return false;
-      } catch (error) {
-        return error.code === 'ESRCH';
-      }
-    });
-  }, 'завершение своего ACP child');
-
-  await fixture.fake();
-
-  const resumed = await adapter.run(runInput(fixture, model, { sessionId: stopped.sessionId }));
-
-  assert.equal(resumed.sessionId, stopped.sessionId);
-  assert.equal(resumed.reply, 'Новый ответ');
-
-  const effect = path.join(fixture.workspace, 'late-effect');
-  const approvalAbort = new AbortController();
-  let lateAllow;
-
-  t.after(() => approvalAbort.abort());
-
-  await fixture.fake({
-    ask: true,
-    effect,
-    tool: { name: 'run_shell_command', args: { command: 'printf allowed' } },
+  const leases = await inspectCliLeases({
+    directory: path.join(fixture.dataHome, 'provider-cli-leases'),
+    providerId: 'qwen',
   });
 
-  const pending = adapter.run(runInput(fixture, model, {
-    signal: approvalAbort.signal,
-    onPermission: () => new Promise((resolve) => {
-      lateAllow = resolve;
-      approvalAbort.abort();
-    }),
-  }));
-
-  await rejectedTurn(() => pending);
-  assert.equal(typeof lateAllow, 'function', 'Сценарий должен дойти до ожидания разрешения');
-  lateAllow({ allow: true });
-  await absent(effect);
+  assert.deepEqual(leases, []);
 });
 
-test('Qwen: native cancelled является остановкой, ошибки CLI сохраняют причину', async (t) => {
-  const fixture = await qwenFixture(t);
-  const adapter = await qwenAdapter({ runnable: true });
+test('Qwen Preview.2: ошибка CLI сохраняет причину и скрывает ключ', async (t) => {
+  const failure = new Error(`synthetic failure ${QWEN_KEY}`);
 
-  await fixture.fake({
-    ask: true,
-    tool: { name: 'run_shell_command', args: { command: 'printf synthetic' } },
-  });
-  await assert.rejects(adapter.run(runInput(fixture, 'shared-model(openai)')), (error) => {
-    assert.equal(error.stopped, true);
-    assert.ok(error.sessionId);
-    assert.equal(error.steps[0].k, 'start');
-
-    return true;
-  });
-  await fixture.fake({ error: `synthetic failure ${QWEN_KEY}` });
-  await assert.rejects(adapter.run(runInput(fixture, 'shared-model(openai)')), (error) => {
+  await assert.rejects(runQwenPreviewStream(t, [], {}, failure), (error) => {
     assert.equal(error.stopped, undefined);
     assert.match(error.message, /synthetic failure/);
     assert.equal(error.message.includes(QWEN_KEY), false);
@@ -415,7 +263,7 @@ test('Qwen: native cancelled является остановкой, ошибки
 });
 
 test('Qwen: отмена после создания сессии не отправляет prompt', async (t) => {
-  const fixture = await qwenFixture(t);
+  const fixture = await qwenNativeFixture(t);
   const adapter = await qwenAdapter({ runnable: true });
   const controller = new AbortController();
   let sessionId;
@@ -432,7 +280,7 @@ test('Qwen: отмена после создания сессии не отпр�
 
     return true;
   });
-  assert.equal((await fixture.records()).some((entry) => entry.frame?.method === 'session/prompt'), false);
+  assert.equal(fixture.requests.length, 0);
 });
 
 test('Qwen: уточнение подтверждается drain один раз; закрытие и отказ снимают ожидание', async () => {
@@ -482,78 +330,27 @@ test('Qwen: уточнение подтверждается drain один ра�
   assert.deepEqual(broken.drain().messages, []);
 });
 
-test('Qwen: чужой drain не забирает уточнение текущего prompt', async (t) => {
-  const fixture = await qwenFixture(t);
+test('Qwen Preview.2: обязательное ограничение файлов действует без запроса согласия', async (t) => {
+  const fixture = await qwenNativeFixture(t);
   const adapter = await qwenAdapter({ runnable: true });
-  const blocks = [];
-  let delivery;
+  const target = path.join(fixture.root, 'outside-workspace');
 
-  await fixture.fake({ hold: true });
+  fixture.actions.push({ name: 'Write', args: { file_path: target, content: 'BAD' } });
 
   const result = await adapter.run(runInput(fixture, 'shared-model(openai)', {
-    onInTurnReady(port) {
-      delivery = port.deliver({
-        messageId: 'qwen-synthetic-in-turn',
-        text: 'Текущее уточнение',
-        sequence: 1,
-      });
+    permissionMode: 'yolo',
+    onPermission() {
+      assert.fail('Запись за пределами корней нельзя разрешать');
     },
-    onAssistantMessage: (block) => blocks.push(block),
   }));
-  const records = await fixture.records();
 
-  assert.deepEqual(await delivery, { ok: true, state: 'forwarded' });
-  assert.deepEqual(records.find((entry) => entry.event === 'foreign-drain').result.messages, []);
-  assert.match(records.find((entry) => entry.event === 'mid-turn-drain').result.messages[0],
-    /Текущее уточнение/);
-  assert.equal(result.reply, 'Новый ответ');
-  assert.deepEqual(blocks.map((block) => block.text), ['Начало', 'Новый ответ']);
-  assert.equal(records.filter((entry) => entry.frame?.method === 'session/prompt').length, 1);
-});
-
-test('qwen-final-guard-before-effect', async (t) => {
-  const fixture = await qwenFixture(t);
-  const adapter = await qwenAdapter({ runnable: true });
-  const model = await selectedModel(adapter, fixture);
-  const effect = path.join(fixture.workspace, 'forbidden-effect');
-
-  for (const options of [
-    { tool: { name: 'run_shell_command', args: { command: 'ssh example.invalid true' } } },
-    { tool: { name: 'unknown_native_tool', args: {} } },
-    { foreignSession: true, tool: { name: 'run_shell_command', args: { command: 'printf allowed' } } },
-  ]) {
-    await fixture.fake({ effect, ...options });
-
-    const before = (await fixture.records()).filter((item) => item.event === 'guard').length;
-
-    await adapter.run(runInput(fixture, model, {
-      permissionMode: 'yolo',
-      providerSettings: { blockDirectSsh: true },
-      onPermission: async () => ({ allow: true }),
-    })).catch(() => null);
-
-    const decisions = (await fixture.records()).filter((item) => item.event === 'guard');
-
-    assert.equal(decisions.length, before + 1, 'Проверяется отказ guard, а не сбой до запуска CLI');
-    assert.equal(decisions.at(-1).allowed, false);
-    await absent(effect);
-  }
-
-  await fixture.fake({ noAck: true });
-
-  const before = (await fixture.records()).filter((item) => item.frame?.method === 'session/prompt').length;
-  const reason = await rejectedTurn(() => adapter.run(runInput(fixture, model)));
-
-  assert.match(reason, /guard|совмест|протокол|защит/i);
-
-  const afterNoAck = (await fixture.records()).filter((item) => item.frame?.method === 'session/prompt');
-
-  assert.equal(afterNoAck.length, before);
-  assert.equal(reason.includes(QWEN_KEY), false);
+  assert.match(result.reply, /Ответ настоящего CLI/);
+  assert.equal(fixture.actions.length, 0);
+  await absent(target);
 });
 
 test('qwen-filesystem-mcp-workdir', async (t) => {
-  const fixture = await qwenFixture(t);
+  const fixture = await qwenNativeFixture(t);
   const adapter = await qwenAdapter({ runnable: true });
   const capability = typeof adapter.workdir === 'function'
     ? adapter.workdir(fixture.config) : adapter.workdir;
@@ -580,20 +377,15 @@ test('qwen-filesystem-mcp-workdir', async (t) => {
   const model = await selectedModel(adapter, fixture);
 
   for (const file of [canary, path.join(fixture.workspace, 'escape', 'canary')]) {
-    await fixture.fake({
-      effect: file,
-      tool: { name: 'write_file', args: { file_path: file, content: 'bad' } },
-    });
-    await adapter.run(runInput(fixture, model, { permissionMode: 'yolo' })).catch(() => null);
+    fixture.actions.push({ name: 'Write', args: { file_path: file, content: 'bad' } });
+    await adapter.run(runInput(fixture, model, { permissionMode: 'yolo' }));
+    assert.equal(fixture.actions.length, 0);
     assert.equal(await readFile(canary, 'utf8'), 'original');
   }
 
   const own = path.join(fixture.workspace, 'own');
 
-  await fixture.fake({
-    effect: own,
-    tool: { name: 'write_file', args: { file_path: own, content: 'effect' } },
-  });
+  fixture.actions.push({ name: 'Write', args: { file_path: own, content: 'effect' } });
   await adapter.run(runInput(fixture, model, { permissionMode: 'yolo' }));
   assert.equal(await readFile(own, 'utf8'), 'effect', 'Полный запрет tools не заменяет правильную политику');
 
@@ -603,7 +395,6 @@ test('qwen-filesystem-mcp-workdir', async (t) => {
   await writeFile(path.join(fixture.workspace, '.qwen/settings.json'), JSON.stringify({
     mcpServers: { hostile: { command: '/bin/sh', args: ['-c', `touch '${malicious}'`] } },
   }));
-  await fixture.fake();
   await adapter.run(runInput(fixture, model, { mcpServers: [] }));
   await absent(malicious);
 
@@ -613,56 +404,34 @@ test('qwen-filesystem-mcp-workdir', async (t) => {
   assert.equal(JSON.stringify(status).includes('"connected":true'), false);
 });
 
-test('qwen-cli-lease', async (t) => {
-  const fixture = await qwenFixture(t);
+test('Qwen Preview.2: reader удерживает проверенный ELF до остановки хода', async (t) => {
+  const fixture = await qwenNativeFixture(t);
   const adapter = await qwenAdapter({ runnable: true });
-  const model = await selectedModel(adapter, fixture);
-
-  await fixture.fake({ hold: true });
-
-  const runtime = await prepareExternalCliRuntime(adapter, fixture.config, fixture.env);
   const leaseInput = {
-    directory: runtime.process.leaseDirectory,
+    directory: path.join(fixture.dataHome, 'provider-cli-leases'),
     providerId: 'qwen',
-    resourceKey: runtime.process.resourceKey,
+    resourceKey: createHash('sha256').update(await realpath(fixture.bin)).digest('hex'),
   };
   const controller = new AbortController();
 
   t.after(() => controller.abort());
+  fixture.actions.push({ hold: true });
 
-  const running = adapter.run(runInput(fixture, model, {
-    signal: controller.signal,
-  }));
-  const outcome = running.then(() => 'ended', () => 'failed');
-  const reached = until(async () => (await fixture.records())
-    .some((entry) => entry.frame?.method === 'session/prompt') ? 'prompt' : '', 'активный prompt');
+  const running = adapter.run(runInput(fixture, 'shared-model(openai)', { signal: controller.signal }));
+  const stopped = assert.rejects(running, { stopped: true });
 
-  assert.equal(await Promise.race([reached, outcome]), 'prompt');
+  await fixture.held;
 
   const observed = await inspectCliLeases(leaseInput);
 
-  assert.ok(observed.some((holder) => holder.childPid || holder.sessionId), 'bwrap не должен терять reader');
+  assert.ok(observed.some((holder) => holder.childPid));
   await assert.rejects(acquireCliLease({ ...leaseInput, mode: 'exclusive' }), { code: 'provider_in_use' });
   controller.abort();
-  await rejectedTurn(() => running);
+  await stopped;
   assert.deepEqual(await inspectCliLeases(leaseInput), []);
-
-  const exclusive = await acquireCliLease({
-    ...leaseInput,
-    mode: 'exclusive',
-  });
-
-  try {
-    await fixture.fake();
-    await rejectedTurn(() => adapter.run(runInput(fixture, model)));
-  } finally {
-    await exclusive.release();
-  }
 });
 
 test('Qwen: контекст и выход из usage-событий, субагент не меняет метрики', async (t) => {
-  const fixture = await qwenFixture(t);
-  const adapter = await qwenAdapter({ runnable: true });
   const progress = [];
   const lifecycle = (executionId, phase, subagentId) => ({
     sessionUpdate: 'agent_message_chunk',
@@ -680,8 +449,7 @@ test('Qwen: контекст и выход из usage-событий, субаг
     _meta: { usage },
   });
 
-  await fixture.fake({
-    stream: [
+  const updates = [
       { sessionUpdate: 'agent_thought_chunk', content: { type: 'text', text: 'Думаю' } },
       lifecycle('req-1', 'started'),
       { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'Новый ответ' } },
@@ -698,12 +466,11 @@ test('Qwen: контекст и выход из usage-событий, субаг
       usageChunk({ inputTokens: 900, outputTokens: 90, cachedReadTokens: 0 }),
       { sessionUpdate: 'usage_update', used: 900, size: 32768 },
       lifecycle('sub-1', 'ended', 'extractor'),
-    ],
-  });
+  ];
 
-  const result = await adapter.run(runInput(fixture, 'shared-model(openai)', {
+  const result = await runQwenPreviewStream(t, updates, {
     onProgress: (tokens, info) => progress.push({ tokens, info }),
-  }));
+  });
 
   assert.equal(successful(result), true, JSON.stringify(result));
   assert.ok(progress.some((entry) => entry.info.contextTokens === 120), 'живой замер по ходу');
@@ -724,31 +491,29 @@ test('Qwen: контекст и выход из usage-событий, субаг
 });
 
 test('Qwen: документация плагина доступна только для чтения без открытия пакета', async (t) => {
-  const fixture = await qwenFixture(t);
+  const fixture = await qwenNativeFixture(t);
   const adapter = await qwenAdapter({ runnable: true });
   const plugin = path.join(fixture.root, 'plugin');
   const docs = path.join(plugin, 'docs');
   const index = path.join(docs, 'README.md');
   const outside = path.join(plugin, 'private.txt');
   const attempt = path.join(docs, 'forbidden');
+  const report = path.join(fixture.workspace, 'docs-probe');
 
   await mkdir(docs, { recursive: true });
   await writeFile(index, 'PLUGIN_DOC_SENTINEL');
   await writeFile(outside, 'PLUGIN_PRIVATE_SENTINEL');
-  await fixture.fake({
-    readMasks: [index, outside],
-    bounds: { allowed: [], denied: [attempt] },
-    tool: { name: 'read_file', args: { file_path: index } },
-  });
-  await adapter.run(runInput(fixture, 'shared-model(openai)', { pluginDocsDirs: [docs, docs] }));
+  fixture.actions.push(
+    { name: 'Bash', args: { command: `test ! -e '${outside}' && cat '${index}' > '${report}'` } },
+    { name: 'Write', args: { file_path: attempt, content: 'BAD' } },
+  );
+  await adapter.run(runInput(fixture, 'shared-model(openai)', {
+    permissionMode: 'yolo',
+    pluginDocsDirs: [docs, docs],
+  }));
 
-  const entries = await fixture.records();
-  const masks = entries.filter((entry) => entry.event === 'mask');
-
-  assert.equal(masks[0].text, 'PLUGIN_DOC_SENTINEL');
-  assert.equal(masks[1].code, 'ENOENT');
-  assert.ok(entries.some((entry) => entry.event === 'bounds' && entry.denied === true));
-  assert.equal(entries.find((entry) => entry.event === 'guard').allowed, true);
+  assert.equal(fixture.actions.length, 0);
+  assert.equal(await readFile(report, 'utf8'), 'PLUGIN_DOC_SENTINEL');
   assert.equal(await readFile(index, 'utf8'), 'PLUGIN_DOC_SENTINEL');
   await assert.rejects(access(attempt), { code: 'ENOENT' });
 });

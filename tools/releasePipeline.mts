@@ -134,6 +134,7 @@ export function recipeDigest(recipe: ReleaseRecipe, runnerBytes: Buffer): string
 export async function recipeImplementationBytes(root: string, darwin = false): Promise<Buffer> {
   const files = ['tools/releasePipeline.mts', 'tools/releaseEnvironment.mts',
     'tools/ci/provision-ubuntu.sh', 'tools/ci/run-release-server-tests.sh',
+    'tools/install-qwen-preview.sh',
     'tools/ci/prepare-release-desktop.sh', 'cli/buildProcesses.ts',
     'go.mod', 'go.sum', 'tools/build-go-utilities.sh', 'tests/run-go-utilities.sh',
     'tools/goReleaseUtility.mts',

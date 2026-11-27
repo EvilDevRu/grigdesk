@@ -80,7 +80,8 @@ async function contained(file: string, roots: readonly string[]): Promise<boolea
     try {
       current = path.join(await fs.realpath(current), ...suffix.reverse());
 
-      return roots.some((root) => current === root || current.startsWith(`${root}${path.sep}`));
+      return roots.some((root) => current === root
+        || current.startsWith(root.endsWith(path.sep) ? root : `${root}${path.sep}`));
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT' || path.dirname(current) === current) {
         return false;

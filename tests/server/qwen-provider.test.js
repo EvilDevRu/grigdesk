@@ -1,10 +1,14 @@
 import assert from 'node:assert/strict';
-import { access, readFile, rm, stat, utimes } from 'node:fs/promises';
+import { createReadStream } from 'node:fs';
+import { access, readFile, readdir, rm, stat, utimes, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
+import path from 'node:path';
+import { Readable } from 'node:stream';
 import test from 'node:test';
 
 import { declaredCredentials } from '../../server/src/lib/executorCredentials.ts';
 import { mergeCatalog } from '../../server/src/lib/modelsRegistry.ts';
+import { qwenPreviewBinary } from '../../server/src/lib/qwen/previewRelease.ts';
 import { applyProviderSetting, resolveProviderSettings } from '../../server/src/lib/providerSettings.ts';
 import { markSupersededModels } from '../../shared/chat/modelFamily.ts';
 import providersModule from '../../server/src/modules/providers/index.ts';
@@ -81,10 +85,9 @@ test('qwen-clean-access-form-saves-service-and-key-without-manual-config', async
   assert.equal(await readFile(fixture.config.envPath, 'utf8'), previous);
 });
 
-test('qwen-card-npm-version', async (t) => {
-  const fixture = await qwenFixture(t);
+test('qwen-card-pinned-preview-binary', async (t) => {
+  const fixture = await qwenFixture(t, { native: true });
   const adapter = await qwenAdapter();
-  const definition = adapter.externalCli(fixture.config, fixture.home);
   const { isChatExecutor } = await import('../../server/src/lib/executors/index.ts');
 
   assert.equal(adapter.name, 'Qwen Code');
@@ -92,31 +95,25 @@ test('qwen-card-npm-version', async (t) => {
   assert.equal(isChatExecutor(adapter), true, 'Карточка должна предоставлять универсальный чатовый runtime');
   assert.ok(adapter.color);
   assert.equal(typeof adapter.order, 'number');
-  assert.deepEqual([definition.packageId, definition.binName, definition.configKey, definition.envKey],
-    ['@qwen-code/qwen-code', 'qwen', 'qwenBin', 'GRIGDESK_QWEN_BIN']);
+  assert.equal(adapter.externalCli, undefined);
   assert.equal(adapter.bin(fixture.config), fixture.bin);
 
   const probe = await adapter.probe(fixture.config);
 
   assert.equal(probe.ok, true, JSON.stringify(probe));
-  assert.match(probe.version, /0\.27\.2/);
-  await fixture.fake({ version: '0.27.3' });
+  assert.equal(probe.version, '1.0.0-preview.2');
 
-  const updated = await adapter.probe(fixture.config);
+  const imposter = path.join(fixture.root, 'unverified-qwen');
+
+  await writeFile(imposter, '#!/bin/sh\nprintf "1.0.0-preview.2\\n"\n', { mode: 0o555 });
+
+  const unverified = await adapter.probe({ ...fixture.config, qwenBin: imposter });
   const missing = await adapter.probe({ ...fixture.config, qwenBin: `${fixture.bin}.missing` });
 
-  assert.equal(updated.ok, true);
-  assert.match(updated.version, /0\.27\.3/);
+  assert.equal(unverified.ok, false);
   assert.equal(missing.ok, false);
-
-  const installation = await adapter.installation(fixture.config, {
-    npm: '/usr/bin/npm',
-  });
-
-  assert.ok(installation.install);
-  assert.ok(installation.update);
-  assert.match(JSON.stringify(installation.install), /@qwen-code\/qwen-code/);
-  assert.ok(!installation.loginCommand, 'OAuth login не должен предлагаться');
+  assert.equal(adapter.distribution(fixture.config, probe).managed, true);
+  assert.equal(adapter.distribution(fixture.config, probe).kind, 'binary');
   assert.ok(!adapter.login);
 
   const usage = await adapter.usage(fixture.config);
@@ -140,10 +137,94 @@ test('qwen-card-npm-version', async (t) => {
     confirmation: 'forwarded',
     images: true,
   });
-  assert.match(card.version, /0\.27\.3/);
+  assert.equal(card.version, '1.0.0-preview.2');
+  assert.equal(card.installation, undefined);
   assert.equal(policy.enforcement, 'command-hook');
   assert.ok(policy.note?.trim(), 'Адаптер должен объяснять границу запрета SSH');
   assert.deepEqual(card.directSshPolicy, policy, 'Публичная карточка сохраняет способ запрета и пояснение');
+});
+
+test('Qwen: штатная установка защищена и отклоняет повреждённый архив', async (t) => {
+  const fixture = await qwenFixture(t, { prepareFake: false });
+  const adapter = await qwenAdapter();
+
+  fixture.config.qwenBin = qwenPreviewBinary(fixture.dataHome);
+
+  const denied = await providerApi(t, fixture, adapter, { auth: true });
+  const request = {
+    method: 'POST',
+    url: '/api/providers/qwen/install-distribution',
+    payload: { executable: fixture.bin },
+  };
+  const fetchArchive = t.mock.method(globalThis, 'fetch', async () => new Response('damaged archive'));
+
+  assert.equal((await denied.app.inject(request)).statusCode, 401);
+  assert.equal(fetchArchive.mock.callCount(), 0);
+
+  const { app } = await providerApi(t, fixture, adapter);
+  const response = await app.inject(request);
+
+  assert.equal(response.statusCode, 502, response.body);
+  assert.equal(fetchArchive.mock.callCount(), 1);
+  await assert.rejects(access(fixture.config.qwenBin), { code: 'ENOENT' });
+  await assert.rejects(access(fixture.bin), { code: 'ENOENT' });
+  assert.deepEqual(await readdir(path.dirname(fixture.config.qwenBin)), []);
+});
+
+test('Qwen: карточка устанавливает закреплённый архив и сразу видит Preview.2', {
+  skip: !process.env.GRIGDESK_QWEN_TEST_ARCHIVE && 'Требуется оригинальный архив Preview.2',
+}, async (t) => {
+  const fixture = await qwenFixture(t, { prepareFake: false });
+  const adapter = await qwenAdapter();
+
+  fixture.config.qwenBin = qwenPreviewBinary(fixture.dataHome);
+
+  const { app, broadcasts } = await providerApi(t, fixture, adapter);
+  const request = { method: 'POST', url: '/api/providers/qwen/install-distribution' };
+  const listing = { method: 'GET', url: '/api/providers' };
+  const savedEnv = await readFile(fixture.config.envPath, 'utf8');
+  const fetchArchive = t.mock.method(globalThis, 'fetch', async (url) => {
+    assert.match(String(url), /releases\/download\/v1\.0\.0-preview\.2\/qwen-linux-x64\.tar\.gz$/u);
+
+    return new Response(Readable.toWeb(createReadStream(process.env.GRIGDESK_QWEN_TEST_ARCHIVE)));
+  });
+  const before = (await app.inject(listing)).json().providers[0];
+
+  assert.equal(before.distribution.canInstall, true);
+  assert.equal(before.distribution.ready, false);
+
+  const results = await Promise.all([app.inject(request), app.inject(request)]);
+
+  assert.deepEqual(results.map(({ statusCode }) => statusCode), [200, 200]);
+  assert.equal(fetchArchive.mock.callCount(), 1);
+
+  const installed = (await app.inject(listing)).json().providers[0];
+
+  assert.equal(installed.distribution.ready, true);
+  assert.equal(installed.version, '1.0.0-preview.2');
+  assert.equal((await app.inject(request)).statusCode, 200);
+  assert.equal(fetchArchive.mock.callCount(), 1);
+  assert.ok(broadcasts.some(({ name, payload }) =>
+    name === 'providers-update' && payload.installation === 'qwen'));
+  assert.equal(await readFile(fixture.config.envPath, 'utf8'), savedEnv);
+});
+
+test('Qwen: измеренный расход приходит в SSE и HTTP при выключенном опросе квот', async (t) => {
+  const fixture = await qwenFixture(t, { prepareFake: false });
+  const { app, broadcasts } = await providerApi(t, fixture, await qwenAdapter());
+  const tokens = { inputTokens: 6200, outputTokens: 180 };
+
+  app.recordProviderTurnTokens('qwen', tokens);
+  app.recordProviderTurnTokens('qwen', { inputTokens: 0, outputTokens: 0 });
+
+  const response = await app.inject('/api/providers/usage?cached=1');
+  const snapshot = response.json();
+
+  assert.equal(snapshot.autoRefresh, false);
+  assert.equal(snapshot.usage.qwen.state, 'unsupported');
+  assert.deepEqual(snapshot.usage.qwen.bars, []);
+  assert.deepEqual(snapshot.usage.qwen.lastTurnTokens, tokens);
+  assert.deepEqual(broadcasts, [{ name: 'providers-usage', payload: snapshot }]);
 });
 
 test('qwen-credentials-env-only', async (t) => {
@@ -233,7 +314,7 @@ test('qwen-credentials-no-public-secret', async (t) => {
 });
 
 test('qwen-catalog-source-refresh', async (t) => {
-  const fixture = await qwenFixture(t);
+  const fixture = await qwenFixture(t, { native: true });
   const adapter = await qwenAdapter();
 
   assert.equal(typeof adapter.catalogCacheKey, 'function', 'Нужен fingerprint источника моделей');
@@ -276,7 +357,7 @@ test('qwen-catalog-source-refresh', async (t) => {
  * Даже новая модель остаётся видимой в кратком списке без настройки «Показывать все».
  */
 test('qwen-catalog-does-not-hide-unrelated-models-as-superseded', async (t) => {
-  const fixture = await qwenFixture(t);
+  const fixture = await qwenFixture(t, { native: true });
   const adapter = await qwenAdapter();
   const ids = ['qwen4-max-preview', 'qwen3.8-max', 'qwen3.8-flash', 'glm-5.3', 'auto'];
 
@@ -296,7 +377,7 @@ test('qwen-catalog-does-not-hide-unrelated-models-as-superseded', async (t) => {
 });
 
 test('qwen-catalog-opaque-routes', async (t) => {
-  const fixture = await qwenFixture(t);
+  const fixture = await qwenFixture(t, { native: true });
 
   fixture.settings.modelProviders.openai[0].apiKey = 'inline-forbidden-secret';
   fixture.settings.modelProviders.openai.push({ id: 'hostile', envKey: 'NODE_OPTIONS' });
@@ -328,7 +409,7 @@ test('qwen-catalog-opaque-routes', async (t) => {
 });
 
 test('qwen-catalog-invalid-and-empty', async (t) => {
-  const fixture = await qwenFixture(t);
+  const fixture = await qwenFixture(t, { native: true });
   const adapter = await qwenAdapter();
   const registry = { qwen: [], _meta: {} };
 
@@ -354,20 +435,23 @@ test('qwen-catalog-invalid-and-empty', async (t) => {
  * Исправленный CLI возвращает готовность того же доступа без смены ключа.
  */
 test('qwen-catalog-cli-failure-is-visible-safe-and-recovers', async (t) => {
-  const fixture = await qwenFixture(t);
+  const fixture = await qwenFixture(t, { native: true });
   const adapter = await qwenAdapter();
   const registry = { qwen: [], _meta: {} };
+  const incompatible = path.join(fixture.root, 'incompatible-qwen');
 
-  await fixture.fake({ noAck: true, stderr: QWEN_KEY });
-  await mergeCatalog(registry, 'qwen', adapter, fixture.config);
+  await writeFile(incompatible, `#!/bin/sh\nprintf '%s' '${QWEN_KEY}' >&2\n`, { mode: 0o555 });
 
-  const refused = adapter.auth(fixture.config);
+  const incompatibleConfig = { ...fixture.config, qwenBin: incompatible };
+
+  await mergeCatalog(registry, 'qwen', adapter, incompatibleConfig);
+
+  const refused = adapter.auth(incompatibleConfig);
 
   assert.equal(registry.qwen.length, 0);
   assert.equal(refused.available, false);
-  assert.match(refused.label, /несовместим.*Обновите или переустановите/);
+  assert.match(refused.label, /несовместим.*Preview\.2/);
   assert.equal(refused.label.includes(QWEN_KEY), false);
-  await fixture.fake();
   await mergeCatalog(registry, 'qwen', adapter, fixture.config);
   assert.equal(registry.qwen.length, 2);
   assert.equal(adapter.auth(fixture.config).available, true);

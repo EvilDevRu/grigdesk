@@ -1,5 +1,8 @@
 # Установка Qwen: проверенный hook микрофонного backend
 
+Исторический контракт Qwen 0.27.x. Действующая установка описана в
+[поставке Qwen Preview.2](qwen-preview-runtime.md).
+
 Штатная npm-установка Qwen проходит общий
 [gate проверки installer-хуков](provider-install-hooks-review-gate.md).
 Для Linux x64 графа `@qwen-code/qwen-code@0.27.2` обнаружены 14 пакетов и один

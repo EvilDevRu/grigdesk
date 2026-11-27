@@ -3,10 +3,12 @@ import { access } from 'node:fs/promises';
 import path from 'node:path';
 import test from 'node:test';
 
-import { qwenAdapter, qwenFixture, runInput } from '../helpers/qwenFixture.mjs';
+import { qwenAdapter, runInput } from '../helpers/qwenFixture.mjs';
+import { qwenNativeFixture } from '../helpers/qwenNativeFixture.mjs';
+import { runQwenPreviewStream } from '../helpers/qwenPreviewStream.mjs';
 
 test('Qwen: размышление дольше 30 секунд заканчивается полным ответом', async (t) => {
-  const fixture = await qwenFixture(t);
+  const fixture = await qwenNativeFixture(t);
   const adapter = await qwenAdapter({ runnable: true });
   const live = [];
   let advanced = false;
@@ -28,7 +30,7 @@ test('Qwen: размышление дольше 30 секунд заканчив
     }));
 
     assert.equal(advanced, true, 'Время продвигается внутри принятого prompt');
-    assert.equal(result.reply, 'Новый ответ');
+    assert.match(result.reply, /Ответ настоящего CLI/);
     assert.deepEqual(live, result.steps);
     assert.deepEqual(live.map((step) => step.k), ['start', 'think', 'text']);
   } finally {
@@ -37,15 +39,11 @@ test('Qwen: размышление дольше 30 секунд заканчив
 });
 
 test('Qwen: ожидание разрешения дольше 30 секунд сохраняет текущий ход', async (t) => {
-  const fixture = await qwenFixture(t);
+  const fixture = await qwenNativeFixture(t);
   const adapter = await qwenAdapter({ runnable: true });
   let asked = false;
 
-  await fixture.fake({
-    ask: true,
-    askDeniedContinues: true,
-    tool: { name: 'run_shell_command', args: { command: 'printf synthetic' } },
-  });
+  fixture.actions.push({ name: 'Bash', args: { command: 'printf synthetic' } });
 
   try {
     const result = await adapter.run(runInput(fixture, 'shared-model(openai)', {
@@ -66,22 +64,22 @@ test('Qwen: ожидание разрешения дольше 30 секунд �
     }));
 
     assert.equal(asked, true);
-    assert.equal(result.reply, 'Новый ответ');
+    assert.match(result.reply, /Ответ настоящего CLI/);
   } finally {
     t.mock.timers.reset();
   }
 });
 
 test('Qwen: ошибка CLI после долгого размышления сохраняет свою причину и хвост', async (t) => {
-  const fixture = await qwenFixture(t);
-  const adapter = await qwenAdapter({ runnable: true });
   const live = [];
   let advanced = false;
-
-  await fixture.fake({ streamError: true });
+  const updates = [
+    { sessionUpdate: 'agent_thought_chunk', content: { type: 'text', text: 'Долгое размышление' } },
+    { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'Частичный ответ' } },
+  ];
 
   try {
-    await assert.rejects(adapter.run(runInput(fixture, 'shared-model(openai)', {
+    await assert.rejects(runQwenPreviewStream(t, updates, {
       onSessionCreated() {
         t.mock.timers.enable({ apis: ['setTimeout'] });
       },
@@ -94,26 +92,22 @@ test('Qwen: ошибка CLI после долгого размышления с
           t.mock.timers.reset();
         }
       },
-    })), /synthetic stream failure/);
+    }, new Error('synthetic stream failure')), /synthetic stream failure/);
 
     assert.equal(advanced, true);
-    assert.equal(live.filter((step) => step.k === 'text').at(-1).text, 'Новый ответ');
+    assert.equal(live.filter((step) => step.k === 'text').at(-1).text, 'Частичный ответ');
   } finally {
     t.mock.timers.reset();
   }
 });
 
 test('Qwen: остановка долгого хода отменяет позднее разрешение', async (t) => {
-  const fixture = await qwenFixture(t);
+  const fixture = await qwenNativeFixture(t);
   const adapter = await qwenAdapter({ runnable: true });
   const controller = new AbortController();
   const effect = path.join(fixture.workspace, 'late-effect');
 
-  await fixture.fake({
-    ask: true,
-    effect,
-    tool: { name: 'run_shell_command', args: { command: 'printf synthetic' } },
-  });
+  fixture.actions.push({ name: 'Bash', args: { command: `printf synthetic > '${effect}'` } });
 
   try {
     await assert.rejects(adapter.run(runInput(fixture, 'shared-model(openai)', {
@@ -135,7 +129,7 @@ test('Qwen: остановка долгого хода отменяет позд
     })), /ход отменён/);
 
     await assert.rejects(access(effect), { code: 'ENOENT' });
-    assert.equal((await fixture.records()).some((entry) => entry.event === 'guard'), false);
+    assert.equal(fixture.actions.length, 0);
   } finally {
     t.mock.timers.reset();
     controller.abort();

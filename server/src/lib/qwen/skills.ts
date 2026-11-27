@@ -2,6 +2,8 @@ import { promises as fs } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
 
+export const QWEN_SKILLS_MOUNT = '/tmp/qwen-config/skills';
+
 /**
  * Общий каталог и цели ссылок на bundles доступны песочнице только для чтения.
  * Родительские home и вложенные ссылки за пределы bundle этим доступом не открываются.

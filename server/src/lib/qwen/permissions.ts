@@ -35,11 +35,13 @@ export async function qwenPermissionResponse(value: unknown, context: {
   signal?: AbortSignal;
   factory: boolean;
   planExecutionMode?: string;
+  preapproved?: boolean;
+  requiresExplicitUser?: boolean;
 }): Promise<Record<string, unknown>> {
   const params = record(value);
   const tool = record(params.toolCall);
   const meta = record(tool._meta);
-  const name = String(meta.toolName || tool.title || '');
+  const name = String(record(meta.qwen).toolName || meta.toolName || tool.title || '');
   const options = Array.isArray(params.options) ? params.options.map(record) : [];
   const rawQuestions = Array.isArray(meta.qwenQuestions) ? meta.qwenQuestions.map(record) : [];
   const isQuestion = meta.qwenInteractionKind === 'user_question' && rawQuestions.length > 0;
@@ -50,7 +52,7 @@ export async function qwenPermissionResponse(value: unknown, context: {
     multiSelect: question.multiSelect === true,
     allowFreeText: true,
   }));
-  let decision: Record<string, unknown> = {};
+  let decision: Record<string, unknown> = context.preapproved ? { allow: true } : {};
 
   if (!context.factory && context.ask && !context.signal?.aborted) {
     decision = record(await context.ask({
@@ -79,7 +81,7 @@ export async function qwenPermissionResponse(value: unknown, context: {
       canRemember: false,
       // CLI уже применил свой режим и native-классификатор перед reverse request.
       // Общая автоматика GrigDesk не переоценивает запрошенное им решение человека.
-      requiresExplicitUser: true,
+      requiresExplicitUser: context.requiresExplicitUser ?? true,
       signal: context.signal,
     }));
   }
@@ -87,7 +89,8 @@ export async function qwenPermissionResponse(value: unknown, context: {
   const answers = isQuestion ? questionAnswers(decision, questions.length) : {};
   const requestedChoice = typeof decision.choice === 'string'
     ? options.find((option) => option.optionId === decision.choice) : undefined;
-  const allowed = !context.signal?.aborted && !context.factory && requestedChoice?.kind !== 'reject_once'
+  const allowed = !context.signal?.aborted && (!context.factory || context.preapproved === true)
+    && requestedChoice?.kind !== 'reject_once' && requestedChoice?.kind !== 'reject_always'
     && (isQuestion ? Object.keys(answers).length === questions.length : decision.allow === true);
   const preferred = allowed ? options.find((option) => option.optionId === 'proceed_once') : undefined;
   const selected = (allowed ? requestedChoice || preferred : undefined)

@@ -8,6 +8,7 @@ import { deepSeekDistributionMode } from './lib/deepseek/distribution.ts';
 import { readClientConfig } from './lib/clientAccess/config.ts';
 import { factoryProfilesRoot, factoryRuntimePaths } from './lib/factoryRuntime.ts';
 import { profilesDirFor } from './lib/runtimeLayout.ts';
+import { qwenPreviewBinary } from './lib/qwen/previewRelease.ts';
 import {
   runtimeInstallationBin, runtimeKind, runtimeMode, runtimeRoot,
 } from './lib/runtimePaths.ts';
@@ -134,7 +135,7 @@ export const config = {
   // kimiLaunchMode: host — обычный хост-процесс с наследованием host config (как claude),
   // contained — server-owned contained ACP profile (bwrap + user systemd cgroup
   // + versioned HTTPS allowlist); host config/hooks/plugins/MCP runtime не наследует.
-  qwenBin: process.env.GRIGDESK_QWEN_BIN || 'qwen',
+  qwenBin: qwenPreviewBinary(dataHome),
   qwenHome: process.env.GRIGDESK_QWEN_HOME || process.env.QWEN_HOME || path.join(home, '.qwen'),
   qwenRuntimeHome: path.join(dataHome, 'qwen-runtime'),
   kimiLaunchMode,

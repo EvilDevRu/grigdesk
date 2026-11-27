@@ -330,6 +330,12 @@
           </section>
           <div class="settings-provider-install-actions">
             <UiButton
+              v-if="selected.distribution?.canInstall && !selected.distribution.ready"
+              :disabled="Boolean(distributionInstalling)"
+              @click="installDistribution(selected.id)"
+            >{{ distributionInstalling === selected.id ? t('settings.providerDistributionInstalling')
+              : t('settings.providerInstallationInstall') }}</UiButton>
+            <UiButton
               v-if="!selected.installed && selected.installation?.canInstall"
               :disabled="installation.busy && installation.snapshot.active?.providerId !== selected.id"
               @click="installation.requestInstall(selected.id, 'install')"
@@ -357,8 +363,13 @@
               @click="installation.requestInstall(selected.id, 'uninstall')"
             >{{ t('settings.providerLifecycleUninstall') }}</UiButton>
           </div>
-          <p v-if="removalResult" data-provider-removal-result>{{ removalResult }}</p>
-          <p v-else-if="updateResult">{{ updateResult.text }}</p>
+          <p v-if="distributionFailure === selected.id" role="alert">
+            {{ t('settings.providerDistributionInstallFailed') }}
+          </p>
+          <template v-if="selected.distribution?.managed !== true">
+            <p v-if="removalResult" data-provider-removal-result>{{ removalResult }}</p>
+            <p v-else-if="updateResult">{{ updateResult.text }}</p>
+          </template>
         </template>
         <template v-else-if="ready && tab === 'models'">
           <p v-if="selected.models?.length">{{ t('settings.providerCatalogReadOnlySharedVisibilityIs') }}</p>
@@ -476,6 +487,8 @@ const props = defineProps<{ active: boolean }>();
 const settings = useSettingsStore();
 const providers = useProvidersStore();
 const installation = useProviderInstallStore();
+const distributionInstalling = ref('');
+const distributionFailure = ref('');
 const native = useProviderSettingsStore();
 const registry = computed(() => (providers.providers as ProviderEntry[]).map((entry) => ({
   ...localizeProviderMetadata(entry, uiLocale.value),
@@ -613,6 +626,24 @@ function dirtyProvider(id: string): boolean {
 
 function terminal(command: string): void {
   void actions.openTerminal(command);
+}
+
+/**
+ * Сервер сам выбирает проверенную поставку и каталог. Обновление реестра
+ * публикует состояние установки сразу после ответа и сохраняет черновик доступа.
+ */
+async function installDistribution(id: string): Promise<void> {
+  distributionInstalling.value = id;
+  distributionFailure.value = '';
+
+  try {
+    await api.post(`/api/providers/${encodeURIComponent(id)}/install-distribution`, {});
+    await refreshRegistry();
+  } catch {
+    distributionFailure.value = id;
+  } finally {
+    distributionInstalling.value = '';
+  }
 }
 
 /**

@@ -13,6 +13,7 @@ import { stageFactoryCandidate } from '../../server/scripts/binary/factoryCandid
 import { testFactoryBinary } from '../helpers/factoryBinary.mjs';
 import { cliJson, sourceRoot } from '../helpers/stageRunnerSettingsFixture.mjs';
 import { qwenFactoryFixture, qwenRouteFixture, routePublicOutput } from '../helpers/qwenFactoryFixture.mjs';
+import { qwenNativeFixture } from '../helpers/qwenNativeFixture.mjs';
 import {
   QWEN_KEY, SECOND_KEY, qwenAdapter, qwenFixture, shellRun, until,
 } from '../helpers/qwenFixture.mjs';
@@ -54,20 +55,16 @@ test('Go проводит Qwen через metadata, ворота и один р�
   skip: process.platform !== 'linux',
   timeout: 60_000,
 }, async (t) => {
-  const qwen = await qwenFixture(t);
+  const qwen = await qwenNativeFixture(t);
   const binary = testFactoryBinary();
   const fx = await prepareCommandServer(t, qwen.root, binary, true);
   const { config } = fx;
-  const trace = path.join(config.stateDir, 'qwen-trace.jsonl');
   const profile = path.join(config.profilesDir, 'demo-profile/runners.env');
   const ticket = path.join(qwen.root, 'ticket.json');
+  const status = { match: 'stage_result', args: { result: 'done', comment: 'qwen fixture completed' } };
 
   await chmod(config.stateDir, 0o700);
-  await qwen.fake({
-    status: true,
-    trace,
-    metadataTraceOptional: true,
-  });
+  qwen.actions.push(status);
   await writeFile(profile, (await readFile(profile, 'utf8')).replace(
     'PROJECT_RUNNER_PRIMARY=deepseek', 'PROJECT_RUNNER_PRIMARY=qwen',
   ));
@@ -125,10 +122,9 @@ test('Go проводит Qwen через metadata, ворота и один р�
     throw new Error(diagnostics.join('\n') || String(error), { cause: error });
   }
 
-  const records = (await readFile(trace, 'utf8')).trim().split('\n').map((line) => JSON.parse(line));
-
-  assert.equal(records.filter((row) => row.event === 'status-current').length, 1);
-  assert.equal(records.find((row) => row.event === 'status-current').response.result.isError, false);
+  assert.equal(status.missing, undefined, 'Нативный MCP объявил stage_result');
+  assert.equal(qwen.actions.length, 0, 'Модель отправила итог через штатный MCP');
+  assert.ok(qwen.requests.some((request) => request.messages.some((message) => message.role === 'tool')));
 });
 
 test('qwen-secrets-systemd-and-detached', async (t) => {

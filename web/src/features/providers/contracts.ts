@@ -1,6 +1,9 @@
 import { isProviderInstallationMetadata } from '../../../../shared/chat/providerInstallContracts.ts';
 import { isRecord } from '../../../../shared/lib/objects.ts';
-import type { ProviderEntry, ProviderModelEntry } from '../../../../shared/chat/providersContracts.ts';
+import { isProviderTurnTokens } from '../../../../shared/chat/providersContracts.ts';
+import type {
+  ProviderEntry, ProviderModelEntry, ProviderTurnTokens,
+} from '../../../../shared/chat/providersContracts.ts';
 
 export interface UsageControl {
   [field: string]: unknown;
@@ -59,6 +62,7 @@ export interface UsageBar {
 }
 
 export interface UsageEntry {
+  lastTurnTokens?: ProviderTurnTokens;
   lastSuccessfulAt?: number | null;
   runtimeGeneration?: string;
   pollIntervalMs?: number;
@@ -135,6 +139,7 @@ export function isProvider(value: unknown): value is ProviderEntry {
  */
 function isUsage(value: unknown): value is UsageEntry {
   if (!isRecord(value) || !fields(value, ['state', 'message'], [], ['stale'])
+    || (value.lastTurnTokens !== undefined && !isProviderTurnTokens(value.lastTurnTokens))
     || (value.lastSuccessfulAt !== undefined && value.lastSuccessfulAt !== null
       && (typeof value.lastSuccessfulAt !== 'number' || !Number.isFinite(value.lastSuccessfulAt)))
     || (value.runtimeGeneration !== undefined && typeof value.runtimeGeneration !== 'string')

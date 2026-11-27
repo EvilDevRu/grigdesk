@@ -3,7 +3,8 @@ import test from 'node:test';
 
 import { createQwenBackground } from '../../server/src/lib/qwen/background.ts';
 import { createQwenSteps } from '../../server/src/lib/qwen/steps.ts';
-import { qwenAdapter, qwenFixture, rejectedTurn, runInput } from '../helpers/qwenFixture.mjs';
+import { rejectedTurn } from '../helpers/qwenFixture.mjs';
+import { runQwenPreviewStream } from '../helpers/qwenPreviewStream.mjs';
 
 const chunk = (text, parent = '', kind = 'agent_message_chunk') => ({
   sessionUpdate: kind,
@@ -65,13 +66,9 @@ for (const background of [false, true]) {
       stream.forEach((update) => collector.observe(update));
       await collector.finish('end_turn');
     } else {
-      const fixture = await qwenFixture(t);
-      const adapter = await qwenAdapter({ runnable: true });
-
-      await fixture.fake({ stream });
-      outcome = await adapter.run(runInput(fixture, 'shared-model(openai)', {
+      outcome = await runQwenPreviewStream(t, stream, {
         onAssistantMessage: (message) => messages.push(message),
-      }));
+      });
     }
 
     const texts = outcome.steps.filter((step) => step.k === 'text');
@@ -122,20 +119,14 @@ test('Qwen: вложенный ребёнок и поздний результа
 });
 
 test('Qwen: ошибка выпускает раздельные хвосты, в реплику попадает только основной', async (t) => {
-  const fixture = await qwenFixture(t);
-  const adapter = await qwenAdapter({ runnable: true });
   const steps = [];
   const messages = [];
 
-  await fixture.fake({
-    stream: [chunk('Основной хвост.'), chunk('Хвост ребёнка.', 'child')],
-    streamError: true,
-  });
-
-  const error = await rejectedTurn(() => adapter.run(runInput(fixture, 'shared-model(openai)', {
+  const stream = [chunk('Основной хвост.'), chunk('Хвост ребёнка.', 'child')];
+  const error = await rejectedTurn(() => runQwenPreviewStream(t, stream, {
     onStep: (step) => steps.push(step),
     onAssistantMessage: (message) => messages.push(message),
-  })));
+  }, new Error('synthetic stream failure')));
 
   assert.match(error, /synthetic stream failure/);
   assert.deepEqual(steps.filter((step) => step.k === 'text').map(({ text, parent }) => ({ text, parent })), [

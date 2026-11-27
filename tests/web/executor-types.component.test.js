@@ -258,6 +258,42 @@ test('типы исполнителей в настоящих настройка
       prov.providers[1].available = false;
       await nextTick();
       assert.equal(wrapper.find('.prov.tripo').exists(), false);
+
+      prov.providers.push({
+        ...card('qwen', 'universal'),
+        distribution: {
+          managed: true,
+          label: 'Qwen Code 1.0 Preview.2',
+          ready: true,
+        },
+        usagePresentation: {
+          freshness: false,
+          spentLabel: false,
+          subscriptionQuotaUnavailable: true,
+        },
+      });
+      prov.updateResults.qwen = { type: 'err', text: 'Прежняя ошибка npm' };
+      await nextTick();
+      await wrapper.get('.prov.qwen').trigger('click');
+
+      const quota = '[data-testid="provider-quota-unavailable"]';
+      const lastTurn = '[data-testid="provider-last-turn-tokens"]';
+
+      const bucket = browser.document.querySelector(quota);
+
+      assert.equal(bucket?.getAttribute('aria-disabled'), 'true');
+      assert.match(bucket.textContent, /Квота подписки.*Нет данных/su);
+      assert.equal(bucket.querySelector('.pu-fill'), null);
+      assert.equal(browser.document.querySelector('[data-context="topbar-popover-refresh"]'), null);
+      assert.equal(browser.document.querySelector(lastTurn), null);
+      assert.doesNotMatch(browser.document.body.textContent, /Прежняя ошибка npm/u);
+
+      globalThis.__typesShellSse('providers-usage', {
+        usage: { qwen: { state: 'unsupported', lastTurnTokens: { inputTokens: 40, outputTokens: 16 } } },
+        autoRefresh: false,
+      });
+      await nextTick();
+      assert.match(browser.document.querySelector(lastTurn)?.textContent ?? '', /вход 40.*выход 16 токенов/u);
     });
 
   delete globalThis.__typesStores;

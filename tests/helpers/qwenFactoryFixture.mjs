@@ -25,11 +25,11 @@ function qwenFactoryEnvironment(fixture) {
 }
 
 /**
- * Профиль Qwen использует временный набор настроек и подмену native CLI.
+ * Профиль Qwen использует временный набор настроек и проверенный Preview.2.
  * Команда метаданных читает настоящий закреплённый узел Go.
  */
 export async function qwenFactoryFixture(t) {
-  const qwen = await qwenFixture(t);
+  const qwen = await qwenFixture(t, { native: true });
   const stage = await settingsFixture(t);
 
   Object.assign(stage.env, qwenFactoryEnvironment(qwen), {

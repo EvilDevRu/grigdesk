@@ -25,13 +25,11 @@
     {
       "id": "qwen-test-cli",
       "group": "prepare-server",
+      "needs": ["server-install"],
       "argv": [
-        "npm",
-        "--prefix",
-        "tests/fixtures/qwen-cli",
-        "ci",
-        "--no-audit",
-        "--no-fund"
+        "bash",
+        "-c",
+        "bash tools/install-qwen-preview.sh \"$PWD/server/node_modules/.grigdesk-test/qwen-code/1.0.0-preview.2\""
       ],
       "timeoutMs": 1800000
     },

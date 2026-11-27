@@ -50,11 +50,11 @@ xvfb и FUSE для проверки готового окна. Ни doctor, н�
 Отключение Chromium sandbox не считается успешной пробой.
 
 Подготовка проверяет ffmpeg, ffprobe, ripgrep и импорт Pillow для генерации растровых
-значков. Полный серверный рецепт устанавливает закреплённый
-`@qwen-code/qwen-code@0.27.3` из `tests/fixtures/qwen-cli/package-lock.json` и передаёт
-его путь через `GRIGDESK_QWEN_BIN`. Native-фикстуры используют loopback API и синтетические
-ключи. Разрешение npm на скрипты действует только для закреплённой версии
-[проверенного audio-capture hook](../chat/qwen-install-hooks.md).
+значков. Полный серверный рецепт подготавливает Linux ELF Qwen Code 1.0 Preview.2 через
+`tools/install-qwen-preview.sh` и передаёт его путь как `GRIGDESK_QWEN_BIN`.
+Скрипт проверяет закреплённый SHA-256 до распаковки и входит в RecipeDigest.
+Проверки Preview.2 используют loopback API с синтетическим ключом и включаются
+через `GRIGDESK_QWEN_PREVIEW_TEST=1`. [Контракт рантайма](../chat/qwen-preview-runtime.md).
 
 Общий launcher серверных тестов создаёт собственный `app-grigdesk-tests-*.scope`
 у уже работающего пользовательского systemd, задаёт Bash и передаёт адрес его шины

@@ -1588,6 +1588,8 @@
   "providerInstallationHeadingInstall": "Установка {name}",
   "providerInstallationHeadingUpdate": "Обновление {name}",
   "providerInstallationInstall": "Установить",
+  "providerDistributionInstalling": "Устанавливается…",
+  "providerDistributionInstallFailed": "Установка не завершилась. Проверьте, что сервер может скачать архив, и повторите.",
   "providerInstallationUpdate": "Обновить",
   "providerInstallationConfirmTitle": "{action} {name}?",
   "providerInstallationLegacyConfirm": "Обновить {name}? Старый сервер не передаёт описание команды и ход установки. Обновление выполнится прежним способом; итог появится в карточке исполнителя.",

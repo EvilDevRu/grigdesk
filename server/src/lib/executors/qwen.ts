@@ -1,24 +1,27 @@
-import { promisify } from 'node:util';
-import { execFile } from '../providerInstall/externalCliProcess.ts';
-
 import type { ExecutorAdapter } from './index.ts';
-import { npmInstallCommand } from '../providerInstall/commands.ts';
-import { npmLatest } from './_npmLatest.ts';
 import { directSshSetting } from './_directSshPolicy.ts';
 import { resolveQwenWorkspace } from '../qwen/workspace.ts';
-import { qwenBin, readQwenSnapshot, qwenCredentials, qwenHostEnabled } from '../qwen/settings.ts';
+import { qwenBin, qwenConfig, readQwenSnapshot, qwenCredentials, qwenHostEnabled } from '../qwen/settings.ts';
 import { projectQwenModels, qwenCatalog, qwenCatalogError } from '../qwen/catalog.ts';
 import { openQwenLiveSession, qwenLiveFingerprint } from '../qwen/live.ts';
 import { runQwenTurn } from '../qwen/runtime.ts';
 import { qwenDiscoveryError } from '../qwen/discovery.ts';
 import { readUserSkillCommands } from '../skills/userSkillCommands.ts';
+import { installQwenPreview } from '../qwen/installPreview.ts';
+import {
+  qwenPreviewBinary, QWEN_PREVIEW_SUPPORTED, QWEN_PREVIEW_VERSION, verifyQwenPreviewBinary,
+} from '../qwen/previewRelease.ts';
 
-const execute = promisify(execFile);
-const binding = {
-  binName: 'qwen',
-  configKey: 'qwenBin',
-  envKey: 'GRIGDESK_QWEN_BIN',
-};
+/**
+ * Кнопка установки пишет только в штатный каталог данных GrigDesk. Переданный
+ * конкретным запуском путь используется для проверки, без права его заменить.
+ */
+function installTarget(config: unknown): string | undefined {
+  const root = qwenConfig(config).dataHome;
+  const target = root && qwenPreviewBinary(root);
+
+  return QWEN_PREVIEW_SUPPORTED && target === qwenBin(config) ? target : undefined;
+}
 
 const adapter: ExecutorAdapter = {
   id: 'qwen',
@@ -28,25 +31,38 @@ const adapter: ExecutorAdapter = {
   color: '#6153d9',
   order: 6,
   bin: qwenBin,
-  externalCli: () => ({ packageId: '@qwen-code/qwen-code', ...binding }),
-  installation: (_config, context) => {
-    const install = npmInstallCommand('@qwen-code/qwen-code', context?.npm || 'npm', binding);
+  distribution: (config, probe) => ({
+    managed: true,
+    kind: 'binary',
+    label: 'Qwen Code 1.0 Preview.2',
+    canInstall: Boolean(installTarget(config)),
+    ...(probe?.ok ? { runtimeVersion: QWEN_PREVIEW_VERSION } : {}),
+    ...(probe && !probe.ok ? {
+      problem: { message: QWEN_PREVIEW_SUPPORTED
+        ? 'Для чата требуется проверенный Qwen Code 1.0 Preview.2.'
+        : 'Qwen Code 1.0 Preview.2 в GrigDesk доступен на Linux x64.' },
+    } : {}),
+  }),
+  async installDistribution(config, signal) {
+    const target = installTarget(config);
 
-    return {
-      install,
-      update: { ...install },
-      loginCommand: '',
-    };
+    if (!target) {
+      throw new Error('Установка Qwen Code Preview.2 недоступна в этой конфигурации.');
+    }
+
+    await installQwenPreview(target, signal);
   },
   /**
-   * Версия проверяется у выбранного CLI тем же launcher-ом, что держит reader lease.
-   * Ошибка установки не раскрывает окружение и не превращается в готовность карточки.
+   * Только проверенная поставка доступна в карточке и в каталоге моделей.
+   * Печати нужной строки `--version` недостаточно для допуска произвольного файла.
    */
   async probe(config) {
     try {
-      const { stdout } = await execute(qwenBin(config), ['--version'], { timeout: 10000 });
+      const binary = await verifyQwenPreviewBinary(qwenBin(config));
 
-      return { ok: true, version: stdout.trim().slice(0, 60) || null };
+      await binary.descriptor.close();
+
+      return { ok: true, version: QWEN_PREVIEW_VERSION };
     } catch {
       return { ok: false, version: null };
     }
@@ -67,7 +83,11 @@ const adapter: ExecutorAdapter = {
     };
   },
   credentials: qwenCredentials,
-  latestVersion: () => npmLatest('@qwen-code/qwen-code'),
+  usagePresentation: {
+    freshness: false,
+    spentLabel: false,
+    subscriptionQuotaUnavailable: true,
+  },
   usage: () => ({
     state: 'unsupported',
     message: 'Получение квот Qwen пока не поддерживается в GrigDesk.',
@@ -81,7 +101,7 @@ const adapter: ExecutorAdapter = {
     images: true,
   },
   catalog: qwenCatalog,
-  catalogCacheKey: (config) => `${readQwenSnapshot(config).fingerprint}:native-model-options-v1`,
+  catalogCacheKey: (config) => `${readQwenSnapshot(config).fingerprint}:preview2-native-models`,
   /**
    * Смена автоматического сервиса или ключа снимает каталог прежнего доступа.
    * Явный источник CLI сохраняет прежнее поведение при пустом или повреждённом JSON.
@@ -164,13 +184,12 @@ const adapter: ExecutorAdapter = {
   sessionBinding: {
     authProfileId: (config) => readQwenSnapshot(config).fingerprint,
     securityProfile: (_config, providerSettings) => qwenHostEnabled(providerSettings)
-      ? 'qwen-host-builtin-guard-v1' : 'qwen-bwrap-private-guard-v1',
+      ? 'qwen-preview2-host' : 'qwen-preview2-bwrap-acp',
   },
   mcpStatus: () => ({ servers: [], note: 'MCP выдаётся сервером для каждого хода.' }),
   compaction: { kind: 'summary' },
   session: {
     mode: 'persistent',
-    unsolicited: true,
     keepAlive: true,
     limitExempt: true,
     enabled: (spec: Record<string, unknown>) => !spec.factory && qwenHostEnabled(spec.providerSettings),

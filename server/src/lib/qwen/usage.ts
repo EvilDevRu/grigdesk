@@ -1,5 +1,6 @@
 import { reportedContextCache, type ContextCache } from '../chat/contextCache.ts';
 import { record } from './transport.ts';
+import { isProviderTurnTokens, type ProviderTurnTokens } from '../../../../shared/chat/providersContracts.ts';
 
 /**
  * Метрики хода Qwen из ACP-потока: выход основного агента, последний контекст и кэш.
@@ -10,6 +11,8 @@ export function createQwenUsage(
   onProgress: (tokens: number, info: Record<string, unknown>) => void,
 ) {
   let outputTokens = 0;
+  let completedOutputTokens = 0;
+  let turnTokens: ProviderTurnTokens | undefined;
   let contextTokens: number | undefined;
   let contextWindow: number | undefined;
   let contextCache: ContextCache | undefined;
@@ -98,8 +101,39 @@ export function createQwenUsage(
         ...(contextWindow !== undefined ? { contextWindow } : {}),
       } : {}),
       ...(contextCache ? { contextCache } : {}),
+      ...(turnTokens ? { turnTokens } : {}),
     };
   }
 
-  return { observe, result };
+  /**
+   * Стандартный итог Preview.2 содержит суммарный расход хода.
+   * Он уточняет токены генерации, но не является окном контекста или балансом подписки.
+   */
+  function observePromptResult(value: Record<string, unknown>): void {
+    const usage = record(value.usage);
+    const output = tokens(usage.outputTokens);
+
+    if (isProviderTurnTokens(usage)) {
+      const collected = {
+        inputTokens: (turnTokens?.inputTokens ?? 0) + usage.inputTokens,
+        outputTokens: (turnTokens?.outputTokens ?? 0) + usage.outputTokens,
+      };
+
+      if (isProviderTurnTokens(collected)) {
+        turnTokens = collected;
+      }
+    }
+
+    if (output !== null) {
+      completedOutputTokens += output;
+      outputTokens = completedOutputTokens;
+      publish();
+    }
+  }
+
+  return {
+    observe,
+    observePromptResult,
+    result,
+  };
 }

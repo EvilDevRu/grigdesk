@@ -3,6 +3,7 @@ import { access, mkdir, readFile, symlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import test from 'node:test';
 
+import { autoDecision } from '../../server/src/lib/chat/autoApprove.ts';
 import { qwenNativeFixture } from '../helpers/qwenNativeFixture.mjs';
 import { qwenAdapter, runInput, selectedModel } from '../helpers/qwenFixture.mjs';
 
@@ -15,23 +16,27 @@ test('Qwen native: Авто пишет в два корня без вопрос�
   const additional = path.join(sibling, 'additional.txt');
   const shell = path.join(sibling, 'shell.txt');
   let questions = 0;
+  const decisions = [];
 
   await mkdir(sibling);
   fixture.actions.push(
-    { name: 'write_file', args: { file_path: own, content: 'native main' } },
-    { name: 'write_file', args: { file_path: additional, content: 'native second' } },
-    { name: 'run_shell_command', args: { command: `ls '${sibling}'` } },
-    { name: 'run_shell_command', args: { command: `printf native-shell > '${shell}'` } },
+    { name: 'Write', args: { file_path: own, content: 'native main' } },
+    { name: 'Write', args: { file_path: additional, content: 'native second' } },
+    { name: 'Bash', args: { command: `ls '${sibling}'` } },
+    { name: 'Bash', args: { command: `printf native-shell > '${shell}'` } },
   );
 
   const result = await adapter.run(runInput(fixture, model, {
     permissionMode: 'auto',
     extraDirs: [sibling],
     signal: AbortSignal.timeout(45000),
-    onPermission: async () => {
-      questions += 1;
+    onPermission: async (question) => {
+      const decision = autoDecision(question);
 
-      return { allow: false };
+      assert.equal(question.requiresExplicitUser, false);
+      decisions.push(decision.verdict);
+
+      return { allow: decision.verdict === 'allow' };
     },
   }));
 
@@ -39,20 +44,20 @@ test('Qwen native: Авто пишет в два корня без вопрос�
   assert.equal(await readFile(own, 'utf8'), 'native main');
   assert.equal(await readFile(additional, 'utf8'), 'native second');
   assert.equal(await readFile(shell, 'utf8'), 'native-shell');
-  assert.equal(questions, 0);
-  assert.ok(fixture.classifications.length > 0, 'Shell действительно проходит native-классификатор');
+  assert.deepEqual(decisions, ['allow', 'allow', 'allow', 'allow']);
   assert.ok(fixture.requests.some((request) => JSON.stringify(request.messages).includes(sibling)),
     'Native workspace должен сообщить модели дополнительный путь');
 
   const manual = path.join(sibling, 'manual.txt');
 
-  fixture.actions.push({ name: 'write_file', args: { file_path: manual, content: 'manual approval' } });
+  fixture.actions.push({ name: 'Write', args: { file_path: manual, content: 'manual approval' } });
   await adapter.run(runInput(fixture, model, {
     permissionMode: 'default',
     sessionId: result.sessionId,
     extraDirs: [sibling],
     signal: AbortSignal.timeout(20000),
-    onPermission: async () => {
+    onPermission: async (question) => {
+      assert.equal(question.requiresExplicitUser, true);
       questions += 1;
 
       return { allow: true };
@@ -62,58 +67,47 @@ test('Qwen native: Авто пишет в два корня без вопрос�
   assert.equal(await readFile(manual, 'utf8'), 'manual approval');
 });
 
-test('Qwen native: отказ классификатора запрещает shell', { timeout: 60000 }, async (t) => {
+test('Qwen native: Авто отдаёт опасную команду на решение человека', { timeout: 60000 }, async (t) => {
   const fixture = await qwenNativeFixture(t);
   const adapter = await qwenAdapter({ runnable: true });
   const target = path.join(fixture.workspace, 'blocked');
-  let questions = 0;
+  const questions = [];
 
-  fixture.classifierReplies.push(true, true);
-  fixture.actions.push({ name: 'run_shell_command', args: { command: `printf BAD > '${target}'` } });
+  await writeFile(target, 'preserved');
+  fixture.actions.push({ name: 'Bash', args: { command: `rm -r '${target}'` } });
 
   const result = await adapter.run(runInput(fixture, 'shared-model(openai)', {
     permissionMode: 'auto',
     signal: AbortSignal.timeout(25000),
-    onPermission: async () => {
-      questions += 1;
+    onPermission: async (question) => {
+      const decision = autoDecision(question);
 
-      return { allow: true };
+      questions.push(decision);
+
+      return { allow: decision.verdict === 'allow' };
     },
   }));
 
-  assert.equal(fixture.classifications.length, 2, 'Проверены быстрая и повторная оценки');
-  assert.equal(questions, 0);
+  assert.equal(questions.length, 1);
+  assert.equal(questions[0].verdict, 'ask');
   assert.match(result.reply, /Ответ настоящего CLI/);
-  await assert.rejects(access(target), { code: 'ENOENT' });
+  assert.equal(await readFile(target, 'utf8'), 'preserved');
 });
 
-test('Qwen native: сбой классификатора требует человека', { timeout: 60000 }, async (t) => {
+test('Qwen native: отсутствие callback Авто оставляет shell закрытым', { timeout: 60000 }, async (t) => {
   const fixture = await qwenNativeFixture(t);
   const adapter = await qwenAdapter({ runnable: true });
   const target = path.join(fixture.workspace, 'unavailable');
-  let questions = 0;
 
-  fixture.classifierReplies.push(...Array(10).fill('unavailable'));
-  fixture.actions.push({ name: 'run_shell_command', args: { command: `printf BAD > '${target}'` } });
+  fixture.actions.push({ name: 'Bash', args: { command: `printf BAD > '${target}'` } });
 
-  try {
-    await adapter.run(runInput(fixture, 'shared-model(openai)', {
-      permissionMode: 'auto',
-      signal: AbortSignal.timeout(25000),
-      onPermission: async (question) => {
-        questions += 1;
-        assert.equal(question.requiresExplicitUser, true, 'Общий auto GrigDesk не подменяет native fallback');
+  const result = await adapter.run(runInput(fixture, 'shared-model(openai)', {
+    permissionMode: 'auto',
+    signal: AbortSignal.timeout(25000),
+  }));
 
-        return { allow: false };
-      },
-    }));
-  } catch (error) {
-    assert.equal(error.stopped, true);
-    assert.ok(error.sessionId);
-  }
-
-  assert.ok(fixture.classifications.length > 0);
-  assert.equal(questions, 1, 'Сбой не разрешает действие автоматически');
+  assert.match(result.reply, /Ответ настоящего CLI/);
+  assert.equal(fixture.actions.length, 0);
   await assert.rejects(access(target), { code: 'ENOENT' });
 });
 
@@ -131,9 +125,9 @@ test('Qwen native: Авто сохраняет изоляцию третьего
   await writeFile(env, 'PRIVATE_SECOND_ENV');
   await symlink(third, path.join(second, 'escape'));
   fixture.actions.push(
-    { name: 'run_shell_command', args: { command: `cat '${env}' > '${report}'` } },
-    { name: 'write_file', args: { file_path: path.join(second, 'escape/outside'), content: 'BAD' } },
-    { name: 'run_shell_command', args: { command: `printf BAD > '${target}'` } },
+    { name: 'Bash', args: { command: `cat '${env}' > '${report}'` } },
+    { name: 'Write', args: { file_path: path.join(second, 'escape/outside'), content: 'BAD' } },
+    { name: 'Bash', args: { command: `printf BAD > '${target}'` } },
   );
   await adapter.run(runInput(fixture, 'shared-model(openai)', {
     permissionMode: 'auto',

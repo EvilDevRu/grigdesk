@@ -3,6 +3,7 @@ import { mkdir, readFile, symlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import test from 'node:test';
 
+import { QWEN_SKILLS_MOUNT } from '../../server/src/lib/qwen/skills.ts';
 import { qwenNativeFixture } from '../helpers/qwenNativeFixture.mjs';
 import { qwenAdapter, runInput } from '../helpers/qwenFixture.mjs';
 
@@ -43,12 +44,13 @@ test('Qwen sandbox: видит общий навык, загружает инс�
   const fixture = await skillFixture(t);
   const adapter = await qwenAdapter({ runnable: true });
   const marker = path.join(fixture.workspace, 'skills-check.txt');
+  const skillPath = path.join(QWEN_SKILLS_MOUNT, 'shared-probe');
   const actions = [
-    { name: 'skill', args: { skill: 'shared-probe' } },
-    { name: 'read_file', args: { file_path: path.join(fixture.skills, 'shared-probe/reference.txt') } },
-    { name: 'write_file', args: { file_path: fixture.resource, content: 'ILLEGAL_CHANGE' } },
-    { name: 'read_file', args: { file_path: path.join(fixture.bundle, 'escape.txt') } },
-    { name: 'run_shell_command', args: {
+    { name: 'Skill', args: { skill: 'shared-probe' } },
+    { name: 'Read', args: { file_path: path.join(skillPath, 'reference.txt') } },
+    { name: 'Write', args: { file_path: fixture.resource, content: 'ILLEGAL_CHANGE' } },
+    { name: 'Read', args: { file_path: path.join(skillPath, 'escape.txt') } },
+    { name: 'Bash', args: {
       command: `test ! -e '${fixture.secret}' && cat '${fixture.resource}' > '${marker}'`
         + ` && if printf BAD > '${fixture.resource}'; then exit 1; fi`,
     } },
@@ -78,7 +80,7 @@ test('Qwen sandbox: навык остаётся read-only при совпаде�
   const fixture = await skillFixture(t);
   const adapter = await qwenAdapter({ runnable: true });
 
-  fixture.actions.push({ name: 'run_shell_command', args: {
+  fixture.actions.push({ name: 'Bash', args: {
     command: `if printf BAD > '${fixture.resource}'; then exit 1; else printf READONLY_OVERLAP_OK; fi`,
   } });
 

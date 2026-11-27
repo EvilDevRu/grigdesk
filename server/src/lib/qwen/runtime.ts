@@ -17,11 +17,13 @@ import { createQwenUsage } from './usage.ts';
 import { resolveQwenWorkspace } from './workspace.ts';
 import { resolveQwenSessionHome } from './session.ts';
 import { resolveQwenSkills } from './skills.ts';
-import { qwenToolAllowed } from './policy.ts';
+import { qwenPreviewToolAllowed } from './previewPolicy.ts';
+import { qwenPreviewModelId } from './previewModels.ts';
 import { qwenPermissionResponse } from './permissions.ts';
-import { createQwenInTurn } from './inTurn.ts';
 import { qwenPromptContent, readQwenImages } from './images.ts';
 import type { QwenMcpServer } from './sandbox.ts';
+
+const WORK_MCP_UNAVAILABLE = 'Qwen не смог подключить рабочие инструменты GrigDesk.';
 
 export interface QwenRuntimeDependencies {
   openTransport?: typeof openQwenTransport;
@@ -78,6 +80,12 @@ async function runQwenSession(
     throw new Error('Qwen: модель недоступна в конфигурации modelProviders');
   }
 
+  const nativeModelId = qwenPreviewModelId(model);
+
+  if (!nativeModelId) {
+    throw new Error('Qwen Preview.2: протокол выбранной модели не поддерживается.');
+  }
+
   const workspace = await resolveQwenWorkspace(
     input.cwd || config.rootDir || process.cwd(), input.extraDirs,
   );
@@ -95,12 +103,11 @@ async function runQwenSession(
   const roots = [cwd, ...extraDirs];
   const runtimeRoot = config.qwenRuntimeHome || path.join(config.dataHome || cwd, 'qwen-runtime');
   const home = await resolveQwenSessionHome({
-    runtimeRoot: hostAccess ? path.join(runtimeRoot, 'host-builtin-v1') : runtimeRoot,
+    runtimeRoot: path.join(runtimeRoot, hostAccess ? 'preview2-host' : 'preview2-acp'),
     chatKey: input.chatKey,
     cwd,
     fingerprint: snapshot.fingerprint,
     extraDirs,
-    attachmentRoot,
     sessionId: input.sessionId,
   });
   const saved = path.join(home, 'session.json');
@@ -133,21 +140,43 @@ async function runQwenSession(
   let lastResponse = '';
   let lastAssistantMessageId = '';
   let assistantRevision = 0;
-  let awaitingAnswer = false;
   let actualModel = '';
-  let currentMode = mode;
-  let planExecutionMode: string | undefined;
-  const inTurn = createQwenInTurn({
-    available: () => active && !awaitingAnswer && !input.signal?.aborted,
-    sendNow: () => transport.client.request('craft/midTurnSendNow', { sessionId }),
-    readImages: async (images) => {
-      if (!transport.images) {
-        throw new Error('Qwen: установленный CLI не поддерживает изображения. Обновите Qwen Code.');
-      }
+  let approvalCount = 0;
 
-      return readQwenImages(images.map((image) => image.path), attachmentsDir, input.signal);
-    },
-  });
+  /**
+   * Передача уточнений ждёт ответы человека. Счётчик учитывает несколько
+   * одновременно запрошенных разрешений от параллельных инструментов.
+   */
+  function publishInTurnAvailability(): void {
+    input.onInTurnAvailability?.(approvalCount > 0
+      ? { available: false, reason: 'awaiting_answer' }
+      : { available: active && !input.signal?.aborted });
+  }
+
+  /**
+   * Граница ответа соответствует завершённому ACP prompt. Преждевременно закрытый
+   * или отменённый запрос не становится успешно доставленным уточнением.
+   */
+  function finishPrompt(value: unknown): void {
+    input.signal?.throwIfAborted();
+
+    if (transport.workMcpUnavailable?.()) {
+      throw new Error(WORK_MCP_UNAVAILABLE);
+    }
+
+    const result = record(value);
+
+    if (result.stopReason === 'cancelled') {
+      throw Object.assign(new Error('Qwen: ход отменён'), { stopped: true });
+    }
+
+    if (result.stopReason !== 'end_turn') {
+      throw new Error(`Qwen: ход завершён без ответа (${String(result.stopReason)})`);
+    }
+
+    usage.observePromptResult(result);
+    emitSteps(streamSteps.flush());
+  }
 
   /**
    * Текстовый блок получает один id и в ленте шагов, и в журнале ответов.
@@ -179,11 +208,13 @@ async function runQwenSession(
    * Во время подготовки факт копится до успешного сохранения сессии перед prompt.
    */
   function reportModel(value: unknown): void {
-    if (typeof value !== 'string' || !value.trim() || actualModel === value.trim()) {
+    const confirmed = snapshot.models.find((entry) => qwenPreviewModelId(entry) === value);
+
+    if (!confirmed || actualModel === confirmed.id) {
       return;
     }
 
-    actualModel = value.trim();
+    actualModel = confirmed.id;
 
     if (active) {
       input.onRunMetadata?.({ actualModelId: actualModel, modelSource: 'session' });
@@ -196,6 +227,7 @@ async function runQwenSession(
     home,
     authType: model.authType,
     mode,
+    nativeModelId,
     mcpServers,
     readonlyRoots,
     skillDirectories: skills.directories,
@@ -212,26 +244,7 @@ async function runQwenSession(
         return;
       }
 
-      if (method === 'qwen/notify/session/model-update') {
-        reportModel(params.currentModelId);
-
-        return;
-      }
-
-      if (method === 'qwen/notify/session/mode-update') {
-        if (params.currentModeId === 'plan' && typeof params.planExecutionMode === 'string') {
-          planExecutionMode = params.planExecutionMode;
-        }
-
-        if (active
-          && ['default', 'auto', 'auto-edit', 'plan', 'yolo'].includes(String(params.currentModeId))) {
-          currentMode = String(params.currentModeId);
-        }
-
-        return;
-      }
-
-      if (method !== 'session/update' || !active) {
+      if (method !== 'session/update' || !active || transport.workMcpUnavailable?.()) {
         return;
       }
 
@@ -242,11 +255,7 @@ async function runQwenSession(
       const kind = update.sessionUpdate;
       const text = String(record(update.content).text || '');
 
-      if (kind === 'current_mode_update') {
-        if (['default', 'auto', 'auto-edit', 'plan', 'yolo'].includes(String(update.currentModeId))) {
-          currentMode = String(update.currentModeId);
-        }
-      } else if (kind === 'config_option_update') {
+      if (kind === 'config_option_update') {
         reportModel(qwenSelectedModel(update.configOptions));
       } else if (kind === 'agent_message_chunk' || kind === 'agent_thought_chunk') {
         const k = kind === 'agent_message_chunk' ? 'text' : 'think';
@@ -266,60 +275,59 @@ async function runQwenSession(
      * Человеческое разрешение не преодолевает отмену или чужую identity.
      */
     async onReverseRequest(method, value) {
-      const params = record(value);
-
-      if (method === 'qwen/control/external_tool_guard/prepare') {
-        // Host живёт между ходами: фоновые вызовы проверяет live actor, не локальный active.
-        const allowed = (hostAccess || active) && await qwenToolAllowed(value, {
-          sessionId,
-          promptId,
-          cwd,
-          writableRoots: roots,
-          mode: currentMode,
-          readonlyRoots,
-          mcpServers,
-          blockDirectSsh: settings.blockDirectSsh !== false,
-          hostAccess,
-          signal: input.signal,
-        });
-
-
-        return { allowed: allowed && !input.signal?.aborted };
-      }
-
-      if (method === 'craft/drainMidTurnQueue') {
-        if (params.sessionId !== sessionId || params.promptId !== promptId) {
-          return { messages: [], hasQueuedPrompt: false };
-        }
-
-        emitSteps(streamSteps.flush(''));
-
-        return inTurn.drain();
-      }
-
-      if (method !== 'session/request_permission' || !active || params.sessionId !== sessionId) {
+      if (method !== 'session/request_permission') {
         throw new Error('Qwen: неизвестный reverse RPC');
       }
 
-      emitSteps(streamSteps.flush(streamSteps.parent(record(params.toolCall))));
+      const allowed = active && await qwenPreviewToolAllowed(value, {
+        sessionId,
+        promptId,
+        cwd,
+        writableRoots: hostAccess ? [path.parse(cwd).root] : roots,
+        mode,
+        readonlyRoots,
+        skillDirectory: skills.directories[0],
+        mcpServers,
+        blockDirectSsh: settings.blockDirectSsh !== false,
+        signal: input.signal,
+      });
 
-      const ask = input.onPermission as ((question: Record<string, unknown>) => Promise<unknown>) | undefined;
+      if (!allowed || !active || input.signal?.aborted) {
+        return { outcome: { outcome: 'cancelled' } };
+      }
 
-      awaitingAnswer = true;
-      input.onInTurnAvailability?.({ available: false, reason: 'awaiting_answer' });
+      // Preview.2 объявляет инструмент внутри запроса разрешения. Далее CLI
+      // может прислать только обновление статуса без имени и аргументов.
+      const tool = record(record(value).toolCall);
+      const name = record(record(tool._meta).qwen).toolName;
+
+      emitSteps(streamSteps.observe({
+        ...tool,
+        title: typeof name === 'string' ? name : tool.title,
+        sessionUpdate: 'tool_call',
+      }));
+
+      const preapproved = mode === 'yolo' || mode === 'plan';
+      const ask = preapproved ? undefined
+        : input.onPermission as ((question: Record<string, unknown>) => Promise<unknown>) | undefined;
+
+      if (ask) {
+        approvalCount += 1;
+        publishInTurnAvailability();
+      }
 
       try {
         return await qwenPermissionResponse(value, {
           ask,
           signal: input.signal,
+          preapproved,
           factory: Boolean(input.factory),
-          planExecutionMode,
+          requiresExplicitUser: mode !== 'auto',
         });
       } finally {
-        awaitingAnswer = false;
-
-        if (active && !input.signal?.aborted) {
-          input.onInTurnAvailability?.({ available: true });
+        if (ask) {
+          approvalCount -= 1;
+          publishInTurnAvailability();
         }
       }
     },
@@ -360,7 +368,9 @@ async function runQwenSession(
       const pending = transport.client.request(method, params, timeoutMs);
 
       if (method === 'session/prompt') {
-        promptSettled = pending.then(() => undefined, () => undefined);
+        const settled = pending.then(() => undefined, () => undefined);
+
+        promptSettled = promptSettled ? Promise.all([promptSettled, settled]).then(() => {}) : settled;
       }
 
       return Promise.race([pending, aborted]);
@@ -369,6 +379,7 @@ async function runQwenSession(
       ...(input.sessionId ? { sessionId: input.sessionId } : {}),
       cwd,
       mcpServers,
+      additionalDirectories: extraDirs,
     }));
 
     sessionId = input.sessionId || String(session.sessionId || '');
@@ -377,36 +388,13 @@ async function runQwenSession(
       throw new Error('Qwen: неверная identity новой сессии');
     }
 
-    const available = record(session.models).availableModels;
+    const modelOptions = session.configOptions;
 
-    if (!Array.isArray(available) || !available.some((entry) => record(entry).modelId === model.id)) {
-      throw new Error('Qwen: native CLI не подтвердил выбранную модель');
+    if (qwenSelectedModel(modelOptions) !== nativeModelId) {
+      throw new Error('Qwen: CLI не подтвердил выбранную модель.');
     }
 
-    const modes = record(session.modes).availableModes;
-
-    if (!Array.isArray(modes) || !modes.some((entry) => record(entry).id === mode)) {
-      throw new Error('Qwen: выбранный режим прав недоступен в установленном CLI. Обновите Qwen Code.');
-    }
-
-    let modelOptions: unknown;
-
-    if (Array.isArray(session.configOptions)) {
-      const selected = record(await request('session/set_config_option', {
-        sessionId,
-        configId: 'model',
-        value: model.id,
-      }));
-
-      modelOptions = selected.configOptions;
-      reportModel(qwenSelectedModel(modelOptions));
-    } else {
-      if (hostAccess) {
-        throw new Error('Qwen: Host требует native model configOptions');
-      }
-
-      await request('session/set_model', { sessionId, modelId: model.id });
-    }
+    reportModel(nativeModelId);
 
     const reasoning = qwenEffortOption(modelOptions);
     const effort = input.effort || '';
@@ -428,19 +416,6 @@ async function runQwenSession(
       }
     }
 
-    await request('session/set_mode', { sessionId, modeId: mode });
-
-    if (!hostAccess && mcpServers.some((server) => server.name === 'grigdesk-work')) {
-      // После синхронного обнаружения Qwen сообщает отказ MCP в stderr и продолжает без него.
-      // В чат передаём только заранее заданную причину, без необработанного вывода CLI.
-      const warning = /^Warning: MCP server\(s\) failed to start: (.+?)\. Continuing with built-in tools/mu;
-      const unavailable = warning.exec(transport.stderr())?.[1]?.split(', ');
-
-      if (unavailable?.includes('grigdesk-work')) {
-        throw new Error('Qwen не смог подключить рабочие инструменты GrigDesk.');
-      }
-    }
-
     await fs.writeFile(saved, sessionId, { mode: 0o600 });
     await input.onSessionCreated?.(sessionId);
     input.signal?.throwIfAborted();
@@ -459,37 +434,82 @@ async function runQwenSession(
 
     // Prompt отвечает после всего хода, включая инструменты и ожидание человека.
     // Ему нужен суточный предел общего ACP-клиента; настройки сохраняют свои 30 секунд.
-    const prompt = request('session/prompt', {
+    const primary = request('session/prompt', {
       sessionId,
       prompt: qwenPromptContent(input.message || '', imageContent),
-      _meta: {
-        'qwen-code/invocation': {
-          version: 1,
-          sessionId,
-          promptId,
-        },
-      },
+      messageId: promptId,
     }, 24 * 60 * 60 * 1000);
+    const followUps: Promise<void>[] = [];
+    let acceptFollowUps = true;
 
-    input.onInTurnReady?.(inTurn.port);
-    input.onInTurnAvailability?.({ available: true });
+    input.onInTurnReady?.({
+      /**
+       * Стандартный ACP ставит запрос в очередь этой же сессии. Передача в stdin
+       * подтверждается отдельно от ответа CLI о завершении запроса.
+       */
+      async deliver({ messageId, text, images = [] }) {
+        const usable = () => acceptFollowUps && active && approvalCount === 0
+          && !input.signal?.aborted && !transport.client.closed;
 
-    const result = record(await prompt);
+        if (!usable() || (images.length && !transport.images)) {
+          return {
+            ok: false,
+            code: 'in_turn_unavailable',
+            message: 'Канал уточнений Qwen недоступен.',
+          };
+        }
+
+        let content: Awaited<ReturnType<typeof readQwenImages>>;
+
+        try {
+          content = await readQwenImages(images.map((image) => image.path), attachmentsDir, input.signal);
+        } catch (error) {
+          return {
+            ok: false,
+            code: 'attachment_unavailable',
+            message: error instanceof Error ? error.message : 'Qwen: изображение недоступно.',
+          };
+        }
+
+        if (!usable()) {
+          return {
+            ok: false,
+            code: 'turn_changed',
+            message: 'Активный ход Qwen завершился.',
+          };
+        }
+
+        const followUp = request('session/prompt', {
+          sessionId,
+          prompt: qwenPromptContent(text, content),
+          messageId: randomUUID(),
+        }, 24 * 60 * 60 * 1000);
+
+        followUps.push(followUp.then((result) => {
+          finishPrompt(result);
+
+          return input.onInTurnReceipt?.({ messageId, state: 'consumed' });
+        }).catch(() => input.onInTurnReceipt?.({
+          messageId,
+          state: 'unknown',
+          error: 'Qwen не подтвердил завершение уточнения.',
+        })).then(() => {}));
+
+        return { ok: true, state: 'forwarded' };
+      },
+      close() {
+        acceptFollowUps = false;
+      },
+    });
+    publishInTurnAvailability();
+    finishPrompt(await primary);
+
+    for (const followUp of followUps) {
+      await followUp;
+    }
 
     active = false;
-    inTurn.close();
-
     input.signal?.throwIfAborted();
-
-    if (result.stopReason === 'cancelled') {
-      throw Object.assign(new Error('Qwen: ход отменён'), { stopped: true });
-    }
-
-    if (result.stopReason !== 'end_turn') {
-      throw new Error(`Qwen: ход завершён без ответа (${String(result.stopReason)})`);
-    }
-
-    emitSteps(streamSteps.flush());
 
     return {
       reply: input.onAssistantMessage ? lastResponse || reply : reply,
@@ -501,6 +521,10 @@ async function runQwenSession(
       ...(actualModel ? { actualModel } : {}),
     };
   } catch (error) {
+    if (transport.workMcpUnavailable?.() && !input.signal?.aborted) {
+      throw new Error(WORK_MCP_UNAVAILABLE);
+    }
+
     const details = error instanceof AcpRpcError ? record(error.data).details : undefined;
     const reason = error instanceof AcpRpcError && typeof details === 'string'
       ? `${error.message}: ${details}` : error;
@@ -518,7 +542,6 @@ async function runQwenSession(
     throw failure;
   } finally {
     active = false;
-    inTurn.close();
     input.onInTurnAvailability?.({ available: false, reason: 'not_ready' });
     emitSteps(streamSteps.flush());
 

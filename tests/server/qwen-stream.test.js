@@ -4,13 +4,12 @@ import test from 'node:test';
 import { createQwenTextSteps } from '../../server/src/lib/qwen/steps.ts';
 import { createQwenBackground } from '../../server/src/lib/qwen/background.ts';
 import { STEP_TEXT_LIMIT, STEP_THINK_LIMIT } from '../../server/src/lib/chat/streamSteps.ts';
-import { qwenAdapter, qwenFixture, rejectedTurn, runInput } from '../helpers/qwenFixture.mjs';
+import { rejectedTurn } from '../helpers/qwenFixture.mjs';
+import { runQwenPreviewStream } from '../helpers/qwenPreviewStream.mjs';
 
 const chunk = (kind, text) => ({ sessionUpdate: kind, content: { type: 'text', text } });
 
 test('Qwen: чередующиеся каналы не дробят ответ и размышление', async (t) => {
-  const fixture = await qwenFixture(t);
-  const adapter = await qwenAdapter({ runnable: true });
   const stream = [
     chunk('agent_thought_chunk', 'Проверяю '),
     chunk('agent_message_chunk', 'Компоненты настоя'),
@@ -22,12 +21,10 @@ test('Qwen: чередующиеся каналы не дробят ответ �
   const steps = [];
   const messages = [];
 
-  await fixture.fake({ stream });
-
-  const result = await adapter.run(runInput(fixture, 'shared-model(openai)', {
+  const result = await runQwenPreviewStream(t, stream, {
     onStep: (step) => steps.push(step),
     onAssistantMessage: (message) => messages.push(message),
-  }));
+  });
 
   const expected = [
     { k: 'think', text: 'Проверяю компоненты и импорты.' },
@@ -51,8 +48,6 @@ test('Qwen: чередующиеся каналы не дробят ответ �
 });
 
 test('Qwen: дельты собираются в смысловые блоки в живой и сохранённой ленте', async (t) => {
-  const fixture = await qwenFixture(t);
-  const adapter = await qwenAdapter({ runnable: true });
   const stream = [
     ...['Один', ' цельный', '\nблок', ' размышления.'].map((text) => chunk('agent_thought_chunk', text)),
     chunk('agent_message_chunk', ''),
@@ -73,12 +68,8 @@ test('Qwen: дельты собираются в смысловые блоки �
     ...['Полный', ' ответ.'].map((text) => chunk('agent_message_chunk', text)),
   ];
 
-  await fixture.fake({ stream });
-
   const live = [];
-  const result = await adapter.run(runInput(fixture, 'shared-model(openai)', {
-    onStep: (step) => live.push(step),
-  }));
+  const result = await runQwenPreviewStream(t, stream, { onStep: (step) => live.push(step) });
 
   assert.equal(result.reply, 'Полный ответ.');
   assert.deepEqual(live, result.steps);
@@ -91,18 +82,12 @@ test('Qwen: дельты собираются в смысловые блоки �
 });
 
 test('Qwen: ошибка потока выпускает накопленный хвост ровно один раз', async (t) => {
-  const fixture = await qwenFixture(t);
-  const adapter = await qwenAdapter({ runnable: true });
 
-  await fixture.fake({
-    stream: [chunk('agent_thought_chunk', 'Сохранённый '), chunk('agent_thought_chunk', 'хвост.')],
-    streamError: true,
-  });
-
+  const stream = [chunk('agent_thought_chunk', 'Сохранённый '), chunk('agent_thought_chunk', 'хвост.')];
   const live = [];
-  const reason = await rejectedTurn(() => adapter.run(runInput(fixture, 'shared-model(openai)', {
+  const reason = await rejectedTurn(() => runQwenPreviewStream(t, stream, {
     onStep: (step) => live.push(step),
-  })));
+  }, new Error('synthetic stream failure')));
 
   assert.match(reason, /synthetic stream failure/);
 

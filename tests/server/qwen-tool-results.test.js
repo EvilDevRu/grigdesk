@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { createQwenBackground } from '../../server/src/lib/qwen/background.ts';
-import { qwenAdapter, qwenFixture, runInput } from '../helpers/qwenFixture.mjs';
+import { runQwenPreviewStream } from '../helpers/qwenPreviewStream.mjs';
 
 const lspFailure = 'LSP document symbols failed: language server unavailable';
 const cases = [
@@ -80,11 +80,7 @@ async function collectResult(t, entry, background) {
 
     await collector.finish('end_turn');
   } else {
-    const fixture = await qwenFixture(t);
-    const adapter = await qwenAdapter({ runnable: true });
-
-    await fixture.fake({ stream });
-    result = await adapter.run(runInput(fixture, 'shared-model(openai)'));
+    result = await runQwenPreviewStream(t, stream);
   }
 
   return result.steps.filter((step) => step.k === 'res');

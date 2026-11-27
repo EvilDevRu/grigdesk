@@ -2,64 +2,33 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { qwenEffortOption } from '../../server/src/lib/qwen/modelMetadata.ts';
-import { qwenAdapter, qwenFixture, rejectedTurn, runInput } from '../helpers/qwenFixture.mjs';
+import { qwenAdapter, runInput } from '../helpers/qwenFixture.mjs';
+import { qwenNativeFixture } from '../helpers/qwenNativeFixture.mjs';
 
-/**
- * Разные маршруты возвращают разные ступени и native-окно, включая неизвестное имя уровня.
- * Каталог и запуск используют один протокол, без переноса возможностей соседней модели.
- */
-test('Qwen: каталог читает усилие каждой модели и подтверждённое CLI окно', async (t) => {
-  const fixture = await qwenFixture(t);
+test('Qwen Preview.2: каталог сохраняет окно маршрута и не обещает неизвестное усилие', async (t) => {
+  const fixture = await qwenNativeFixture(t);
   const adapter = await qwenAdapter({ runnable: true });
-  const first = 'shared-model(openai)';
-  const second = 'shared-model(anthropic)';
-  const metadata = {
-    [first]: {
-      context: 96000,
-      efforts: ['none', 'low', 'medium', 'xhigh'],
-      defaultEffort: 'medium',
-    },
-    [second]: {
-      context: 48000,
-      efforts: ['none', 'default', 'future-tier'],
-      defaultEffort: 'default',
-    },
-  };
+  const primary = fixture.settings.modelProviders.openai[0];
 
-  await fixture.fake({ metadata });
+  primary.generationConfig.contextWindowSize = 96000;
+  fixture.settings.modelProviders.openai.push({
+    ...primary,
+    id: 'secondary',
+    name: 'Вторая модель',
+    generationConfig: { ...primary.generationConfig, contextWindowSize: 48000 },
+  });
+  await fixture.writeSettings(fixture.settings);
 
   const models = await adapter.catalog(fixture.config);
+  const first = models.find((model) => model.id === 'shared-model(openai)');
+  const second = models.find((model) => model.id === 'secondary(openai)');
 
-  assert.deepEqual(models.find((model) => model.id === first).efforts, metadata[first].efforts);
-  assert.deepEqual(models.find((model) => model.id === second).efforts, metadata[second].efforts);
-  assert.equal(models.find((model) => model.id === first).context, 96000);
-  assert.equal(models.find((model) => model.id === second).context, 48000);
-  assert.ok(models.every((model) => !model.contextUnverified));
-
-  const result = await adapter.run(runInput(fixture, first, { effort: 'xhigh' }));
-
-  assert.equal(result.reply, 'Новый ответ');
-
-  const frames = (await fixture.records()).filter((entry) => entry.frame?.method).map((entry) => entry.frame);
-  const effortIndex = frames.findLastIndex((frame) => frame.method === 'session/set_config_option'
-    && frame.params.configId === 'reasoning_effort' && frame.params.value === 'xhigh');
-  const promptIndex = frames.findLastIndex((frame) => frame.method === 'session/prompt');
-
-  assert.ok(effortIndex >= 0 && effortIndex < promptIndex, 'Усилие подтверждается до запроса к модели');
-
-  const rejected = await rejectedTurn(() => adapter.run(runInput(fixture, second, { effort: 'xhigh' })));
-
-  assert.match(rejected, /усилие недоступно/);
-  assert.equal((await fixture.records()).filter((entry) =>
-    entry.frame?.method === 'session/prompt').length, 1, 'Чужой уровень не отправляет prompt');
-
-  await fixture.fake({ metadata, unconfirmedEffort: true });
-
-  const refused = await rejectedTurn(() => adapter.run(runInput(fixture, first, { effort: 'xhigh' })));
-
-  assert.match(refused, /не подтвердил выбранное усилие/);
-  assert.equal((await fixture.records()).filter((entry) =>
-    entry.frame?.method === 'session/prompt').length, 1, 'Неподтверждённое усилие не отправляет prompt');
+  assert.equal(first.context, 96000);
+  assert.equal(second.context, 48000);
+  assert.deepEqual(first.efforts, []);
+  assert.deepEqual(second.efforts, []);
+  await assert.rejects(adapter.run(runInput(fixture, second.id, { effort: 'xhigh' })), /усилие недоступно/);
+  assert.equal(fixture.requests.length, 0);
 });
 
 test('Qwen: группы ACP, default для переключения thinking и отсутствие capability', () => {

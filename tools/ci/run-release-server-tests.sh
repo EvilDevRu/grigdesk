@@ -8,8 +8,9 @@ if (( available_kib < 16777216 )); then
 fi
 
 export SHELL=/bin/bash
-export GRIGDESK_QWEN_BIN="$PWD/tests/fixtures/qwen-cli/node_modules/@qwen-code/qwen-code/cli-entry.js"
-test -r "$GRIGDESK_QWEN_BIN"
+export GRIGDESK_QWEN_BIN="$PWD/server/node_modules/.grigdesk-test/qwen-code/1.0.0-preview.2/qwen"
+export GRIGDESK_QWEN_PREVIEW_TEST=1
+test -x "$GRIGDESK_QWEN_BIN"
 
 # Qwen Host привязывает свои временные units к отдельному владельцу тестов.
 # Общий набор сохраняет свой адрес D-Bus, адрес host-manager получает только фикстура Qwen.

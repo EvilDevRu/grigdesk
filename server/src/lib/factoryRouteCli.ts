@@ -39,6 +39,7 @@ import {
   buildFactoryExternalCliDescriptor, factoryExternalCliDescriptorPath,
 } from './providerInstall/factoryExternalCli.ts';
 import { nodeExecutable, runtimeKind } from './runtimePaths.ts';
+import { qwenBin } from './qwen/settings.ts';
 import { accessService, type AccessProfileService } from './accessProfiles/service.ts';
 
 /**
@@ -518,7 +519,7 @@ export function routeLaunchEnv(
     ...(config.deepseekRuntimeHome
       ? { GRIGDESK_DEEPSEEK_RUNTIME_HOME: config.deepseekRuntimeHome }
       : {}),
-    GRIGDESK_QWEN_BIN: config.qwenBin || process.env.GRIGDESK_QWEN_BIN || 'qwen',
+    GRIGDESK_QWEN_BIN: qwenBin(config),
     GRIGDESK_QWEN_HOME: config.qwenHome || process.env.GRIGDESK_QWEN_HOME || process.env.QWEN_HOME || '',
     GRIGDESK_QWEN_CONFIG_ROOT: root,
     GRIGDESK_QWEN_SERVICE: process.env.GRIGDESK_QWEN_SERVICE || '',

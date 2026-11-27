@@ -1,7 +1,6 @@
 import { promises as fs } from 'node:fs';
 
 import qwen from '../src/lib/executors/qwen.ts';
-import { externalCliAdapter } from '../src/lib/providerInstall/externalCliAdapter.ts';
 import { createQwenFactoryStatus } from '../src/lib/qwen/factoryStatus.ts';
 import { resolveQwenSnapshot } from '../src/lib/qwen/discovery.ts';
 import { record } from '../src/lib/qwen/transport.ts';
@@ -34,14 +33,13 @@ function runnerConfig(bin: string, env: NodeJS.ProcessEnv) {
 
 /**
  * Один metadata-only путь обслуживает models.tsv и варианты запуска раннера.
- * CLI подтверждает ids без prompt; чатовый models.json не читается и не пишется.
+ * Preview.2 подтверждает текущий маршрут без prompt и обращения к чатовой базе моделей.
  */
 async function metadata(argv: readonly string[], env: NodeJS.ProcessEnv): Promise<void> {
   const { required } = parseRunnerArguments(argv, LABEL, ['--metadata', '--bin']);
   const mode = required('--metadata');
   const config = runnerConfig(required('--bin'), env);
-  const adapter = externalCliAdapter(qwen, env);
-  const discovered = await adapter.catalog!(config);
+  const discovered = await qwen.catalog!(config);
   const entries = Array.isArray(discovered) ? discovered.map(record) : [];
 
   if (!entries?.length) {
@@ -123,8 +121,7 @@ export async function runQwenFactory(argv = process.argv.slice(2), env = process
   const status = await createQwenFactoryStatus(env);
 
   try {
-    const adapter = externalCliAdapter(qwen, env);
-    const result = await adapter.run!({
+    const result = await qwen.run!({
       config,
       message: prompt,
       model,

@@ -267,6 +267,7 @@
                        отказа вендора, кнопка гаснет и называет время: клик всё равно
                        вернул бы прошлый снимок, и молчащая кнопка честнее мёртвой. -->
                   <UiIconButton
+                    v-if="!p.usagePresentation?.subscriptionQuotaUnavailable"
                     data-context="topbar-popover-refresh"
                     role="embedded"
                     :label="t('core.checkLimitsNow')"
@@ -305,7 +306,8 @@
                   >{{ updateNoteOf(p)!.text }}</span>
                   <!-- Беда лимитов — СВЕРХУ и со ссылкой на состояние вендора: снизу её
                        читали уже после того, как начинали гадать о причине сбоя. -->
-                  <span v-if="usageOf(p)!.message" class="pu-state" :class="`is-${usageOf(p)!.tone}`">
+                  <span v-if="usageOf(p).message && !p.usagePresentation?.subscriptionQuotaUnavailable"
+                    class="pu-state" :class="`is-${usageOf(p).tone}`">
                     <span>{{ usageOf(p)!.message }}</span>
                     <!-- Срок паузы — рядом с отказом: «временно ограничил» без «до когда»
                          оставляло человека гадать, ждать минуту или час. -->
@@ -329,7 +331,8 @@
                     </UiButton>
                   </span>
                   <ProviderUsageTransportNotice :provider-id="p.id" />
-                  <span v-if="prov.usageAutoRefresh === false" class="pu-reset">
+                  <span v-if="prov.usageAutoRefresh === false && !p.usagePresentation?.subscriptionQuotaUnavailable"
+                    class="pu-reset">
                     {{ t('core.usageAutoRefreshOff') }}
                   </span>
                   <span v-if="usageOf(p)!.stale" class="pu-reset">{{ t('core.limitDataIsStale') }}</span>
@@ -345,6 +348,18 @@
                   </span>
                   <!-- Потребление лимитов подписки — как /usage в CLI -->
                   <span class="pu">
+                    <span v-if="p.usagePresentation?.subscriptionQuotaUnavailable" class="pu-row"
+                      aria-disabled="true" data-testid="provider-quota-unavailable">
+                      <span class="pu-head">
+                        <span>{{ t('core.providerSubscriptionQuota') }}</span>
+                        <span>{{ t('core.providerSubscriptionQuotaUnavailable') }}</span>
+                      </span>
+                      <span class="pu-bar" aria-hidden="true" />
+                    </span>
+                    <span v-if="prov.usage[p.id]?.lastTurnTokens" class="pu-reset"
+                      data-testid="provider-last-turn-tokens">
+                      {{ turnTokenLabel(p) }}
+                    </span>
                     <span
                       v-for="b in usageOf(p)!.bars"
                       :key="b.key"
@@ -468,7 +483,7 @@ import PluginIcon from '../PluginIcon.vue';
 
 import { selectTopbarTimerTasks } from '../boardTimerTasks.ts';
 import { boardSupportsTimer } from '../trackerCapabilities.ts';
-import { formatDate, intlLocale } from '../../../../shared/i18n/formats.ts';
+import { formatDate, formatNumber, intlLocale } from '../../../../shared/i18n/formats.ts';
 import { countryFlag } from '../countryFlag.ts';
 import { uiLocale } from '../../ui.ts';
 
@@ -674,6 +689,15 @@ const usageOf = (p: TopbarProvider) => providerUsageView(prov.usage[p.id], p, ui
   deliveryStale: prov.usageTransport.deliveryStale,
   manualOnly: prov.usageAutoRefresh === false,
 });
+
+function turnTokenLabel(provider: TopbarProvider): string {
+  const tokens = prov.usage[provider.id]?.lastTurnTokens;
+
+  return tokens ? t('core.providerLastTurnTokens', {
+    input: formatNumber(tokens.inputTokens, uiLocale),
+    output: formatNumber(tokens.outputTokens, uiLocale),
+  }) : '';
+}
 // Пауза после «стучитесь реже»: сервер кладёт её срок в retryAt снимка. Пока она идёт,
 // принудительная проверка вернёт прошлый снимок — кнопка гаснет и называет время. Формат
 // тот же, что у сброса полосы: «сегодня 03:45», и в прошлом он пуст — пауза снята.
@@ -738,7 +762,7 @@ function showProviderInstallation(id: string, close: () => void): void {
 function installResultNeedsAttention(p: TopbarProvider): boolean {
   const result = installation.snapshot.recent[p.id];
 
-  if (!result || installation.snapshot.active?.providerId === p.id) {
+  if (p.distribution?.managed === true || !result || installation.snapshot.active?.providerId === p.id) {
     return false;
   }
 
@@ -749,12 +773,12 @@ function installResultNeedsAttention(p: TopbarProvider): boolean {
 function canUpdateCli(p: TopbarProvider) {
   return providerCliActions(p).canUpdate && (p.updateAvailable || prov.updating === p.id);
 }
-// Всплывашка показывает только ошибки установки, независимо от смены версии.
-// Успешные итоги, включая готовность терминала, остаются в окне установки и настройках.
+// Всплывашка показывает ошибки внешней установки у исполнителей с этим способом доставки.
+// Успешные итоги внешней установки доступны в её окне и настройках.
 function updateNoteOf(p: TopbarProvider) {
   const result = prov.updateResults[p.id];
 
-  return result?.type === 'err' ? result : null;
+  return p.distribution?.managed !== true && result?.type === 'err' ? result : null;
 }
 // Куда смотреть при сбое вендора. Домен объявляет адаптер исполнителя, поэтому
 // всплывашка не знает ни одного вендорского адреса.

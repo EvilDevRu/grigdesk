@@ -17,6 +17,7 @@ import type {} from '@fastify/multipart';
 import type {} from '@fastify/websocket';
 
 import type { ProviderUsagePatch } from './providerUsage.ts';
+import type { ProviderTurnTokens } from '../../../shared/chat/providersContracts.ts';
 import type { ShutdownCoordinator } from './shutdown.ts';
 import type { ProjectsService } from '../modules/projects/service.ts';
 import type { PluginDocsEntry } from './pluginDocs.ts';
@@ -65,6 +66,7 @@ declare module 'fastify' {
     syncProvidersUsagePolicy?(enabled: boolean, revision: number): void;
     // Обработчик живёт вместе с процессом и принимает только поколение своего аккаунта.
     providerUsageSink?(providerId: string): (patch: ProviderUsagePatch) => boolean;
+    recordProviderTurnTokens?(providerId: string, tokens: ProviderTurnTokens): void;
     // Обслуживание внешнего CLI сохраняет паузу аккаунта и отвергает старые callbacks.
     invalidateProviderRuntime?(providerId: string, options?: { removed?: boolean }): Promise<boolean>;
     factoryArbitrate?(

@@ -7,8 +7,36 @@ import type { ProviderInstallationMetadata } from './providerInstallContracts.ts
 // в проекте быть не должно.
 
 import { contractDecoders } from '../lib/contractDecoders.ts';
+import { isRecord } from '../lib/objects.ts';
 import type { InTurnCapability } from './chatInTurnContracts.ts';
 import type { JsonValue } from './providerSettingsContracts.ts';
+
+export interface ProviderTurnTokens {
+  inputTokens: number;
+  outputTokens: number;
+}
+
+export interface ProviderUsagePresentation {
+  freshness: boolean;
+  spentLabel: boolean;
+  subscriptionQuotaUnavailable?: boolean;
+}
+
+/**
+ * Учитывает только измеренный непустой расход запроса. CLI может вернуть
+ * пару нулей в ответе локальной команды, где обращения к модели не было.
+ */
+export function isProviderTurnTokens(value: unknown): value is ProviderTurnTokens {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  const { inputTokens, outputTokens } = value;
+
+  return typeof inputTokens === 'number' && typeof outputTokens === 'number'
+    && Number.isSafeInteger(inputTokens) && Number.isSafeInteger(outputTokens)
+    && inputTokens >= 0 && outputTokens >= 0 && (inputTokens > 0 || outputTokens > 0);
+}
 
 export interface ProviderSettingEntry {
   id: string;
@@ -82,7 +110,7 @@ export interface ProviderEntry {
   permissionModeSelectionPolicy?: 'preserve-explicit';
   permissionModesRequiringExplicitSelection?: readonly string[];
   installation?: ProviderInstallationMetadata;
-  usagePresentation?: { freshness: boolean; spentLabel: boolean };
+  usagePresentation?: ProviderUsagePresentation;
   sessionBinding?: boolean;
   commands?: Array<{
     cmd: string;
@@ -122,7 +150,9 @@ export interface ProviderEntry {
   install?: string;
   distribution?: {
     label?: string;
+    managed?: boolean;
     ready: boolean;
+    canInstall?: boolean;
     authHint?: string;
     problem?: { message: string; command?: string };
   };

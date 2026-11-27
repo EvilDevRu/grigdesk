@@ -10,8 +10,8 @@ import { QWEN_KEY, qwenAdapter, qwenFixture } from '../helpers/qwenFixture.mjs';
  * Удаление исходного settings повторяет чистую установку, а не подготовленный конфиг.
  * Каждый запрос каталога подменён; реальные ключи и внешние сервисы не используются.
  */
-async function cleanInstall(t) {
-  const fixture = await qwenFixture(t, { settings: {} });
+async function cleanInstall(t, native = false) {
+  const fixture = await qwenFixture(t, { native, settings: {} });
 
   await rm(fixture.file);
   delete process.env.GRIGDESK_QWEN_SERVICE;
@@ -19,8 +19,8 @@ async function cleanInstall(t) {
   return fixture;
 }
 
-test('qwen-clean-install-and-reinstall-discover-live-models-without-source-settings', async (t) => {
-  const fixture = await cleanInstall(t);
+test('qwen-clean-install-discovers-and-refreshes-live-models-without-source-settings', async (t) => {
+  const fixture = await cleanInstall(t, true);
   const adapter = await qwenAdapter();
   const requests = [];
   const data = [{
@@ -51,14 +51,12 @@ test('qwen-clean-install-and-reinstall-discover-live-models-without-source-setti
   assert.equal(JSON.stringify(snapshot).includes('ignored-inline-key'), false);
   assert.equal(adapter.auth(fixture.config).available, true);
 
-  await rm(fixture.bin);
-  await fixture.fake({ version: '0.27.3' });
   data.push({ id: 'appeared-after-install' });
 
-  const afterReinstall = await adapter.catalog(fixture.config, { fetch });
+  const refreshed = await adapter.catalog(fixture.config, { fetch });
 
   assert.equal((await adapter.probe(fixture.config)).ok, true);
-  assert.deepEqual(afterReinstall.map((entry) => entry.id),
+  assert.deepEqual(refreshed.map((entry) => entry.id),
     ['new-coder(openai)', 'appeared-after-install(openai)']);
   assert.equal(requests.length, 2, 'Обновление каталога не застревает в прежней копии');
   await assert.rejects(access(fixture.file), { code: 'ENOENT' });
@@ -101,7 +99,7 @@ test('qwen-service-and-key-isolate-discovery-and-auth-requires-secret', async (t
  * Полный ответ API проходит native-подтверждение без общего семейства для разных моделей.
  */
 test('qwencloud-token-plan-preserves-qwen4-and-full-live-model-list', async (t) => {
-  const fixture = await cleanInstall(t);
+  const fixture = await cleanInstall(t, true);
   const adapter = await qwenAdapter();
   const ids = ['qwen4-max-preview', 'qwen3.8-max', 'qwen3.8-flash', 'qwen3.7-plus', 'auto'];
   const urls = [];
@@ -203,7 +201,7 @@ test('qwen-discovery-preserves-existing-provider-config-and-does-not-commit-stal
 });
 
 test('qwen-discovery-marks-nonchat-and-captures-created-without-leaking-into-cli-settings', async (t) => {
-  const fixture = await cleanInstall(t);
+  const fixture = await cleanInstall(t, true);
   const adapter = await qwenAdapter();
   const data = [
     { id: 'qwen3.8-max', created: 1760000000 },

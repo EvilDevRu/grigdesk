@@ -4,10 +4,11 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import { qwenAdapter, qwenFixture, runInput } from '../helpers/qwenFixture.mjs';
+import { qwenAdapter, runInput } from '../helpers/qwenFixture.mjs';
+import { qwenNativeFixture } from '../helpers/qwenNativeFixture.mjs';
 
 test('Qwen: дополнительные корни проходят адаптер и доступны инструментам', async (t) => {
-  const fixture = await qwenFixture(t);
+  const fixture = await qwenNativeFixture(t);
   const adapter = await qwenAdapter({ runnable: true });
   const sibling = path.join(fixture.root, 'second');
   const alias = path.join(fixture.root, 'second-link');
@@ -24,68 +25,29 @@ test('Qwen: дополнительные корни проходят адапт�
 
   assert.equal(validation.error, undefined);
   assert.deepEqual(validation.extraDirs, [sibling]);
-  await fixture.fake({
-    effect,
-    tool: { name: 'write_file', args: { file_path: effect, content: 'effect' } },
-  });
+  fixture.actions.push({ name: 'Write', args: { file_path: effect, content: 'effect' } });
 
   const result = await adapter.run(runInput(fixture, 'shared-model(openai)', {
     extraDirs: [alias, sibling],
     permissionMode: 'yolo',
   }));
 
-  assert.equal(result.reply, 'Новый ответ');
+  assert.match(result.reply, /Ответ настоящего CLI/);
   assert.equal(await readFile(effect, 'utf8'), 'effect');
 });
 
-test('Qwen: Авто передаётся CLI как отдельный режим', async (t) => {
-  const fixture = await qwenFixture(t);
+test('Qwen: неизвестный режим отклоняется до обращения к модели', async (t) => {
+  const fixture = await qwenNativeFixture(t);
   const adapter = await qwenAdapter({ runnable: true });
 
-  await adapter.run(runInput(fixture, 'shared-model(openai)', { permissionMode: 'auto' }));
-
-  const selected = (await fixture.records()).find((entry) => entry.frame?.method === 'session/set_mode');
-
-  assert.equal(selected.frame.params.modeId, 'auto');
-});
-
-test('Qwen: неизвестный native-режим отклоняется до prompt', async (t) => {
-  const fixture = await qwenFixture(t);
-  const adapter = await qwenAdapter({ runnable: true });
-
-  await fixture.fake({ modes: ['default', 'plan', 'yolo'] });
   await assert.rejects(adapter.run(runInput(fixture, 'shared-model(openai)', {
-    permissionMode: 'auto',
-  })), /режим прав недоступен/);
-  assert.equal((await fixture.records()).some((entry) => entry.frame?.method === 'session/prompt'), false);
-});
-
-test('Qwen: native fallback Авто явно требует человека', async (t) => {
-  const fixture = await qwenFixture(t);
-  const adapter = await qwenAdapter({ runnable: true });
-  let questions = 0;
-
-  await fixture.fake({
-    ask: true,
-    askDeniedContinues: true,
-    tool: { name: 'run_shell_command', args: { command: 'printf synthetic' } },
-  });
-  await adapter.run(runInput(fixture, 'shared-model(openai)', {
-    permissionMode: 'auto',
-    onPermission: async (question) => {
-      questions += 1;
-      assert.equal(question.requiresExplicitUser, true);
-
-      return { allow: false };
-    },
-  }));
-
-  assert.equal(questions, 1);
-  assert.equal((await fixture.records()).some((entry) => entry.event === 'guard'), false);
+    permissionMode: 'unknown',
+  })), /неизвестный режим прав/);
+  assert.equal(fixture.requests.length, 0);
 });
 
 test('Qwen: память привязана к набору корней, порядок и ссылки сохраняют resume', async (t) => {
-  const fixture = await qwenFixture(t);
+  const fixture = await qwenNativeFixture(t);
   const adapter = await qwenAdapter({ runnable: true });
   const second = path.join(fixture.root, 'second');
   const third = path.join(fixture.root, 'third');
@@ -95,25 +57,28 @@ test('Qwen: память привязана к набору корней, пор
   await mkdir(third);
   await symlink(second, alias);
 
-  const first = await adapter.run(runInput(fixture, 'shared-model(openai)', { extraDirs: [second, third] }));
+  const first = await adapter.run(runInput(fixture, 'shared-model(openai)', {
+    message: 'Первая реплика для проверки повторного входа.',
+    extraDirs: [second, third],
+  }));
   const resumed = await adapter.run(runInput(fixture, 'shared-model(openai)', {
     extraDirs: [third, alias, second],
     sessionId: first.sessionId,
   }));
+  const requestsBeforeDenial = fixture.requests.length;
 
   assert.equal(resumed.sessionId, first.sessionId);
+  assert.ok(requestsBeforeDenial >= 2);
   await assert.rejects(adapter.run(runInput(fixture, 'shared-model(openai)', {
     extraDirs: [second],
     sessionId: first.sessionId,
   })), /identity сессии/);
 
-  const prompts = (await fixture.records()).filter((entry) => entry.frame?.method === 'session/prompt');
-
-  assert.equal(prompts.length, 2);
+  assert.equal(fixture.requests.length, requestsBeforeDenial);
 });
 
 test('Qwen: второй корень скрывает свои .env и .qwen, третья папка остаётся закрытой', async (t) => {
-  const fixture = await qwenFixture(t);
+  const fixture = await qwenNativeFixture(t);
   const adapter = await qwenAdapter({ runnable: true });
   const second = path.join(fixture.root, 'second');
   const third = path.join(fixture.root, 'third');
@@ -121,6 +86,7 @@ test('Qwen: второй корень скрывает свои .env и .qwen, �
   const env = path.join(second, '.env');
   const settings = path.join(second, '.qwen/settings.json');
   const forbidden = path.join(third, 'forbidden');
+  const report = path.join(second, 'visible-env');
 
   await mkdir(second);
   await mkdir(third);
@@ -129,24 +95,17 @@ test('Qwen: второй корень скрывает свои .env и .qwen, �
   await mkdir(path.dirname(settings));
   await writeFile(settings, '{"private":"PRIVATE_SECOND_SETTINGS"}');
   await symlink(third, path.join(second, 'escape'));
-  await fixture.fake({
-    readMasks: [env, settings],
-    bounds: { allowed: [path.join(second, 'shell-write')], denied: [forbidden] },
-    effect: forbidden,
-    tool: { name: 'write_file', args: { file_path: path.join(second, 'escape/forbidden'), content: 'BAD' } },
-  });
+  fixture.actions.push(
+    { name: 'Bash', args: { command: `test ! -e '${settings}' && cat '${env}' > '${report}'` } },
+    { name: 'Write', args: { file_path: path.join(second, 'escape/forbidden'), content: 'BAD' } },
+  );
   await adapter.run(runInput(fixture, 'shared-model(openai)', {
     extraDirs: [second],
     permissionMode: 'yolo',
   }));
 
-  const records = await fixture.records();
-  const masks = records.filter((entry) => entry.event === 'mask');
-
-  assert.equal(masks[0].text, '{}');
-  assert.equal(masks[1].code, 'ENOENT');
-  assert.ok(records.some((entry) => entry.event === 'bounds' && entry.denied === true));
-  assert.equal(records.find((entry) => entry.event === 'guard').allowed, false);
+  assert.equal(await readFile(report, 'utf8'), '{}');
+  assert.equal(fixture.actions.length, 0);
   assert.equal(await readFile(secret, 'utf8'), 'PRIVATE_SECOND_ENV');
   assert.match(await readFile(settings, 'utf8'), /PRIVATE_SECOND_SETTINGS/);
   assert.equal((await lstat(env)).isSymbolicLink(), true);
@@ -154,7 +113,7 @@ test('Qwen: второй корень скрывает свои .env и .qwen, �
 });
 
 test('Qwen: домашняя папка допустима главным cwd, дополнительным корнем остаётся запрещённой', async (t) => {
-  const fixture = await qwenFixture(t);
+  const fixture = await qwenNativeFixture(t);
   const adapter = await qwenAdapter({ runnable: true });
   const home = await realpath(os.homedir());
 
@@ -174,9 +133,8 @@ test('Qwen: домашняя папка допустима главным cwd, �
 });
 
 test('Qwen: недопустимый дополнительный путь не запускает CLI', async (t) => {
-  const fixture = await qwenFixture(t);
+  const fixture = await qwenNativeFixture(t);
   const adapter = await qwenAdapter({ runnable: true });
-  const before = (await fixture.records()).length;
   const maskedRoot = path.join(fixture.workspace, '.qwen');
 
   await mkdir(maskedRoot);
@@ -185,5 +143,5 @@ test('Qwen: недопустимый дополнительный путь не 
     await assert.rejects(adapter.run(runInput(fixture, 'shared-model(openai)', { extraDirs: [directory] })));
   }
 
-  assert.equal((await fixture.records()).length, before);
+  assert.equal(fixture.requests.length, 0);
 });

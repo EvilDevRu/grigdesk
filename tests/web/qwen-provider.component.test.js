@@ -7,6 +7,7 @@ import { providerUsageView } from '../../web/src/features/providers/providerUsag
 import { messages, translate } from '../../shared/i18n/catalogs.ts';
 import data from './fixtures/settings-modal/data.json' with { type: 'json' };
 import { i18nComponent } from './helpers/i18nComponent.js';
+import { job, snapshot } from './helpers/providerInstallFixture.js';
 
 process.env.NODE_ENV = 'test';
 
@@ -146,6 +147,93 @@ test('qwen-quota-message-describes-integration-support-in-both-languages', () =>
   assert.equal(view.message, messages.en.settings.builtinProviderText.qwen.quotaUnsupported);
   assert.deepEqual(view.bars, []);
   assert.doesNotMatch(view.message, /CLI/);
+});
+
+test('Qwen: установить Preview.2 из карточки и повторить после сетевого отказа', async (t) => {
+  const entry = qwenEntry();
+  const installUrl = '/api/providers/qwen/install-distribution';
+  let attempts = 0;
+
+  entry.installed = false;
+  entry.version = '';
+  entry.distribution = {
+    label: 'Qwen Code 1.0 Preview.2',
+    managed: true,
+    canInstall: true,
+    ready: false,
+  };
+
+  const h = await i18nComponent(t, {
+    fetch: async (url) => {
+      if (String(url) === installUrl) {
+        attempts += 1;
+
+        if (attempts === 1) {
+          return new Response('{"error":"fixture refusal"}', { status: 502 });
+        }
+
+        entry.installed = true;
+        entry.version = '1.0.0-preview.2';
+        entry.distribution.ready = true;
+
+        return new Response('{"ok":true}');
+      }
+
+      return new Response(JSON.stringify(String(url).split('?')[0] === '/api/providers'
+        ? { providers: [entry] } : {}));
+    },
+  });
+  const providers = h.module.useProvidersStore(h.pinia);
+
+  providers.providers = [entry];
+  providers.loaded = true;
+  h.settings.setAuthenticated(true);
+  h.settings.requestOpen({
+    pageId: 'agents.providers',
+    entityId: 'qwen',
+    tabId: 'overview',
+  });
+
+  const page = h.mount(h.module.ProviderPage, {
+    attachTo: h.win.document.querySelector('#mount'),
+    props: { active: true },
+    global: { plugins: [h.pinia] },
+  });
+  const installButton = () => page.findAll('button').find((button) => button.text() === 'Установить');
+
+  t.after(() => page.unmount());
+  await h.flushPromises();
+  await installButton().trigger('click');
+  await h.flushPromises();
+  assert.match(page.text(), /Установка не завершилась/);
+  await installButton().trigger('click');
+  await h.flushPromises();
+  assert.equal(attempts, 2);
+  assert.match(page.text(), /1\.0\.0-preview\.2/);
+  assert.doesNotMatch(page.text(), /Установка не завершилась/);
+  assert.equal(installButton(), undefined);
+
+  const installation = h.pinia._s.get('provider-install');
+  const oldJob = job({
+    providerId: 'qwen',
+    status: 'succeeded',
+    outcome: 'updated',
+    before: '0.27.2',
+    after: '0.27.3',
+    finishedAt: 1_700_000_001_000,
+    terminal: {
+      status: 'ready',
+      reason: null,
+      binDirectory: '/fixture/bin',
+      shell: 'bash',
+    },
+  });
+
+  assert.equal(installation.applySnapshot(snapshot(null, 1, { qwen: oldJob })), true);
+  await h.flushPromises();
+  assert.equal(installation.snapshot.recent.qwen.after, '0.27.3');
+  assert.match(page.text(), /1\.0\.0-preview\.2/);
+  assert.doesNotMatch(page.text(), /0\.27\.[23]|Команда доступна в новом терминале/u);
 });
 
 test('Qwen Host: ручное подтверждение, Apply, отказ и повтор на английском', async (t) => {

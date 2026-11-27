@@ -1,13 +1,19 @@
 import { spawn, type ChildProcess } from 'node:child_process';
-import { randomUUID } from 'node:crypto';
+import { createHash } from 'node:crypto';
 import { constants, promises as fs } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 
-import { currentExternalCliProcess } from '../providerInstall/externalCliProcess.ts';
+import { dataHome } from '../../../../shared/runtime/dataHome.ts';
 import { acquireCliLease } from '../providerInstall/leases.ts';
 import { redactRunnerError } from '../factoryProviderRunner.ts';
-import { startQwenHost } from './host.ts';
-import { qwenConfig, type QwenSnapshot } from './settings.ts';
+import { startQwenHostScope } from './host.ts';
+import { qwenPreviewSettings } from './previewModels.ts';
+import { openQwenPreviewGateway } from './previewGateway.ts';
+import { verifyQwenPreviewBinary } from './previewRelease.ts';
+import { qwenPreviewNativeTools } from './previewPolicy.ts';
+import { qwenBin, qwenConfig, type QwenSnapshot } from './settings.ts';
+import { QWEN_SKILLS_MOUNT } from './skills.ts';
 
 export interface QwenMcpServer {
   name: string;
@@ -27,6 +33,7 @@ export interface QwenLaunchOptions {
   home: string;
   authType: string;
   mode: string;
+  nativeModelId?: string;
   readonlyRoots?: string[];
   skillDirectories?: string[];
   mcpServers?: QwenMcpServer[];
@@ -55,19 +62,13 @@ async function packageRoot(file: string): Promise<string> {
 }
 
 /**
- * Пустая файловая система даёт процессу выбранные writable корни и свой durable home.
- * Ambient settings, hooks и .env проекта перекрываются server-owned снимком до запуска CLI.
+ * Профиль и ELF защищены отдельными mounts в обоих режимах доступа.
+ * Песочница выдаёт выбранные корни, а «Хост» привязывает весь процесс к user scope.
  */
 export async function startQwenSandbox(
   configValue: unknown, snapshot: QwenSnapshot, options: QwenLaunchOptions,
 ) {
-  const config = qwenConfig(configValue);
-  const context = currentExternalCliProcess();
-
-  if (options.hostAccess) {
-    return startQwenHost(configValue, snapshot, options);
-  }
-
+  const host = options.hostAccess === true;
   const bwrap = process.env.GRIGDESK_QWEN_BWRAP_BIN || '/usr/bin/bwrap';
   const workspaceRoots = [options.cwd, ...options.extraDirs || []];
 
@@ -83,18 +84,15 @@ export async function startQwenSandbox(
     throw new Error('Qwen: недоступна обязательная песочница bwrap');
   }
 
-  if (!context) {
-    throw new Error('Qwen: не подготовлена выбранная копия CLI');
-  }
-
-  const lease = await acquireCliLease({
-    directory: context.leaseDirectory,
-    providerId: context.providerId,
-    resourceKey: context.resourceKey,
-    mode: 'reader',
-  });
+  const appConfig = qwenConfig(configValue);
+  const runtimeHome = appConfig.dataHome || dataHome({ env: process.env, home: os.homedir() });
+  let lease: Awaited<ReturnType<typeof acquireCliLease>> | undefined;
   let child: ChildProcess | undefined;
   let closed: Promise<void> | undefined;
+  let hostScope: Awaited<ReturnType<typeof startQwenHostScope>> | undefined;
+  let ownershipReleased = false;
+  let binary: Awaited<ReturnType<typeof verifyQwenPreviewBinary>> | undefined;
+  let gateway: Awaited<ReturnType<typeof openQwenPreviewGateway>> | undefined;
   let stderr = '';
   const placeholders: Array<{
     file: string;
@@ -106,6 +104,8 @@ export async function startQwenSandbox(
   // Пустые точки монтирования создаются эксклюзивно и удаляются только по своему inode.
   // Изменённый человеком или наполненный каталог никогда не удаляется рекурсивно.
   const cleanup = async () => {
+    await gateway?.close();
+
     for (const entry of placeholders) {
       const stat = await fs.lstat(entry.file).catch(() => null);
 
@@ -126,29 +126,57 @@ export async function startQwenSandbox(
   };
 
   try {
+    binary = await verifyQwenPreviewBinary(qwenBin(appConfig));
+    lease = await acquireCliLease({
+      directory: path.join(runtimeHome, 'provider-cli-leases'),
+      providerId: 'qwen',
+      resourceKey: createHash('sha256').update(binary.physical).digest('hex'),
+      mode: 'reader',
+    });
+
+    const reader = lease;
+
     await fs.mkdir(options.home, { recursive: true, mode: 0o700 });
     privateDir = await fs.mkdtemp(path.join(options.home, 'turn-'));
 
-    const qwenHome = path.join(options.home, '.qwen');
-    const safeSettings = path.join(privateDir, 'settings.json');
+    const config = path.join(privateDir, 'config');
     const empty = path.join(privateDir, 'empty');
     const temp = path.join(privateDir, 'tmp');
+    const projects = path.join(options.home, 'projects');
+    const configTarget = host ? config : '/tmp/qwen-config';
+    const tempTarget = host ? temp : '/tmp/qwen-tmp';
+    const binaryTarget = host ? path.join(config, 'qwen') : '/qwen';
+    const directories = [...options.extraDirs || [], ...options.readonlyRoots || []];
 
-    await fs.mkdir(qwenHome, { recursive: true, mode: 0o700 });
+    await fs.mkdir(config);
+    await fs.mkdir(path.join(config, 'skills'));
+    await fs.mkdir(projects, { recursive: true, mode: 0o700 });
     await fs.mkdir(empty);
     await fs.mkdir(temp);
 
-    const settings = {
-      ...snapshot.settings,
-      skills: { directories: options.skillDirectories || [] },
-      context: { includeDirectories: [...options.extraDirs || [], ...options.readonlyRoots || []] },
-    };
+    if (host) {
+      await fs.writeFile(binaryTarget, '', { mode: 0o400 });
+    }
 
-    await fs.writeFile(safeSettings, JSON.stringify(settings), { mode: 0o400 });
-    await fs.writeFile(path.join(privateDir, 'empty.json'), '{}', { mode: 0o400 });
-    await fs.writeFile(path.join(qwenHome, 'settings.json'), JSON.stringify(settings), {
-      mode: 0o600,
+    const requireWorkMcp = options.mcpServers?.some(({ name }) => name === 'grigdesk-work');
+
+    gateway = await openQwenPreviewGateway(snapshot, requireWorkMcp);
+
+    const settings = qwenPreviewSettings(snapshot, directories, gateway, options.nativeModelId);
+    const authority = { rules: [{ subject: { kind: 'tool', toolName: '*' }, behavior: 'ask' }] };
+
+    await fs.writeFile(path.join(config, 'settings.json'), JSON.stringify(settings), { mode: 0o400 });
+    await fs.writeFile(path.join(config, 'managed-settings.json'), JSON.stringify(authority), {
+      mode: 0o400,
     });
+    await fs.writeFile(path.join(privateDir, 'empty.json'), '{}', { mode: 0o400 });
+
+    const mutableDirs = ['projects', 'logs', 'memory', 'shell-snapshots', 'host-actions', 'todos', 'tasks'];
+
+    for (const directory of mutableDirs) {
+      await fs.mkdir(path.join(config, directory));
+      await fs.mkdir(path.join(temp, directory));
+    }
 
     for (const root of workspaceRoots) {
       for (const [name, directory] of [['.qwen', true], ['.env', false]] as const) {
@@ -174,11 +202,17 @@ export async function startQwenSandbox(
       }
     }
 
-    const bin = await fs.realpath(context.executable);
     const node = await fs.realpath(process.execPath);
-    const cliRoot = await packageRoot(bin);
-    const args = ['--die-with-parent', '--new-session', '--unshare-pid', '--unshare-ipc',
-      '--unshare-uts', '--proc', '/proc', '--dev', '/dev', '--tmpfs', '/tmp'];
+    const args = ['--die-with-parent', '--new-session'];
+
+    if (host) {
+      // У полного bind / устройства получают nodev. Bun требует /dev/urandom при старте.
+      args.push('--bind', '/', '/', '--dev', '/dev');
+    } else {
+      args.push('--unshare-pid', '--unshare-ipc', '--unshare-uts', '--proc', '/proc',
+        '--dev', '/dev', '--tmpfs', '/tmp');
+    }
+
     const mounted = new Map<string, boolean>();
     // Повторный mount может только сузить доступ: read-only сильнее прежнего writable.
     // Отсутствующие необязательные системные пути пропускаются до запуска.
@@ -199,21 +233,20 @@ export async function startQwenSandbox(
 
     // Системные alternatives и кэш загрузчика нужны зависимостям ffmpeg/ffprobe.
     // Монтируются публичные системные данные, а не весь /etc с настройками хоста.
-    for (const file of ['/usr', '/bin', '/lib', '/lib64', '/etc/ssl', '/etc/resolv.conf',
-      '/etc/hosts', '/etc/nsswitch.conf', '/etc/passwd', '/etc/group',
-      '/etc/alternatives', '/etc/ld.so.cache']) {
-      await bind(file);
+    if (!host) {
+      for (const file of ['/usr', '/bin', '/lib', '/lib64', '/etc/ssl', '/etc/resolv.conf',
+        '/etc/hosts', '/etc/nsswitch.conf', '/etc/passwd', '/etc/group',
+        '/etc/alternatives', '/etc/ld.so.cache']) {
+        await bind(file);
+      }
+
+      await bind(path.dirname(node));
+
+      for (const root of [...workspaceRoots].sort((left, right) => left.length - right.length)) {
+        await bind(root, root, true);
+      }
     }
 
-    await bind(path.dirname(node));
-    await bind(cliRoot);
-
-    for (const root of [...workspaceRoots].sort((left, right) => left.length - right.length)) {
-      await bind(root, root, true);
-    }
-
-    await bind(options.home, options.home, true);
-    await bind(privateDir);
     // Read-only ресурсы накладываются после writable workspace: общий каталог навыков
     // не становится изменяемым, даже когда выбранная рабочая папка содержит его родителя.
     for (const root of options.readonlyRoots || []) {
@@ -232,7 +265,7 @@ export async function startQwenSandbox(
         if (entry.isSymbolicLink()) {
           const target = path.resolve(path.dirname(file), await fs.readlink(file));
           const protectedRoots = [...workspaceRoots, options.home, privateDir, path.dirname(node),
-            cliRoot, '/usr', '/bin', '/lib', '/lib64', '/proc', '/dev'];
+            configTarget, tempTarget, '/qwen', '/usr', '/bin', '/lib', '/lib64', '/proc', '/dev'];
 
           if (target === path.parse(target).root
             || protectedRoots.some((directory) => directory === target
@@ -268,44 +301,64 @@ export async function startQwenSandbox(
 
     // Родители bind mounts тоже закрыты от записи: иначе можно создать ложный
     // соседний файл в пустом /tmp. Временные файлы CLI получают отдельный writable mount.
-    await bind(temp, '/tmp/qwen-tmp', true);
-    args.push('--remount-ro', '/', '--remount-ro', '/tmp');
+    if (!host) {
+      await bind(temp, tempTarget, true);
+    }
+
+    await bind(config, configTarget);
+
+    const [skillDirectory] = options.skillDirectories ?? [];
+
+    if (skillDirectory) {
+      await bind(skillDirectory, QWEN_SKILLS_MOUNT);
+    }
+
+    for (const directory of mutableDirs) {
+      const source = directory === 'projects' ? projects : path.join(temp, directory);
+
+      await bind(source, path.join(configTarget, directory), true);
+    }
+
+    // bwrap получает уже проверенный inode через дополнительный дескриптор.
+    // Повторная подстановка пути после расчёта SHA не меняет запущенную программу.
+    args.push('--ro-bind', '/proc/self/fd/3', binaryTarget);
+
+    if (!host) {
+      args.push('--remount-ro', '/', '--remount-ro', '/tmp');
+    }
 
     const env: NodeJS.ProcessEnv = {
       PATH: `${path.dirname(node)}:/usr/bin:/bin`,
-      HOME: options.home,
-      TMPDIR: '/tmp/qwen-tmp',
-      QWEN_HOME: qwenHome,
-      QWEN_CODE_SYSTEM_SETTINGS_PATH: safeSettings,
-      QWEN_CODE_SYSTEM_DEFAULTS_PATH: path.join(privateDir, 'empty.json'),
+      HOME: tempTarget,
+      TMPDIR: tempTarget,
       CI: '1',
       NO_COLOR: '1',
       LANG: 'C.UTF-8',
+      QWEN_EXPOSE_TOKEN_USAGE: '1',
+      ...(requireWorkMcp ? { QWEN_MCP_INIT_BUDGET_MS: '15000' } : {}),
     };
 
-    for (const key of snapshot.envKeys) {
-      if (process.env[key]) {
-        env[key] = process.env[key];
-      }
+    args.push('--chdir', options.cwd, '--', binaryTarget, '--acp', '--config-dir', configTarget,
+      '--setting-sources', 'user', '--permission-mode', 'default', '--strict-mcp-config',
+      '--disable-builtin-skills', '--tools', ...qwenPreviewNativeTools);
+
+    if (host) {
+      hostScope = await startQwenHostScope(bwrap, args, {
+        cwd: options.cwd,
+        env: {
+          ...env,
+          DBUS_SESSION_BUS_ADDRESS: process.env.DBUS_SESSION_BUS_ADDRESS,
+          XDG_RUNTIME_DIR: process.env.XDG_RUNTIME_DIR,
+        },
+        executableFd: binary.descriptor.fd,
+      });
     }
 
-    // Qwen должен передать модели полный набор рабочих инструментов уже в первом запросе.
-    if (options.mcpServers?.some((server) => server.name === 'grigdesk-work')) {
-      env.QWEN_CODE_LEGACY_MCP_BLOCKING = '1';
-    }
-
-    const nonce = randomUUID();
-
-    env.QWEN_CODE_PRIVATE_ACP_CAPABILITY = nonce;
-    env.QWEN_CODE_PRIVATE_EXTERNAL_TOOL_GUARD = 'required-v1';
-    env.QWEN_CODE_PRIVATE_EXTERNAL_TOOL_GUARD_PROVIDER = 'attached-v1';
-    args.push('--chdir', options.cwd, '--', node, bin, '--acp', '--auth-type', options.authType,
-      '--approval-mode', options.mode);
-    child = spawn(bwrap, args, {
+    child = hostScope?.child ?? spawn(bwrap, args, {
       cwd: options.cwd,
       env,
       detached: true,
-      stdio: ['pipe', 'pipe', 'pipe'],
+      stdio: ['pipe', 'pipe', 'pipe', binary.descriptor.fd],
     });
 
     const owned = child;
@@ -319,22 +372,16 @@ export async function startQwenSandbox(
       stderr = (stderr + part.toString()).slice(-8192);
     });
 
-    await new Promise<void>((resolve, reject) => {
-      owned.once('spawn', resolve);
-      owned.once('error', reject);
-    });
-    await lease.attachSession(owned.pid!);
-    await lease.attachChild(owned.pid!);
+    let closing: Promise<void> | undefined;
 
-    return {
-      child: owned,
-      nonce,
-      stderr: () => stderr,
-      /**
-       * Завершается только собственная группа; reader снимается после reaping.
-       * Уборка точек монтирования не затрагивает чужие файлы рабочей папки.
-       */
-      async close() {
+    /**
+     * В режиме «Хост» закрытие подтверждает systemd, в песочнице — собственный child.
+     * Файлы и аренда остаются до завершения всех выданных процессов.
+     */
+    async function terminate() {
+      if (hostScope) {
+        await hostScope.close();
+      } else {
         try {
           process.kill(-owned.pid!, 'SIGTERM');
         } catch {
@@ -351,18 +398,64 @@ export async function startQwenSandbox(
 
         await exited;
         clearTimeout(timer);
-        await lease.release();
-        await cleanup();
+      }
+
+      await reader.release();
+      await cleanup();
+    }
+
+    const resource = {
+      child: owned,
+      stderr: () => stderr || hostScope?.stderr() || '',
+      workMcpUnavailable: gateway.workMcpUnavailable,
+      /**
+       * Завершение своей OS-группы подтверждается до снятия reader.
+       * Ошибка закрытия сохраняет владельцу возможность повторить операцию.
+       */
+      close(): Promise<void> {
+        closing ??= terminate().catch((error) => {
+          closing = undefined;
+
+          throw error;
+        });
+
+        return closing;
       },
     };
+
+    options.onOwnedProcess?.(resource);
+    ownershipReleased = Boolean(options.onOwnedProcess);
+
+    await (hostScope?.ready ?? new Promise<void>((resolve, reject) => {
+      owned.once('spawn', resolve);
+      owned.once('error', reject);
+    }));
+    await binary.descriptor.close();
+    binary = undefined;
+    await reader.attachSession(owned.pid!);
+    await reader.attachChild(owned.pid!);
+
+    return resource;
   } catch (error) {
-    child?.kill('SIGKILL');
-    await closed;
-    await lease.release();
-    await cleanup();
+    await binary?.descriptor.close();
+
+    if (!ownershipReleased) {
+      if (hostScope) {
+        await hostScope.close();
+      } else {
+        child?.kill('SIGKILL');
+        await closed;
+      }
+
+      await lease?.release();
+      await cleanup();
+    }
 
     const reason = stderr ? `Qwen: не удалось запустить песочницу. ${stderr.trim()}` : error;
+    const message = redactRunnerError(reason, snapshot.envKeys.map((key) => process.env[key]));
 
-    throw new Error(redactRunnerError(reason, snapshot.envKeys.map((key) => process.env[key])));
+    throw Object.assign(new Error(message), {
+      code: (error as NodeJS.ErrnoException).code,
+    });
   }
 }

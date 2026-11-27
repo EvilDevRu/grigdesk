@@ -1,28 +1,28 @@
 # Connecting Qwen Code
 
-Qwen Code uses an external npm CLI and an API key for the selected model service.
-Chats require a Linux server with a working bwrap sandbox. The CLI needs Node.js 22 or newer
-and local headers for the selected Node during installation; missing headers cause refusal before installation.
+GrigDesk runs Qwen Code 1.0 Preview.2 on Linux x64 in a bwrap sandbox. You can install it
+from the executor card. GrigDesk downloads the official archive and verifies it before
+installing it in the application data directory.
 
 ## Prepare access and models
 
-1. Open Settings → Executors → Qwen Code and install the CLI using its button.
-   Updating and version checks are on the same page.
+1. Open Settings → Executors → Qwen Code → Overview and click Install. If Preview.2 is
+   already ready, continue to step 2. The card shows the version after installation.
+   If the download fails, click Install again.
 2. On Access, select the API service and region matching your key. The default is Alibaba Model Studio in Singapore.
    QwenCloud, Coding Plan, Token Plan and OpenRouter are separate services with non-interchangeable keys.
    For an Individual Plan or Team Plan at qwencloud.com, choose QwenCloud Token Plan — Singapore.
    Alibaba Coding Plan is a different service whose models may differ from your QwenCloud subscription.
 3. Enter the API key and Apply. Empty input preserves the saved key; removal is a separate action.
 4. The chosen service's API loads models automatically. No manual JSON is needed:
-   GrigDesk prepares private CLI settings. Installation, updating and reinstallation use the same access;
-   refreshed catalogs expose new models at the top of the list.
+   GrigDesk prepares private CLI settings. New models appear after a catalog refresh.
 5. Select Qwen and a model in chat. Catalog failures show a reason such as HTTP 401.
    Check service, region and key. GrigDesk never tries the key against other services.
    Loading the catalog does not prove a paid model request will succeed.
 
 If Qwen is missing from the list, use “Qwen Code · No models” at its bottom when offered,
 or open Settings → AI executors. The card explains the issue and offers rechecking or setup.
-Use Overview to update or reinstall an incompatible CLI.
+Overview shows the verified runtime version. The card hides results from servicing the old npm copy.
 Saving access remains successful while models reload. After connection loss, Access saved offers Recheck;
 do not re-enter the saved key. Unsaved access shows Save connection and Apply;
 rechecking before saving uses the old connection.
@@ -36,204 +36,33 @@ If you already configured `modelProviders` in Qwen CLI, GrigDesk uses it without
 Service selection is hidden and access uses the configured `envKey` names.
 Invalid JSON must be repaired at its source, rather than replaced automatically.
 
-Installation checks dependency installer hooks before confirmation.
-“This installation method is not verified for the version” requires reviewing the changed package.
-Verified CLI versions 0.27.2 and 0.27.3 work with this protection enabled.
-If an older server reports “Подготовка операции не удалась” (operation preparation failed)
-while updating to 0.27.3,
-apply the GrigDesk update containing the verified profile for that version,
-restart the server manually, and retry the Qwen update.
-The optional microphone backend uses a prebuilt addon; compiling it needs Python 3, make and a C++ toolchain.
-It is not required for GrigDesk chat.
-
 ## Chat operation
 
-A project may have several repositories. The primary repository is the starting directory;
-others are additional readable and writable roots. Task conversations use their task working copies.
-Their common parent is not granted. Changing folders, roots or access separates native memory from
-the previous session while keeping GrigDesk history. Stop interrupts the process;
-continuation uses the saved session. Successful tools show ✓ and failed tools ✕ in live and saved history.
-A tool row shows the command, file path or edit diff, and the expanded result shows short
-human-readable text instead of wire JSON; image results are marked with a placeholder.
-The fix applies to new turns after a manual server restart.
+For a project with several repositories, the primary repository is the starting directory.
+Other repositories are additional working roots. The sandbox masks `.env` and `.qwen` in those
+roots. The move to Preview.2 keeps the GrigDesk conversation and starts a new native session.
+Later turns resume the saved Preview.2 session. Stop interrupts the current turn.
 
-The requested-model marker in turn status means the CLI has not confirmed session selection.
-After confirmation it disappears and the model is stored with the reply.
-It remains if the CLI does not report the current model.
-Reasoning and replies form continuous blocks even when their streamed fragments alternate.
-If words are split between Reasoning rows, apply the GrigDesk fix and manually restart the server;
-it takes effect for new turns. Previously published separate replies are not rebuilt.
-Older token steps without their own IDs are combined when displayed without changing messages or memory.
+GrigDesk checks tool requests before execution. Ask shows an approval card. Auto uses the shared
+GrigDesk classifier and asks when it cannot approve a request. No confirmations lets approved
+operations proceed immediately. Plan blocks writes and shell commands. Select a working
+permission mode to act on a plan.
 
-When subagents work in parallel, their actions and text previews stay under their
-respective Agent calls. One subagent's tools do not split another's words, and their
-text does not mix into the main agent's final reply. This fix applies to new turns
-after updating and manually restarting the server; previously saved fragments are
-not rebuilt automatically.
+You can attach PNG, JPEG, GIF and WebP images with a model that declares vision support.
+Limits are 10 images, 10 MB each and 32 MiB total.
 
-Long reasoning, tools and approval waits do not stop after 30 seconds. Stop works during each state.
-If an installed version reports `ACP timeout: session/prompt` around 30 seconds, update the server,
-restart it manually and retry. Changing API service or re-entering a saved key does not fix that error.
+## Preview.2 capabilities
 
-Effort levels come from the installed CLI separately for each model. Verified CLI 0.27.2 reports
-`none`, `low`, `medium`, `xhigh` for Qwen4 Max Preview. Reasoning-switch models offer `none` and `default`;
-models without such a setting show no selector. The CLI confirms effort before sending a prompt.
-After a catalog change, reselect an unrecognized level.
-Generic fallback levels for unknown models do not confirm their capabilities, so some third-party models
-may have no effort control until CLI metadata exists. That does not establish that their API lacks reasoning.
-Context-window size is the CLI's working setting, not an independent check of the service's request limit.
+The sandbox supports reading, file search, editing, Bash, reading pages, foreground subagents and
+server-approved work MCP tools. A follow-up sent while Qwen is responding joins the same session
+queue. Qwen replies in a separate block after the current request.
 
-Sandboxing also hides `.env` and `.qwen` symlinks in every working root behind empty data,
-preserving the original links and content on the server. Early failures show the sandbox reason
-rather than an incidental `/proc` error for an exited process.
-Ask, Auto, Plan and No confirmations retain sandbox boundaries and direct-SSH server checks.
-An incompatible CLI guard protocol causes visible refusal, never unprotected fallback.
-Without bwrap or on another server OS, turns are unavailable.
+Host mode requires separate confirmation. It grants access to the server user's files and
+services. Tool approvals and the direct SSH restriction follow the selected settings.
+Enable keeping chat agents alive between turns and run GrigDesk as a systemd user service.
+Close the process manually in the live sessions list. Background tasks and automatic idle
+cleanup are unavailable in Preview.2.
 
-Auto uses Qwen's native automatic mode: ordinary changes within selected directories proceed independently;
-the CLI evaluates other actions, potentially making extra model requests and consuming quota.
-Unavailable assessment may fall back to a permission question. Ask keeps manual confirmations;
-No confirmations skips them while preserving sandbox boundaries.
-Update Qwen Code if the CLI does not support the chosen mode.
-
-Attach PNG, JPEG, GIF or WebP, including without text. Images go directly to Qwen and require a vision-capable model.
-Limits are 10 images, 10 MB each and 32 MiB total. Put other file types in the working folder and mention them.
-Reattach missing images and update an incompatible CLI in executor settings.
-GrigDesk does not yet support Qwen quota retrieval; this is an integration limitation, not a service response.
-
-## Shared skills in chat
-
-Select Qwen and type `/` in the message field to see shared skills from
-`~/.agents/skills/<name>/SKILL.md`, such as `/split-commit` or `/grigdesk-connect-project`
-when installed. Type part of a name to filter the menu, then select a skill or send
-`/name` with arguments. Page context and attachments are preserved.
-
-Skills work in the ordinary sandbox without Host mode. Qwen receives read-only access
-to their instructions and supporting files. Running a skill preserves the chat's chosen
-permission mode and working folders. Symlinked skill directories are supported;
-flat `.md` files and skills with `user-invocable: false` are not listed in the menu.
-
-The list is reread when the executor catalog refreshes. If your GrigDesk version lacks
-this support, apply the update, restart the server manually and reload the page. Chat memory does
-not need to be reset.
-
-## Native tools
-
-GrigDesk permits search and page reading, todos, memory, subagents and agent commands, skills, LSP,
-notebook editing, image/media processing, native schedules, goals and workflows.
-Availability also depends on CLI version, configuration and service.
-Permitting web search does not give search access to a model-only API key.
-
-Agent questions appear in ordinary GrigDesk cards, supporting multiple choices when offered and free text.
-Plan approval shows the plan and CLI-provided continuation choices; approval can allow edits in the same turn.
-Cancel and Stop end the wait.
-During work, send text or image clarification using Send. It enters the current turn:
-Qwen may interrupt generation, answer and continue the original task.
-Delivery status confirms transfer to the executor, rather than model acknowledgement.
-While a question card awaits an answer, composer messages wait for the next turn.
-
-Stop shows “⏹ Turn stopped.” without a red error card. Completed actions and available session memory remain;
-the next message continues the conversation. File changes are not rolled back.
-
-Messages with and without images continue the same session, including after Stop.
-If an older version reported a foreign or invalid Qwen session identity after an attachment,
-apply the GrigDesk fix, restart the server manually and retry in the same conversation.
-There is no need to reset memory or create a new chat: saved sessions with the previous binding remain supported.
-
-Sandbox and direct-SSH restrictions also apply to subagents and these tools.
-Plan mode blocks shell, edits, media processing and workflow. Native page reading permits localhost and private addresses.
-When a sandboxed turn starts, Qwen waits for GrigDesk work tools, including supervised SSH.
-If Qwen reports a connection failure for these tools, GrigDesk shows it before sending the request to the model.
-Retry the message once the connection is restored.
-
-In stock CLI 0.27.2–0.28.0, subagents can fail with `Tool invocation guard failed` because the CLI loses the parent guard context.
-Allowing subagents does not fix it; a compatible external CLI fix is needed. GrigDesk does not disable protection.
-Updating from 0.27.x to 0.28.0 alone does not resolve this issue.
-A compatible patch is verified on a separate test build of v0.28.0: the subagent receives only the parent turn's
-identity for the guard, and all other checks stay in place. Installing and releasing the fixed CLI into the working
-GrigDesk is agreed separately.
-
-Media tools require executable `ffmpeg` and `ffprobe`; otherwise chat and other tools remain available.
-LSP needs a configured language server and external processing services need their own access.
-In the sandbox, Qwen's process lasts for one turn. Native schedules and background tasks do not survive its exit;
-permitting those tools does not create a permanent GrigDesk worker. In Host mode the process lives between turns (below).
-
-## Host mode
-
-Qwen runs in the sandbox by default. Host mode is enabled manually:
-Settings → Executors → Qwen Code → Parameters → Host mode. Enabling requires confirmation
-in the shared dialog: Qwen will access Docker, processes and files with the server user's permissions.
-This is not a new isolation — the agent runs outside the sandbox with the same rights as the GrigDesk server.
-There is no automatic sudo; the chosen approval modes and the direct SSH restriction remain active.
-
-Host mode supports ordinary and background subagents, monitors, schedules and the other native tools
-of a compatible CLI. Web search, LSP, skills and media processing use the programs, configuration and access
-already configured in Qwen: new subscriptions, keys and programs are not purchased or installed automatically;
-a missing dependency shows its reason. Enabled plugin documentation is available in both modes.
-
-LSP requires an explicitly trusted workspace in Qwen. A media tool must also be enabled
-for model calls in Qwen's native settings; having ffmpeg and ffprobe alone is not enough.
-
-Requirements: the enabled Settings → Runs → Keep the chat agent alive between turns toggle,
-a working user systemd and a separate GrigDesk application unit. If the environment is unavailable,
-the turn gets a visible refusal reason; there is no unprotected launch and no sandbox fallback.
-The mode is unavailable without Linux user systemd.
-
-The process lives between messages: a background task or schedule finishes and publishes its reply
-to the feed without a new message. If a schedule manages to finish while the reply to your message
-is being prepared, its result is still published to the feed exactly once with the full text
-and is not mixed into the reply to your message. Stop interrupts the current turn, not the process.
-Closing the live process in Settings → Runs → Live agent processes, resetting memory, deleting the chat
-and exiting GrigDesk terminate it; there is no autostart after an OS reboot.
-Closing a chat moves it to the archive and lets background work continue.
-GrigDesk has no internal session-count limit for Qwen Host: other agents filling
-the regular pool do not block new Qwen conversations, and pool pressure does not
-terminate Qwen even in archived chats.
-
-With no current work, background tasks, active goal or future schedules, the process
-closes after 30 minutes of confirmed idle time. Repeated checks do not extend that
-period. A new message or background work starts the idle countdown again.
-Pending cron jobs and wakeups keep the process alive between executions.
-The process list shows why it is retained, time until a wakeup or auto stop,
-and “Unlimited sessions”. History and saved memory remain available: the next
-message starts a process using the same session.
-
-If the full status is unavailable, automatic shutdown pauses and the list shows
-“Status unconfirmed”. Support is verified for Qwen Code 0.27.3; another version or
-modified package needs updated GrigDesk support. Every process remains available
-for explicit shutdown.
-The bulk “Stop idle processes” action on that page shows an explicit message with the number
-of failures when processes did not confirm shutdown: such processes remain in the list
-until a repeated close confirms their termination.
-If a process has already exited while being closed, GrigDesk confirms its termination
-and removes the entry without a false error. An unavailable shutdown check remains an explicit failure.
-
-Enabling and disabling applies to the next turn; already running work is stopped immediately
-by closing the live process in the list. Switching profiles separates Qwen's native memory;
-the GrigDesk conversation is preserved. History after attachments does not break.
-If process preparation was interrupted (for example a guard protocol refusal), the process stays
-in the live list until explicitly closed, and a repeated message gets the explicit error
-“unfinished preparation requires a confirmed close”.
-
-## Verification limits
-
-Pipelines offer a Qwen runner using the same model source. Select executor and model in the stage editor.
-This grants no extra filesystem rights: checking stages write state and implementation stages write the working folder.
-Verify a node separately in a test environment before assigning real tasks.
-
-Automated checks used real CLI 0.27.2 with a local test API for catalog setup and turns without an original
-`settings.json`, plus a node with a test CLI. They cover a real API pause exceeding 30 seconds,
-long approval waits, Stop, stream errors, clarification delivery during generation and separately saved replies.
-They verify exact image bytes in ordinary turns and clarification, additional working roots,
-native Auto, refused automatic assessment and fallback to manual confirmation.
-Live-model clarification, actual image recognition, installation from the card and browser acceptance are separate checks.
-Paid smoke testing requires a real key entered by its owner through Access settings after a manual server restart.
-
-Host mode is covered by automated checks without paid calls: one process across two turns, the mandatory guard
-protocol, background replies and schedules, Stop, repeated close after a refusal, and manual enabling
-with confirmation and setting persistence. Native tests using CLI 0.27.3 and a local API cover host process
-and socket access, subagents, configured LSP/media/search, server-owned MCP tools, the second message's
-image and background command shutdown. They require user systemd and a separate test service;
-without that environment, checks give a visible refusal and are not considered passed.
-Manual application acceptance and live-model checks remain with the owner after updating
-and manually restarting the server.
+Open the Qwen icon in the top bar. The Subscription quota bar is disabled while the integration
+has no balance or reset time. The last measured turn's input and output token counts appear
+below the bar. The measurement is kept until GrigDesk restarts.

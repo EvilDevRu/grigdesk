@@ -5,6 +5,8 @@ import path from 'node:path';
 import { parse, type ParseError } from 'jsonc-parser';
 
 import { isRecord } from '../../../../shared/lib/objects.ts';
+import { dataHome } from '../../../../shared/runtime/dataHome.ts';
+import { qwenPreviewBinary } from './previewRelease.ts';
 import { DEFAULT_QWEN_SERVICE, QWEN_SERVICE_ENV, qwenServiceCredential } from './services.ts';
 
 export interface QwenConfig {
@@ -35,8 +37,16 @@ export interface QwenSnapshot {
 
 export const qwenConfig = (value: unknown): QwenConfig => isRecord(value) ? value : {};
 
-export const qwenBin = (value: unknown): string =>
-  qwenConfig(value).qwenBin || process.env.GRIGDESK_QWEN_BIN || 'qwen';
+/**
+ * Источник по умолчанию — проверяемый файл в каталоге данных, независимо от PATH.
+ * Явная привязка всё равно проходит проверку байтов Preview.2 перед запуском.
+ */
+export function qwenBin(value: unknown): string {
+  const config = qwenConfig(value);
+  const runtimeHome = config.dataHome || dataHome({ env: process.env, home: os.homedir() });
+
+  return config.qwenBin || qwenPreviewBinary(runtimeHome);
+}
 
 /**
  * Только сохранённый boolean включает доверенный доступ к хосту.

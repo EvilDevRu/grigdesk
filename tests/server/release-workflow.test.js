@@ -40,11 +40,8 @@ test('RW-QWEN: native CLI закреплён, а Host имеет настоящ�
   const steps = workflow.jobs.server.steps;
   const manager = steps.findIndex((step) => step.name === 'Пользовательский менеджер процессов тестов');
   const tests = steps.findIndex((step) => step.id === 'server_tests');
-  const lock = JSON.parse(await fs.readFile(
-    path.join(repository, 'tests/fixtures/qwen-cli/package-lock.json'), 'utf8'));
 
   assert.ok(manager >= 0 && tests > manager);
-  assert.equal(lock.packages['node_modules/@qwen-code/qwen-code'].version, '0.27.3');
   assert.match(steps[manager].run, /github-hosted/u);
   assert.match(steps[manager].run, /MemoryMax=4G/u);
   assert.match(steps[manager].run, /DBUS_SESSION_BUS_ADDRESS/u);
@@ -54,13 +51,19 @@ test('RW-QWEN: native CLI закреплён, а Host имеет настоящ�
   const cli = recipe.stages.find((stage) => stage.id === 'qwen-test-cli');
   const native = recipe.stages.find((stage) => stage.id === 'server-tests');
   const launcher = await fs.readFile(path.join(repository, 'tools/ci/run-release-server-tests.sh'), 'utf8');
+  const installer = await fs.readFile(path.join(repository, 'tools/install-qwen-preview.sh'), 'utf8');
+  const runtime = '$PWD/server/node_modules/.grigdesk-test/qwen-code/1.0.0-preview.2';
 
   assert.equal(cli.group, 'prepare-server');
-  assert.match(cli.argv.join(' '), /npm --prefix tests\/fixtures\/qwen-cli ci/u);
+  assert.deepEqual(cli.needs, ['server-install']);
+  assert.deepEqual(cli.argv, ['bash', '-c', `bash tools/install-qwen-preview.sh "${runtime}"`]);
+  assert.match(installer, /^version=1\.0\.0-preview\.2$/mu);
+  assert.match(installer, /sha256sum/u);
   assert.ok(native.needs.includes('prepare-server'));
   assert.equal(native.group, 'server');
   assert.deepEqual(native.argv, ['bash', 'tools/ci/run-release-server-tests.sh']);
-  assert.match(launcher, /GRIGDESK_QWEN_BIN="\$PWD\/tests\/fixtures\/qwen-cli\//u);
+  assert.ok(launcher.includes(`GRIGDESK_QWEN_BIN="${runtime}/qwen"`));
+  assert.match(launcher, /GRIGDESK_QWEN_PREVIEW_TEST=1/u);
   assert.match(launcher, /systemd-run --user --scope --collect/u);
   assert.match(launcher, /app-grigdesk-tests-.*\.scope/u);
   assert.match(launcher, /npm --prefix server test/u);

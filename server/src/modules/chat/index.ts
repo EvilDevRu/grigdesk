@@ -4420,6 +4420,11 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
 
       await assistantPublisher.flush(runId);
       out = normalizeExecutorContextCache(out);
+
+      if (chatKey && !slash && !plan && !summaryWorkspace && out.turnTokens) {
+        fastify.recordProviderTurnTokens?.(executor.id, out.turnTokens);
+      }
+
       // ACP может вернуть end_turn без единого chunk/шага. После принятого prompt
       // повторять нельзя: модель могла выполнить действие, а ответ потеряться. Но и
       // выдавать `(пусто)` как успешный ответ нельзя. На pinned Kimi 0.31.1 так ход

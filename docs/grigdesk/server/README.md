@@ -32,7 +32,7 @@
 - [История автономного установщика: потоковый хвост архивов, ограничение postject и проверка ELF](installer-archive-tail.md)
 - [Подписанный канал сайта, защита от отката, офлайн-приёмка и справка RU/EN](site-release-channel.md)
 - [Ручной выбор full/skip, причина, identity и запись решения в выпуске](release-test-selection.md)
-- [Release workflow, нативные сборщики, общая выгрузка девяти файлов и допуск promote](release-workflow-validation.md)
+- [Release workflow, закреплённые нативные рантаймы, артефакты и допуск promote](release-workflow-validation.md)
 - [Stable из проверенных исходников: полный run, проверка пакетов и сверка Git-дерева](release-validation-reuse.md)
 - [Фоновый реестр исполнителей: бюджет 1,2 с, сохранение карточек при переименовании, wait и refresh](providers-background-read.md)
 - [Сборка на экране меню, отмена, итог и полный журнал](cli-build-interaction.md)

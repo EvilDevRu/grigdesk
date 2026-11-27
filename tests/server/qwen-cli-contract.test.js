@@ -10,102 +10,89 @@ import {
   QWEN_KEY, QWEN_TEST_PNG, qwenAdapter, qwenImage, rejectedTurn, runInput, selectedModel, successful,
 } from '../helpers/qwenFixture.mjs';
 
-for (const legacy of [false, true]) {
-  test(`Qwen native: продолжение после остановки с вложением, legacy=${legacy}`, {
-    timeout: 60000,
-  }, async (t) => {
-    const fixture = await qwenNativeFixture(t);
-    const adapter = await qwenAdapter({ runnable: true });
-    const image = await qwenImage(fixture);
-    const controller = new AbortController();
-    const original = 'ATTACHMENT_RESUME_ORIGINAL: запомни исходный запрос.';
-    const followup = 'ATTACHMENT_RESUME_FOLLOWUP: продолжи тот же разговор.';
-    let sessionId;
+test('Qwen Preview.2 продолжает остановленный первый ход с вложением', {
+  timeout: 60000,
+}, async (t) => {
+  const fixture = await qwenNativeFixture(t);
+  const adapter = await qwenAdapter({ runnable: true });
+  const image = await qwenImage(fixture);
+  const controller = new AbortController();
+  const original = 'ATTACHMENT_RESUME_ORIGINAL: запомни исходный запрос.';
+  const followup = 'ATTACHMENT_RESUME_FOLLOWUP: продолжи тот же разговор.';
+  let sessionId;
 
-    fixture.settings.modelProviders.openai[0].generationConfig.modalities = { image: true };
-    await fixture.writeSettings(fixture.settings);
-    fixture.actions.push({ hold: true });
-    t.after(() => controller.abort());
+  fixture.settings.modelProviders.openai[0].generationConfig.modalities = { image: true };
+  await fixture.writeSettings(fixture.settings);
+  fixture.actions.push({ hold: true });
+  t.after(() => controller.abort());
 
-    // Прежняя формула получается без attachmentsDir: каталог доставки остаётся рабочим корнем.
-    // Новый путь дополнительно проверяет настоящую картинку в первом остановленном ходе.
-    const running = adapter.run(runInput(fixture, 'shared-model(openai)', {
-      attachmentsDir: legacy ? undefined : image.root,
-      attachmentPaths: legacy ? [] : [image.file],
-      extraDirs: [image.root],
-      message: original,
-      signal: controller.signal,
-      onSessionCreated(value) {
-        sessionId = value;
-      },
-    }));
-    const outcome = running.then((value) => ({ value }), (error) => ({ error }));
+  const running = adapter.run(runInput(fixture, 'shared-model(openai)', {
+    attachmentsDir: image.root,
+    attachmentPaths: [image.file],
+    extraDirs: [image.root],
+    message: original,
+    signal: controller.signal,
+    onSessionCreated(value) {
+      sessionId = value;
+    },
+  }));
+  const outcome = running.then((value) => ({ value }), (error) => ({ error }));
 
-    assert.equal(await Promise.race([fixture.held.then(() => 'held'), outcome]), 'held');
-    controller.abort();
+  assert.equal(await Promise.race([fixture.held.then(() => 'held'), outcome]), 'held');
+  controller.abort();
 
-    const stopped = await outcome;
+  const stopped = await outcome;
 
-    assert.equal(stopped.error?.stopped, true);
-    assert.equal(stopped.error.sessionId, sessionId);
+  assert.equal(stopped.error?.stopped, true);
+  assert.equal(stopped.error.sessionId, sessionId);
 
-    const beforeResume = fixture.requests.length;
-    const resumed = await adapter.run(runInput(fixture, 'shared-model(openai)', {
-      attachmentsDir: image.root,
-      sessionId,
-      message: followup,
-      signal: AbortSignal.timeout(25000),
-    }));
-    const resumedContext = JSON.stringify(fixture.requests.slice(beforeResume)
-      .map((entry) => entry.messages));
+  const beforeResume = fixture.requests.length;
+  const resumed = await adapter.run(runInput(fixture, 'shared-model(openai)', {
+    attachmentsDir: image.root,
+    sessionId,
+    message: followup,
+    signal: AbortSignal.timeout(25000),
+  }));
+  const resumedContext = JSON.stringify(fixture.requests.slice(beforeResume)
+    .map((entry) => entry.messages));
 
-    assert.equal(resumed.sessionId, sessionId);
-    assert.match(resumed.reply, /Ответ настоящего CLI/);
-    assert.ok(resumedContext.includes(original), 'Native resume сохранил исходный запрос');
-    assert.ok(resumedContext.includes(followup), 'Продолжение отправлено в ту же память');
+  assert.equal(resumed.sessionId, sessionId);
+  assert.match(resumed.reply, /Ответ настоящего CLI/);
+  assert.ok(resumedContext.includes(original), 'Native resume сохранил исходный запрос');
+  assert.ok(resumedContext.includes(followup), 'Продолжение отправлено в ту же память');
 
-    if (!legacy) {
-      assert.ok(JSON.stringify(fixture.requests[0].messages).includes(QWEN_TEST_PNG.toString('base64')),
-        'Картинка первого хода передана настоящему CLI до остановки');
-    }
-  });
-}
+  assert.ok(JSON.stringify(fixture.requests[0].messages).includes(QWEN_TEST_PNG.toString('base64')),
+    'Картинка первого хода передана настоящему CLI до остановки');
+});
 
-test('qwen-native-model-specific-efforts-and-dashscope-wire', { timeout: 60000 }, async (t) => {
-  const fixture = await qwenNativeFixture(t, { dashscope: true });
+test('Qwen Preview.2 сообщает доступные модели без неподтверждённых усилий', {
+  timeout: 60000,
+}, async (t) => {
+  const fixture = await qwenNativeFixture(t);
   const base = fixture.settings.modelProviders.openai[0];
+  const ids = ['qwen4-max-preview', 'qwen3.7-max', 'qwen-audio-3.0-asr-flash', 'glm-5.3', 'wan3.0-video'];
 
-  fixture.settings.modelProviders.openai = [
-    'qwen4-max-preview', 'qwen3.7-max', 'qwen-audio-3.0-asr-flash', 'glm-5.3', 'wan3.0-video',
-  ]
-    .map((id) => ({
-      ...base,
-      id,
-      name: id,
-      generationConfig: {},
-    }));
+  fixture.settings.modelProviders.openai = ids.map((id) => ({
+    ...base,
+    id,
+    name: id,
+  }));
   await fixture.writeSettings(fixture.settings);
 
   const adapter = await qwenAdapter({ runnable: true });
   const catalog = await adapter.catalog(fixture.config);
   const qwen4 = catalog.find((model) => model.name === 'qwen4-max-preview');
 
-  assert.deepEqual(qwen4.efforts, ['none', 'low', 'medium', 'xhigh']);
-  assert.deepEqual(catalog.find((model) => model.name === 'qwen3.7-max').efforts, ['none', 'default']);
-  assert.deepEqual(catalog.find((model) => model.name === 'qwen-audio-3.0-asr-flash').efforts, []);
-  assert.deepEqual(catalog.find((model) => model.name === 'glm-5.3').efforts, []);
-  assert.deepEqual(catalog.find((model) => model.name === 'wan3.0-video').efforts, []);
-  assert.ok(qwen4.context > 0 && !qwen4.contextUnverified, 'Размер сообщает native CLI');
+  assert.deepEqual(catalog.map(({ name }) => name), ids);
+  assert.ok(catalog.every((model) => model.efforts.length === 0));
+  assert.equal(qwen4.context, base.generationConfig.contextWindowSize);
+  await assert.rejects(adapter.run(runInput(fixture, qwen4.id, { effort: 'xhigh' })), /усилие недоступно/);
+  assert.equal(fixture.requests.length, 0);
 
-  for (const effort of qwen4.efforts) {
-    const offset = fixture.requests.length;
-    const result = await adapter.run(runInput(fixture, qwen4.id, { effort }));
-    const wire = fixture.requests.slice(offset).find((request) => request.tools?.length);
+  const result = await adapter.run(runInput(fixture, 'qwen3.7-max(openai)'));
 
-    assert.match(result.reply, /Ответ настоящего CLI/);
-    assert.equal(wire.model, 'qwen4-max-preview');
-    assert.equal(wire.reasoning_effort, effort, 'Выбранный уровень доходит до API выбранного сервиса');
-  }
+  assert.match(result.reply, /Ответ настоящего CLI/);
+  assert.equal(fixture.requests[0].model, 'qwen3.7-max');
 });
 
 test('qwen-native-clean-install-generated-catalog-and-turn', { timeout: 60000 }, async (t) => {
@@ -140,15 +127,10 @@ test('qwen-native-clean-install-generated-catalog-and-turn', { timeout: 60000 },
   assert.equal(result.actualModel, catalog[0].id);
   assert.ok(metadata.some((value) => value.actualModelId === catalog[0].id
     && value.modelSource === 'session'));
-  assert.equal(result.contextTokens, 20, 'Контекст приходит из usage_update настоящего CLI');
-  assert.ok(Number.isSafeInteger(result.contextWindow) && result.contextWindow > 0,
-    'Окно объявляет сам CLI, а не каталог');
-  assert.equal(result.contextMetric, 'qwen-acp-usage-update');
-  assert.deepEqual(result.contextCache, {
-    scope: 'request', status: 'reported', readTokens: 0, uncachedTokens: 20,
-  });
-  assert.ok(progress.some((entry) => entry.info?.contextTokens === 20
-    && entry.info?.contextWindow === result.contextWindow), 'Живой замер контекста по ходу');
+  assert.equal(result.contextTokens, undefined);
+  assert.equal(result.contextWindow, undefined);
+  assert.equal(result.contextCache, undefined);
+  assert.equal(progress.at(-1).info.tokensIsEstimate, false);
   assert.equal(progress.at(-1).tokens, 8, 'Выход основного обращения без субагента');
   fixture.catalog.push({ id: 'new-model-without-release' });
 
@@ -242,10 +224,8 @@ test('qwen-native-catalog-stream-resume-abort', { timeout: 60000 }, async (t) =>
   const steps = [];
   let created;
 
-  assert.ok(fixture.metadata.availableModels.some((entry) => entry.modelId === model));
-
   await writeFile(inputFile, 'native read sentinel');
-  fixture.actions.push({ name: 'read_file', args: { file_path: inputFile } });
+  fixture.actions.push({ name: 'Read', args: { file_path: inputFile } });
 
   const first = await adapter.run(runInput(fixture, model, {
     signal: AbortSignal.timeout(25000),
@@ -305,11 +285,10 @@ test('qwen-native-catalog-stream-resume-abort', { timeout: 60000 }, async (t) =>
   });
   await fixture.writeSettings(`// Источник CLI допускает комментарии\n${JSON.stringify(fixture.settings)}`);
 
-  const expected = await fixture.readMetadata();
   const catalog = await adapter.catalog(fixture.config);
 
   assert.deepEqual(catalog.map((entry) => entry.id).sort(),
-    expected.availableModels.map((entry) => entry.modelId).sort());
+    ['native-added(openai)', 'shared-model(openai)']);
   assert.ok(catalog.some((entry) => entry.id === 'native-added(openai)'));
 
   const systemFile = fixture.env.QWEN_CODE_SYSTEM_SETTINGS_PATH;
@@ -324,13 +303,12 @@ test('qwen-native-catalog-stream-resume-abort', { timeout: 60000 }, async (t) =>
   }] } }));
   await utimes(systemFile, systemStat.atime, systemStat.mtime);
 
-  const nativeSystem = await fixture.readMetadata();
   const merged = await adapter.catalog(fixture.config);
 
   assert.notEqual(await adapter.catalogCacheKey(fixture.config), cacheKey);
   assert.deepEqual(merged.map((entry) => entry.id).sort(),
-    nativeSystem.availableModels.map((entry) => entry.modelId).sort(),
-    'Приоритет слоёв берётся из того же CLI, а не из догадки теста');
+    ['shared-model(openai)', 'system-model(openai)'],
+    'Системный слой сохраняет приоритет над пользовательской записью провайдеров');
 });
 
 test('qwen-native-never-and-filesystem', { timeout: 60000 }, async (t) => {
@@ -347,15 +325,15 @@ test('qwen-native-never-and-filesystem', { timeout: 60000 }, async (t) => {
   await writeFile(canary, 'original');
   await symlink(sibling, path.join(fixture.workspace, 'escape'));
 
-  const ownWrite = { name: 'write_file', args: { file_path: own, content: 'native own write' } };
-  const shell = { name: 'run_shell_command', args: { command: `printf native-shell > '${shellFile}'` } };
+  const ownWrite = { name: 'Write', args: { file_path: own, content: 'native own write' } };
+  const shell = { name: 'Bash', args: { command: `printf native-shell > '${shellFile}'` } };
 
   fixture.actions.push(ownWrite, shell,
-    { name: 'write_file', args: { file_path: canary, content: 'BAD' } },
-    { name: 'write_file', args: {
+    { name: 'Write', args: { file_path: canary, content: 'BAD' } },
+    { name: 'Write', args: {
       file_path: path.join(fixture.workspace, 'escape/canary'), content: 'BAD',
     } },
-    { name: 'run_shell_command', args: { command: `printf BAD > '${canary}'` } });
+    { name: 'Bash', args: { command: `printf BAD > '${canary}'` } });
 
   const result = await adapter.run(runInput(fixture, model, {
     permissionMode: 'yolo',
@@ -418,7 +396,7 @@ test('Qwen ждёт рабочий MCP перед новым и восстано
     fixture.actions.push(list);
 
     const result = await adapter.run(runInput(fixture, model, {
-      permissionMode: 'auto',
+      permissionMode: 'yolo',
       sessionId,
       signal: AbortSignal.timeout(22000),
       mcpServers,
@@ -454,8 +432,8 @@ test('Qwen показывает отказ рабочего MCP до обращ�
     env: [],
   }];
 
-  for (const sessionId of [undefined, working.sessionId]) {
-    await assert.rejects(adapter.run(runInput(fixture, model, { sessionId, mcpServers })),
+  for (const input of [{ chatKey: 'new-with-broken-mcp' }, { sessionId: working.sessionId }]) {
+    await assert.rejects(adapter.run(runInput(fixture, model, { ...input, mcpServers })),
       /Qwen не смог подключить рабочие инструменты GrigDesk/);
     assert.equal(fixture.requests.length, before, 'Пользовательский запрос ещё не отправлен');
   }
@@ -492,7 +470,7 @@ test('qwen-native-final-guard-fails-closed', { timeout: 60000 }, async (t) => {
     mcpServers: { foreign: { command: '/bin/sh', args: ['-c', `touch '${ambient}'`] } },
   }));
 
-  const ssh = { name: 'run_shell_command', args: {
+  const ssh = { name: 'Bash', args: {
     command: `ssh example.invalid true; printf BAD > '${canary}'`,
   } };
   const mcp = { match: 'allowed_probe', args: {} };
@@ -530,7 +508,7 @@ test('qwen-native-final-guard-fails-closed', { timeout: 60000 }, async (t) => {
   assert.equal(reason.includes(QWEN_KEY), false, 'Ошибка API должна сохранять причину без секрета');
 });
 
-test('Qwen native: текст ребёнка сохраняет parent и не становится ответом основного агента', {
+test('Qwen Preview.2 хранит текст ребёнка в результате его Agent', {
   timeout: 60000,
 }, async (t) => {
   const fixture = await qwenNativeFixture(t);
@@ -538,7 +516,7 @@ test('Qwen native: текст ребёнка сохраняет parent и не �
   const messages = [];
 
   fixture.actions.push({
-    name: 'agent',
+    name: 'Agent',
     args: {
       description: 'Проверить вывод текста',
       prompt: 'Ответь одним предложением без инструментов.',
@@ -556,10 +534,10 @@ test('Qwen native: текст ребёнка сохраняет parent и не �
     signal: AbortSignal.timeout(45000),
     permissionMode: 'yolo',
   }));
-  const child = outcome.steps.find((step) => step.k === 'text' && step.text === 'CHILD_TEXT_SENTINEL');
+  const result = outcome.steps.find((step) => step.k === 'res' && step.text === 'CHILD_TEXT_SENTINEL');
 
-  assert.ok(child?.parent, 'Native CLI передал parentToolCallId в поток');
-  assert.ok(outcome.steps.some((step) => step.k === 'tool' && step.id === child.parent));
+  assert.equal(result?.ok, true);
+  assert.ok(outcome.steps.some((step) => step.k === 'tool' && step.id === result.id && step.name === 'Agent'));
   assert.deepEqual(messages.map((message) => message.text), ['Ответ настоящего CLI.']);
   assert.equal(outcome.reply, 'Ответ настоящего CLI.');
 });

@@ -32,6 +32,7 @@ import { createProviderUsagePoller, type UsagePollContext } from '../../lib/prov
 import { createProviderStatusProbe, VENDOR_FAULT_USAGE_STATES } from '../../lib/providerStatus.ts';
 import { ProviderUsageSeenStore, isFreshGroup } from '../../lib/providerUsageSeen.ts';
 import type { ProviderUsage, ProviderUsagePatch, UsageBar } from '../../lib/providerUsage.ts';
+import { isProviderTurnTokens, type ProviderTurnTokens } from '../../../../shared/chat/providersContracts.ts';
 import { acceptPatch, projectUsage, settlePoll } from '../../lib/providerUsageLive.ts';
 import type { LiveUsage } from '../../lib/providerUsageLive.ts';
 import type { PrefsStore } from '../../lib/prefsStore.ts';
@@ -520,6 +521,7 @@ async function providersModule(
   const usageBackoff = new Map<string, { until: number; ticks: number }>();
   // Адресный сброс общего кэша сохраняет прошлые снимки и паузы соседних аккаунтов.
   const usagePrevious = new Map<string, ProviderUsage>();
+  const lastTurnTokens = new Map<string, ProviderTurnTokens>();
   const usageGenerations = new Map<string, number>();
   const liveUsage = new Map<string, LiveUsage>();
   const usageBootId = randomUUID();
@@ -810,8 +812,17 @@ async function providersModule(
    * Одинаковая проекция используется HTTP, ручным ответом и существующим SSE-потоком.
    */
   function usageSnapshot() {
+    const usage = projectUsageMap(Object.fromEntries(usagePrevious));
+
+    for (const [id, tokens] of lastTurnTokens) {
+      usage[id] = {
+        ...(usage[id] ?? normalizeProviderUsage({ state: 'unsupported', checkedAt: 0 })),
+        lastTurnTokens: tokens,
+      };
+    }
+
     return {
-      usage: projectUsageMap(Object.fromEntries(usagePrevious)),
+      usage,
       autoRefresh: usagePoller.isEnabled(),
       autoRefreshRevision: usagePolicyRevision,
     };
@@ -827,6 +838,17 @@ async function providersModule(
     }
   }
 
+  // Счётчики хода приходят с завершением генерации независимо от опроса подписки.
+  fastify.decorate('recordProviderTurnTokens', (id: string, tokens: ProviderTurnTokens): void => {
+    if (!usageAbort.signal.aborted && isProviderTurnTokens(tokens)) {
+      lastTurnTokens.set(id, {
+        inputTokens: tokens.inputTokens,
+        outputTokens: tokens.outputTokens,
+      });
+      publishUsage();
+    }
+  });
+
   /**
    * Выключение сохраняет видимые проценты без продвижения даты измерения.
    * Включение планирует сбор отдельно: сохранённая настройка не зависит от сети.
@@ -838,7 +860,7 @@ async function providersModule(
       return;
     }
     if (!enabled) {
-      const frozen = usageSnapshot().usage;
+      const frozen = projectUsageMap(Object.fromEntries(usagePrevious));
 
       for (const [id, entry] of Object.entries(frozen)) {
         usagePrevious.set(id, entry);
@@ -895,6 +917,56 @@ async function providersModule(
   }
 
   fastify.decorate('invalidateProviderRuntime', invalidateProviderRuntime);
+
+  // Одновременные клики используют одну установку закреплённой поставки.
+  const distributionInstalls = new Map<string, Promise<void>>();
+  const distributionAbort = new AbortController();
+
+  /**
+   * Остановка сервера прерывает скачивание вместе с очисткой временного каталога.
+   * Опубликованный рантайм переживает остановку и заново определяется при запуске.
+   */
+  async function stopDistributionInstalls(): Promise<void> {
+    distributionAbort.abort();
+    await Promise.allSettled(distributionInstalls.values());
+  }
+
+  fastify.shutdown?.register('установки поставок исполнителей', stopDistributionInstalls);
+  fastify.addHook('preClose', stopDistributionInstalls);
+
+  fastify.post<ProviderRoute>('/api/providers/:id/install-distribution', async (request, reply) => {
+    const { id } = request.params;
+    const adapter = (await adaptersOf()).get(id);
+    const distribution = adapter?.distribution?.(config);
+
+    if (!adapter?.installDistribution || distribution?.managed !== true || distribution.canInstall !== true) {
+      return reply.code(404).send({ error: 'distribution_install_unavailable' });
+    }
+
+    let pending = distributionInstalls.get(id);
+
+    if (!pending) {
+      const install = adapter.installDistribution;
+
+      pending = (async () => {
+        await install(config, distributionAbort.signal);
+        await invalidateProviderRuntime(id);
+        invalidateModelsRegistry(config.modelsPath);
+        fastify.sse?.broadcast?.('providers-update', { installation: id });
+      })().finally(() => distributionInstalls.delete(id));
+      distributionInstalls.set(id, pending);
+    }
+
+    try {
+      await pending;
+
+      return { ok: true };
+    } catch (error) {
+      fastify.log.warn({ provider: id, err: error }, 'не удалась установка закреплённой поставки');
+
+      return reply.code(502).send({ error: 'distribution_install_failed' });
+    }
+  });
 
   // ── Проверка новых версий CLI: периодически и по кнопке, НИКОГДА не обновляет сама ──
   // providerId → что показала последняя фоновая проверка новой версии CLI.

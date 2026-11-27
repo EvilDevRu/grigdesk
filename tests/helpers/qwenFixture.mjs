@@ -60,7 +60,7 @@ export function sourceSettings(baseUrl = 'http://127.0.0.1:9/v1') {
  * Одноразовые home/data/workspace исключают доступ к данным владельца.
  * Переменные процесса нужны существующей обёртке externalCli, а не подмене адаптера.
  */
-export async function qwenFixture(t, { native = false, settings = sourceSettings() } = {}) {
+export async function qwenFixture(t, { native = false, prepareFake = true, settings = sourceSettings() } = {}) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-qwen-'));
   const workspace = path.join(root, 'workspace');
   const home = path.join(root, 'home');
@@ -107,7 +107,7 @@ export async function qwenFixture(t, { native = false, settings = sourceSettings
     assert.ok(bin && path.isAbsolute(bin), 'environment: передайте настоящий CLI через --qwen-cli');
     await access(bin);
 
-    const version = spawnSync(process.execPath, [bin, '--version'], { encoding: 'utf8', timeout: 15000 });
+    const version = spawnSync(bin, ['--version'], { encoding: 'utf8', timeout: 15000 });
 
     assert.equal(version.status, 0, `environment: CLI не запускается: ${version.stderr}`);
   }
@@ -200,7 +200,7 @@ export async function qwenFixture(t, { native = false, settings = sourceSettings
     },
   };
 
-  if (!native) {
+  if (!native && prepareFake) {
     await fixture.fake();
     await validateFakeAcp(fixture);
   }

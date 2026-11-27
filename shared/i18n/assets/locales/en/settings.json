@@ -1588,6 +1588,8 @@
   "providerInstallationHeadingInstall": "{name} installation",
   "providerInstallationHeadingUpdate": "{name} update",
   "providerInstallationInstall": "Install",
+  "providerDistributionInstalling": "Installing…",
+  "providerDistributionInstallFailed": "Installation did not finish. Check that the server can download the archive, then retry.",
   "providerInstallationUpdate": "Update",
   "providerInstallationConfirmTitle": "{action} {name}?",
   "providerInstallationLegacyConfirm": "Update {name}? The older server does not provide the command description or installation progress. The update will use the previous method; the result will appear in the executor card.",

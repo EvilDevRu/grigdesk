@@ -188,6 +188,9 @@ import type {
   InTurnUnavailableReason,
 } from '../../../../shared/chat/chatInTurnContracts.ts';
 import type { ProviderUsagePatch } from '../providerUsage.ts';
+import type {
+  ProviderTurnTokens, ProviderUsagePresentation,
+} from '../../../../shared/chat/providersContracts.ts';
 import type { ChatStep } from '../chat/streamSteps.ts';
 import type { ChatRunMetadata } from '../../../../shared/chat/chatRun.ts';
 import type {
@@ -287,6 +290,7 @@ export interface ExecutorRunResult {
   deliveryFailure?: boolean;
   turnFailure?: TurnFailureSignal;
   turnRecovery?: TurnRecovery;
+  turnTokens?: ProviderTurnTokens;
   [field: string]: unknown;
 }
 
@@ -364,7 +368,7 @@ export interface ExecutorAdapter {
     import('../../../../shared/chat/chatPermissionModes.ts').WorkToolPolicy | undefined;
   runtimeProfileFingerprint?: (preparedRuntime: PreparedExecutorRuntime) => string;
   externalCli?: (config: unknown, home: string) => ExternalCliDefinition | null;
-  usagePresentation?: { freshness: boolean; spentLabel: boolean };
+  usagePresentation?: ProviderUsagePresentation;
   usageRequiresRuntime?: boolean;
   installation?: (config: unknown, context?: ProviderInstallationContext) => ProviderInstallation;
   studio3d?: Studio3dProvider;
@@ -386,11 +390,13 @@ export interface ExecutorAdapter {
     authHint?: string;
     buildId?: string;
     runtimeVersion?: string;
+    canInstall?: boolean;
     packageId?: string;
     binaryVersion?: string;
     error?: string;
     problem?: { message: string; command?: string };
   } | null;
+  installDistribution?: (config: unknown, signal?: AbortSignal) => Promise<void>;
   statusPage?: string;
   updateCmd?: readonly string[];
   catalogLive?: boolean;

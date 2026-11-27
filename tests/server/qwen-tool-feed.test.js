@@ -4,7 +4,7 @@ import test from 'node:test';
 import { createQwenBackground } from '../../server/src/lib/qwen/background.ts';
 import { STEP_IMAGE_TEXT } from '../../shared/chat/chatSteps.ts';
 import { foldChatSteps } from '../../web/src/views/chat/chatStepRows.ts';
-import { qwenAdapter, qwenFixture, runInput } from '../helpers/qwenFixture.mjs';
+import { runQwenPreviewStream } from '../helpers/qwenPreviewStream.mjs';
 
 const textBlock = (text) => ({ type: 'content', content: { type: 'text', text } });
 
@@ -42,19 +42,14 @@ async function collectResults(t, stream, background) {
 
     await collector.finish('end_turn');
   } else {
-    const fixture = await qwenFixture(t);
-    const adapter = await qwenAdapter({ runnable: true });
-
-    await fixture.fake({ stream });
-    result = await adapter.run(runInput(fixture, 'shared-model(openai)'));
+    result = await runQwenPreviewStream(t, stream);
   }
 
   return result.steps.filter((step) => step.k === 'res');
 }
 
 /**
- * Строки вызова собираются тем же двойным прогоном: живой ход через fake ACP
- * CLI и фоновый коллектор обязаны рисовать одинаковую строку инструмента.
+ * Строки вызова собираются тем же двойным прогоном: ход через границу ACP и фоновый коллектор обязаны рисовать одинаковую строку инструмента.
  */
 async function collectToolFeed(t, stream, background) {
   let result;
@@ -72,11 +67,7 @@ async function collectToolFeed(t, stream, background) {
 
     await collector.finish('end_turn');
   } else {
-    const fixture = await qwenFixture(t);
-    const adapter = await qwenAdapter({ runnable: true });
-
-    await fixture.fake({ stream });
-    result = await adapter.run(runInput(fixture, 'shared-model(openai)'));
+    result = await runQwenPreviewStream(t, stream);
   }
 
   return result.steps;

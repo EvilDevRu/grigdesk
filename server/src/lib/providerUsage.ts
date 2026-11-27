@@ -59,6 +59,7 @@ export interface ProviderUsagePatch {
 
 // Состояние лимитов исполнителя целиком.
 export interface ProviderUsage {
+  lastTurnTokens?: import('../../../shared/chat/providersContracts.ts').ProviderTurnTokens;
   state: string;
   bars: unknown[];
   resources: UsageResource[];

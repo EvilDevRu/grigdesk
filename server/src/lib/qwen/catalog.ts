@@ -6,9 +6,16 @@ import { qwenConfig, readQwenSnapshot, type QwenSnapshot } from './settings.ts';
 import { qwenDiscoveryError, resolveQwenSnapshot } from './discovery.ts';
 import { classifyQwenModel } from './modelClassification.ts';
 import { openQwenTransport, record } from './transport.ts';
-import { qwenEffortOption } from './modelMetadata.ts';
+import { qwenEffortOption, qwenSelectedModel } from './modelMetadata.ts';
+import { qwenPreviewModelId } from './previewModels.ts';
 
 const catalogProblems = new Map<string, string>();
+
+interface SelectedPreviewModel {
+  id: string;
+  configOptions: unknown;
+  entry: Record<string, unknown>;
+}
 
 /**
  * Отказ native-каталога относится к конкретному доступу и не раскрывает вывод CLI.
@@ -35,8 +42,8 @@ function catalogProblem(config: unknown, error: unknown): string {
 
   const reason = error instanceof Error ? error.message : '';
 
-  if (reason.includes('несовместимый протокол обязательного guard')) {
-    return 'Qwen Code несовместим с GrigDesk. Обновите или переустановите Qwen Code в разделе «Обзор».';
+  if (reason.includes('Preview.2')) {
+    return 'Qwen Code несовместим с этой поставкой GrigDesk. Требуется проверенный Qwen Code 1.0 Preview.2.';
   }
 
   if (reason.includes('песочница bwrap')) {
@@ -57,27 +64,25 @@ function catalogProblem(config: unknown, error: unknown): string {
  */
 export function projectQwenModels(
   snapshot: QwenSnapshot,
-  available?: unknown,
-  optionsByModel: ReadonlyMap<string, unknown> = new Map(),
+  selected?: SelectedPreviewModel,
 ) {
-  const native = Array.isArray(available) ? available.map(record) : null;
-
   return snapshot.models.flatMap((model) => {
-    const confirmed = native?.find((entry) => entry.modelId === model.id);
+    const nativeId = qwenPreviewModelId(model);
 
-    if (native && !confirmed) {
+    if (!nativeId) {
       return [];
     }
 
-    const context = record(confirmed?._meta).contextLimit
+    const confirmed = selected?.id === nativeId ? selected : undefined;
+    const context = record(confirmed?.entry._meta).contextLimit
       ?? record(model.entry.generationConfig).contextWindowSize;
-    const effort = qwenEffortOption(optionsByModel.get(model.id));
+    const effort = qwenEffortOption(confirmed?.configOptions);
     const classification = classifyQwenModel(model.entry.id);
     const nonChat = model.nonChat === true || classification !== null;
 
     return [{
       id: model.id,
-      name: String(confirmed?.name || model.entry.name || model.entry.id),
+      name: String(model.entry.name || confirmed?.entry.name || model.entry.id),
       ...(typeof context === 'number' && context > 0 ? { context } : { contextUnverified: true }),
       efforts: effort?.levels ?? [],
       ...(model.createdAt ? { createdAt: model.createdAt } : {}),
@@ -90,7 +95,7 @@ export function projectQwenModels(
 }
 
 /**
- * Изолированный CLI сообщает свои native ids без prompt и сторонних MCP.
+ * Изолированный CLI подтверждает текущий маршрут без prompt и сторонних MCP.
  * Одноразовая metadata-сессия не пишет models.json или настройки владельца.
  */
 export async function qwenCatalog(
@@ -123,8 +128,8 @@ export async function qwenCatalog(
 }
 
 /**
- * Ошибка чтения или подтверждения моделей передаётся общей обёртке каталога.
- * Временная metadata-сессия завершается при любом исходе без пользовательского prompt.
+ * Preview.2 сообщает одну текущую модель в ACP, даже когда настроено несколько.
+ * Проверяем старт на первом маршруте и публикуем проверенный сервером список настроек.
  */
 async function loadQwenCatalog(
   config: unknown,
@@ -132,10 +137,13 @@ async function loadQwenCatalog(
 ) {
   const snapshot = await resolveQwenSnapshot(config, { ...discovery, refresh: true });
 
-  if (!snapshot.models.length) {
+  const first = snapshot.models.find((model) => qwenPreviewModelId(model));
+
+  if (!first) {
     return [];
   }
 
+  const nativeId = qwenPreviewModelId(first);
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'qwen-metadata-'));
   const cwd = qwenConfig(config).rootDir || path.join(root, 'workspace');
 
@@ -145,37 +153,29 @@ async function loadQwenCatalog(
     const transport = await openQwenTransport(config, snapshot, {
       cwd,
       home: path.join(root, 'home'),
-      authType: snapshot.models[0]!.authType,
+      authType: first.authType,
       mode: 'default',
+      nativeModelId: nativeId,
     });
 
     try {
       const session = record(await transport.client.request('session/new', { cwd, mcpServers: [] }));
-      const available = record(session.models).availableModels;
-      const options = new Map<string, unknown>();
+      const selected = qwenSelectedModel(session.configOptions);
 
-      if (Array.isArray(session.configOptions) && Array.isArray(available)) {
-        const currentId = record(session.models).currentModelId;
-
-        for (const entry of available.map(record)) {
-          if (typeof entry.modelId !== 'string'
-            || !snapshot.models.some((model) => model.id === entry.modelId)) {
-            continue;
-          }
-
-          const selected = entry.modelId === currentId ? session : record(await transport.client.request(
-            'session/set_config_option', {
-              sessionId: session.sessionId,
-              configId: 'model',
-              value: entry.modelId,
-            },
-          ));
-
-          options.set(entry.modelId, selected.configOptions);
-        }
+      if (selected !== nativeId) {
+        throw new Error('Qwen Preview.2: CLI не подтвердил модель для проверки каталога.');
       }
 
-      return projectQwenModels(snapshot, available, options);
+      const available = record(session.models).availableModels;
+      const item = Array.isArray(available)
+        ? available.map(record).find((model) => model.modelId === selected)
+        : undefined;
+
+      return projectQwenModels(snapshot, {
+        id: selected,
+        configOptions: session.configOptions,
+        entry: item ?? {},
+      });
     } finally {
       await transport.close();
     }
