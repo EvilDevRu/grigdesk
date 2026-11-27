@@ -14,6 +14,8 @@ type Choice struct {
 	Shortcut   func(byte) (int, error)
 }
 
+type ChooseFunc func(Choice) (int, error)
+
 // Choose показывает вопрос, подробности и строки выбора на общем экране.
 // Общий экран меню остаётся у его владельца после окончания выбора.
 func (screen *Screen) Choose(input Input, choice Choice) (int, error) {

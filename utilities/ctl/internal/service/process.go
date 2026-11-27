@@ -20,6 +20,7 @@ type Terminal struct {
 	Stdout io.Writer
 	Stderr io.Writer
 	Screen *ctlterm.Screen
+	Choose ctlterm.ChooseFunc
 }
 
 type Result struct {

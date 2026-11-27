@@ -78,8 +78,10 @@ fi
 
 isolate_test_file "$TESTS_ROOT/server/chat-list-benchmark.test.mjs" 2048 benchmark "$@"
 isolate_test_file "$TESTS_ROOT/server/deepseek-upstream-update.test.js" 1024 source-sync "$@"
+isolate_test_file "$TESTS_ROOT/server/deepseek-runtime-rollback.test.js" 1024 harness-rollback "$@"
+isolate_test_file "$TESTS_ROOT/server/deepseek-factory-settings.test.js" 1024 harness-factory "$@"
 isolate_test_file "$TESTS_ROOT/deepseek/buildInputs.test.mts" 1024 package-builder "$@"
-isolate_test_file "$TESTS_ROOT/deepseek/suite-wiring.test.mts" 1024 suite-wiring "$@"
+isolate_test_file "$TESTS_ROOT/deepseek/suite-wiring.test.mts" 768 suite-wiring "$@"
 
 HEAP_MB="${NODE_TEST_HEAP_MB:-1024}"
 MAX_RSS_MB="${NODE_TEST_MAX_RSS_MB:-2048}"

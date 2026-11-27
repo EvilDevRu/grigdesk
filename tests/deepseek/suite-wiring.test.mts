@@ -116,6 +116,8 @@ test('candidate gate передаёт vendor builder-у и не пропуска
   assert.ok(calls.every((call) => !call.args.some((arg) => arg.startsWith('--test-name-pattern'))));
 
   for (const call of calls.slice(1)) {
+    assert.equal(call.env.GRIGDESK_TEST_DEEPSEEK_VENDOR_DIR, options.vendorDir);
+    assert.equal(call.env.GRIGDESK_DEEPSEEK_NODE_CACHE, options.nodeCacheDir);
     assert.equal(call.env.GRIGDESK_TEST_DEEPSEEK_BINARY, '/fixture/output/deepseek');
     assert.equal(call.env.GRIGDESK_TEST_DEEPSEEK_PAYLOAD,
       `/fixture/node-cache/payloads/${'a'.repeat(64)}/payload.zip`);

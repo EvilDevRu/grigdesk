@@ -1,3 +1,4 @@
+import { selectedDeepSeekVendor } from '../helpers/deepseekVendor.mts';
 import assert from 'node:assert/strict';
 import { execFile, spawn } from 'node:child_process';
 import { promises as fs } from 'node:fs';
@@ -245,11 +246,11 @@ test(RELOCATION_TEST, async (t) => {
 });
 
 /**
- * Исходники плагина перечисляются из самой generation: build outputs и links исключены.
- * Tsconfig переписывается сборкой, поэтому не входит ни сюда, ни в хэш runtime.json.
+ * Хэш исходников берётся из снимка upstream. Хэши патчей проверяются отдельно.
+ * Tsconfig переписывается сборкой и в хэш исходников не входит.
  */
-async function pluginSources(artifact) {
-  const root = path.join(artifact, 'packages/llm/llm-pi-ai');
+async function pluginSources(upstream) {
+  const root = path.join(upstream, 'packages/llm/llm-pi-ai');
   const result = [];
 
   /**
@@ -287,16 +288,17 @@ test('настоящий runtime.json содержит версию и integrity
   const metadata = JSON.parse(await fs.readFile(path.join(artifact, 'runtime.json'), 'utf8'));
   const lockFile = path.join(REPO_ROOT, 'deepseek/build/runtime-deps/package-lock.json');
   const lock = JSON.parse(await fs.readFile(lockFile, 'utf8'));
-  const patchesDir = path.join(REPO_ROOT, 'deepseek/vendor/deepseek-harness/patches');
+  const vendor = selectedDeepSeekVendor();
+  const patchesDir = path.join(vendor, 'patches');
   const patches = await Promise.all((await fs.readdir(patchesDir)).sort().map(async (name) => ({
     path: name,
     sha256: sha256(await fs.readFile(path.join(patchesDir, name))),
   })));
   const pinned = lock.packages['node_modules/@earendil-works/pi-ai'];
-  const sources = await pluginSources(artifact);
+  const sources = await pluginSources(path.join(vendor, 'upstream'));
 
   assert.deepEqual(metadata.llmPiAi?.piAi, {
-    version: '0.85.1',
+    version: pinned.version,
     integrity: pinned.integrity,
   });
   assert.ok(sources.length > 0);

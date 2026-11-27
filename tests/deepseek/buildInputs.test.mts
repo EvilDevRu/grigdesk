@@ -12,12 +12,12 @@ import { deepSeekPackagePaths } from '../../deepseek/scripts/paths.ts';
 import { deepSeekBuildInputs } from '../../deepseek/scripts/buildRuntime.mts';
 import { assertKnownDynamicReferences } from '../../deepseek/scripts/deepseekBuildInputs.ts';
 import { verifyDeepSeekSnapshot } from '../../deepseek/scripts/deepseekVendorManifest.ts';
-import { sha256 } from '../../shared/node/hash.ts';
+import { sha256, sha256File } from '../../shared/node/hash.ts';
 import { componentNodeRuntimeManifest, readTargetNodeRuntime } from '../../shared/node/nodeRuntime.ts';
 import { artifactsPath } from '../../shared/runtime/dataHome.ts';
-import { createDeepSeekVendorFixture } from '../helpers/deepseekVendor.mts';
+import { createDeepSeekVendorFixture, selectedDeepSeekVendor } from '../helpers/deepseekVendor.mts';
 import { verifyTestDeepSeekArtifact } from '../helpers/deepseekRuntimeArtifact.mts';
-import { prepareLegacyDeepSeekDependencies } from '../helpers/deepseekLegacyDependencies.mts';
+import { testDeepSeekRuntimeDependencies } from '../helpers/deepseekBinary.mts';
 
 interface CommandFailure extends Error {
   code: number;
@@ -57,7 +57,7 @@ describe('runtime-deps package и lock принадлежат пакету', () 
     const manifest = JSON.parse(await readFile(path.join(paths.runtimeDependenciesDir, 'package.json'),
       'utf8'));
     const lock = await readFile(path.join(paths.runtimeDependenciesDir, 'package-lock.json'));
-    const inputs = await deepSeekBuildInputs(paths.vendorDir);
+    const inputs = await deepSeekBuildInputs(selectedDeepSeekVendor());
 
     assert.equal(manifest.name, 'grigdesk-deepseek-build-dependencies');
     assert.equal(inputs.hashes['deepseek/build/runtime-deps/package-lock.json'], sha256(lock));
@@ -73,7 +73,7 @@ describe('dynamic imports и license supplements принадлежат паке
 
     const registry = JSON.parse(await readFile(paths.dynamicImportsFile, 'utf8'));
     const sources = JSON.parse(await readFile(path.join(paths.licensesDir, 'sources.json'), 'utf8'));
-    const inputs = await deepSeekBuildInputs(paths.vendorDir);
+    const inputs = await deepSeekBuildInputs(selectedDeepSeekVendor());
 
     assertKnownDynamicReferences([registry[0]], registry);
     assert.throws(() => assertKnownDynamicReferences([{
@@ -102,7 +102,7 @@ async function assertHostInput(
   assert.equal(paths.hostFiles[role], path.join(paths.root, 'src/host', `${role}.mjs`));
 
   const bytes = await readFile(paths.hostFiles[role]);
-  const inputs = await deepSeekBuildInputs(paths.vendorDir);
+  const inputs = await deepSeekBuildInputs(selectedDeepSeekVendor());
 
   assert.equal(inputs.hashes[relative], sha256(bytes));
 }
@@ -113,10 +113,6 @@ describe('entry host перенесён без изменения содержи
 
 describe('web host перенесён без изменения содержимого', () => {
   it('builder читает web host из пакета', () => assertHostInput('webHost'));
-});
-
-describe('presets host перенесён без изменения содержимого', () => {
-  it('builder читает presets host из пакета', () => assertHostInput('presetsHost'));
 });
 
 describe('ACP settings bridge перенесён без изменения содержимого', () => {
@@ -137,7 +133,7 @@ describe('runtime composition принадлежит scripts пакета', () =
 
     const composition = await import(pathToFileURL(paths.scripts.composition).href);
 
-    assert.equal(composition.COMPOSITION_REVISION, 'grigdesk-host-web-acp-v4');
+    assert.equal(composition.COMPOSITION_REVISION, 'grigdesk-host-web-acp-v5');
     assert.throws(() => composition.assertRuntimeClosure(new Set(), [
       {
         owner: 'package',
@@ -181,7 +177,7 @@ describe('build inputs и license writer принадлежат scripts паке
 
     t.after(() => rm(scratch, { recursive: true, force: true }));
     await assert.rejects(inputs.verifyCompiledResources(scratch, [{
-      name: '@deepseek-ai/dsh-code-runtime-worker-thread',
+      name: '@deepseek-ai/dsh-session-persistence-jsonl',
       root: 'packages/worker',
       manifest: { exports: { '.': './lib/typert.host.js' } },
     }]), (error: Error) => {
@@ -239,7 +235,23 @@ describe('builder принадлежит пакету и не требует ser
 
     const artifactsRoot = artifactsPath({ env: process.env, home: os.homedir() });
     const parent = path.join(artifactsRoot, 'build-input-tests');
-    const dependencies = await prepareLegacyDeepSeekDependencies(artifactsRoot);
+    const worker = await testDeepSeekRuntimeDependencies();
+
+    assert.equal(await sha256File(worker.node), worker.nodeSha256);
+
+    const identity = await exec(worker.node, ['-p',
+      'JSON.stringify({ nodeVersion: process.versions.node, nativeAbi: process.versions.modules, '
+      + 'platform: process.platform, arch: process.arch })',
+    ], { env: { PATH: '' } });
+
+    const runtime = JSON.parse(identity.stdout);
+
+    assert.deepEqual(runtime, {
+      nodeVersion: worker.version,
+      nativeAbi: worker.abi,
+      platform: process.platform,
+      arch: process.arch,
+    });
 
     await mkdir(parent, { recursive: true });
 
@@ -252,12 +264,13 @@ describe('builder принадлежит пакету и не требует ser
 
     t.after(() => rm(scratch, { recursive: true, force: true }));
 
-    // Копия builder получает отдельный автоматически подготовленный prefix текущего ABI.
+    // Сборка из отдельного cwd использует закреплённый worker и его prefix.
     // SEA dev dependencies и промежуточный cache в исходную фикстуру не входят.
     await cp(paths.root, copiedPackage, {
       recursive: true,
       verbatimSymlinks: true,
-      filter: (file) => !['node_modules', '.cache'].includes(path.relative(paths.root, file)),
+      filter: (file) => !['node_modules', '.cache', 'vendor/deepseek-harness']
+        .includes(path.relative(paths.root, file)),
     });
     await cp(path.join(path.dirname(path.resolve(paths.root)), 'shared'), path.join(source, 'shared'), {
       recursive: true,
@@ -268,6 +281,9 @@ describe('builder принадлежит пакету и не требует ser
 
     const cli = path.join(copiedPackage, 'scripts/buildRuntime.mts');
     const copiedVendor = path.join(copiedPackage, 'vendor/deepseek-harness');
+
+    await cp(selectedDeepSeekVendor(), copiedVendor, { recursive: true, verbatimSymlinks: true });
+
     const snapshotBefore = await verifyDeepSeekSnapshot(copiedVendor);
     const options = {
       cwd,
@@ -279,21 +295,21 @@ describe('builder принадлежит пакету и не требует ser
       timeout: 240000,
       maxBuffer: 4 * 1024 * 1024,
     };
-    const built = await exec(process.execPath, [cli, '--runtime-deps-dir', dependencies,
+    const built = await exec(worker.node, [cli, '--runtime-deps-dir', worker.directory,
       '--output-dir', generation], options);
 
     assert.equal(built.stdout.trim(), generation);
 
-    const metadata = await verifyTestDeepSeekArtifact(generation);
+    const metadata = await verifyTestDeepSeekArtifact(generation, runtime);
 
     assert.deepEqual(await verifyDeepSeekSnapshot(copiedVendor), snapshotBefore,
       'Успешная сборка не создаёт зависимости или compiled-файлы в vendor');
-    assert.equal(metadata.inputIdentity.nativeAbi, process.versions.modules);
+    assert.equal(metadata.inputIdentity.nativeAbi, worker.abi);
     await writeFile(path.join(artifactsPath({ env: process.env, home: os.homedir() }),
       'new-package-runtime.json'), JSON.stringify(metadata));
 
     const second = path.join(output, 'changed-inputs');
-    const pending = exec(process.execPath, [cli, '--runtime-deps-dir', dependencies,
+    const pending = exec(worker.node, [cli, '--runtime-deps-dir', worker.directory,
       '--output-dir', second], options);
     let finished = false;
     const outcome = pending.then((result) => {

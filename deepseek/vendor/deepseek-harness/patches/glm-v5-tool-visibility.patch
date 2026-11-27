@@ -1,0 +1,17 @@
+diff --git a/packages/core/agent-loop/src/agent.ts b/packages/core/agent-loop/src/agent.ts
+--- a/packages/core/agent-loop/src/agent.ts
++++ b/packages/core/agent-loop/src/agent.ts
+@@ -312,7 +312,12 @@
+         toolSet.dispose()
+         return decision
+       }
+-      return { ...decision, assembly, selection, toolSet }
++      // Профиль GLM публикует разрешённый набор до фиксации поверхности запроса.
++      const visible = this.loopCtx.get('grigdeskGlmToolVisible' as never) as
++        ((name: string, agent: Agent) => boolean) | undefined
++      if (!visible) return { ...decision, assembly, selection, toolSet }
++      const tools = assembly.tools.filter(({ name }) => visible(name, this))
++      return { ...decision, assembly: { ...assembly, tools }, selection, toolSet }
+     } catch (error: unknown) {
+       toolSet.dispose()
+       throw error

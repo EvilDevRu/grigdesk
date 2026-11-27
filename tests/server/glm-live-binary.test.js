@@ -61,7 +61,8 @@ function lastUser(payload) {
       : (item.content ?? []).map((block) => block.text ?? '').join('\n'));
 
   return messages.findLast((message) => !message.startsWith('Current runtime context.')
-    && !message.startsWith('<system-reminder>')) ?? '';
+    && !message.startsWith('<system-reminder>')
+    && !message.startsWith('Time sampled while preparing turn ')) ?? '';
 }
 
 /**

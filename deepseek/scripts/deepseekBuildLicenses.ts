@@ -65,6 +65,16 @@ export async function writeDeepSeekLicenseInventory(
         'supplement:GPL-3.0.txt');
     }
 
+    // WASM-пакет LibreOffice Kit кладёт тексты и атрибуцию рядом с исходными рецептами.
+    if (originals.length === 0 && manifest.name === '@deepseek-ai/libreoffice-kit-wasm'
+      && manifest.version === '0.2.3' && manifest.license === 'MPL-2.0') {
+      originals.push(
+        path.posix.join(relative, 'licenses/LICENSE'),
+        path.posix.join(relative, 'licenses/NOTICE'),
+        path.posix.join(relative, 'licenses/DeepSeek-Harness-MIT.txt'),
+      );
+    }
+
     if (originals.length === 0 && manifest.name === '@xterm/headless' && manifest.version === '6.0.0') {
       if (manifest.commit !== 'f447274f430fd22513f6adbf9862d19524471c04') {
         throw new Error('Изменился provenance xterm license supplement');

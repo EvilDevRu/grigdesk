@@ -12,7 +12,7 @@ import {
   prepareDeepSeekSync,
   verifyDeepSeekSnapshot,
 } from '../../deepseek/scripts/deepseekVendorManifest.ts';
-import { createDeepSeekVendorFixture } from '../helpers/deepseekVendor.mts';
+import { createDeepSeekVendorFixture, selectedDeepSeekVendor } from '../helpers/deepseekVendor.mts';
 
 const exec = promisify(execFile);
 
@@ -22,14 +22,15 @@ test('verifier читает vendor нового пакета одинаково 
 
   assert.equal(paths.vendorDir, expected);
 
-  const manifest = await verifyDeepSeekSnapshot(paths.vendorDir);
+  const selected = selectedDeepSeekVendor();
+  const manifest = await verifyDeepSeekSnapshot(selected);
   const pathsUrl = new URL('../../deepseek/scripts/paths.ts', import.meta.url).href;
   const verifierUrl = new URL('../../deepseek/scripts/deepseekVendorManifest.ts', import.meta.url).href;
   const source = `
 import { deepSeekPackagePaths } from ${JSON.stringify(pathsUrl)};
 import { verifyDeepSeekSnapshot } from ${JSON.stringify(verifierUrl)};
 const paths = deepSeekPackagePaths();
-const manifest = await verifyDeepSeekSnapshot(paths.vendorDir);
+const manifest = await verifyDeepSeekSnapshot(${JSON.stringify(selected)});
 console.log(JSON.stringify({ vendorDir: paths.vendorDir, commit: manifest.commit }));
 `;
 
@@ -73,7 +74,7 @@ test('offline snapshot отвергает порчу и неизвестный �
 
 test('upstream link-platform загрязняет только копию vendor и обнаруживается verifier-ом', async (t) => {
   const input = await createDeepSeekVendorFixture(t);
-  const original = deepSeekPackagePaths().vendorDir;
+  const original = selectedDeepSeekVendor();
   const directory = path.join(input.root, 'native-vendor');
 
   await fs.cp(original, directory, { recursive: true });

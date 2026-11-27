@@ -2,6 +2,8 @@ import { promises as fs } from 'node:fs';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 
+import type { VendorSelection } from './deepseekVendorManifest.ts';
+
 export interface ClosureRequirement {
   owner: string;
   kind: 'dependency' | 'peer' | 'yaml' | 'generated' | 'native' | 'dynamic';
@@ -23,11 +25,9 @@ export function assertRuntimeClosure(
   }
 }
 
-export const COMPOSITION_REVISION = 'grigdesk-host-web-acp-v4';
+export const COMPOSITION_REVISION = 'grigdesk-host-web-acp-v5';
 
 export const RUNTIME_WORKER_PACKAGES: ReadonlySet<string> = new Set([
-  '@deepseek-ai/dsh-code-runtime-worker-thread',
-  '@deepseek-ai/dsh-workflow-worker-thread',
   '@deepseek-ai/dsh-session-persistence-jsonl',
 ]);
 
@@ -47,6 +47,7 @@ const OMITTED_BUNDLE_PACKAGES = new Set([
   '@deepseek-ai/dsh-cordis-client-runner',
   '@deepseek-ai/dsh-host-directory-picker-auto',
   '@deepseek-ai/dsh-host-directory-picker-native',
+  '@deepseek-ai/dsh-message-quotes',
 ]);
 
 /**
@@ -76,6 +77,78 @@ function omitBundlePackage(name: string): boolean {
 }
 
 /**
+ * Поддерживает одиночный слой и список из manifest пакета в порядке объявления.
+ * Имя ресурса разрешается внутри своего bundle, поэтому manifest не читает соседние файлы.
+ */
+async function bundlePatchFiles(directory: string): Promise<string[]> {
+  const manifest = JSON.parse(await fs.readFile(path.join(directory, 'package.json'), 'utf8'));
+  const patch = manifest.dsh?.bundle?.patch ?? './cordis.patch.yml';
+  const files = Array.isArray(patch) ? patch : [patch];
+
+  if (!files.length || files.some((file) => typeof file !== 'string'
+    || !/^(?:\.\/)?(?:[\w.-]+\/)*[\w.-]+\.ya?ml$/u.test(file) || file.split('/').includes('..'))) {
+    throw new Error(`Некорректное объявление dsh.bundle.patch: ${directory}`);
+  }
+
+  return files;
+}
+
+/**
+ * Host-проект выбирается так же, как при компиляции.
+ * Пакет с одними ресурсами может обойтись без обоих проектов.
+ */
+async function hostProject(sourceDir: string, root: string) {
+  for (const name of ['tsconfig.host.json', 'tsconfig.json']) {
+    const file = path.posix.join(root, name);
+
+    try {
+      return { file, config: JSON.parse(await fs.readFile(path.join(sourceDir, file), 'utf8')) };
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+        throw error;
+      }
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Закрытый GLM preset строится из единственной штатной декларации standard.
+ * Сохраняем соседние пресеты и порядок слоёв, чтобы они не меняли поведение DeepSeek.
+ */
+function addGlmPreset(patches: any[]): void {
+  const inserts = patches.filter((patch) => Array.isArray(patch.insert)).map((patch) => patch.insert);
+  const rows = inserts.flat();
+
+  if (!rows.some((row) => row.id === 'agent-preset-registry')) {
+    return;
+  }
+
+  const standard = rows.filter((row) => row.id === 'preset-standard');
+
+  if (standard.length !== 1 || standard[0].name !== '@deepseek-ai/dsh-agent-preset'
+    || standard[0].config?.id !== 'standard' || !Array.isArray(standard[0].config.plugins)
+    || rows.some((row) => row.id === 'preset-grigdesk-glm')) {
+    throw new Error('Web bundle требует одну штатную декларацию preset-standard');
+  }
+
+  const original = standard[0];
+  const insert = inserts.find((group) => group.includes(original));
+
+  insert.splice(insert.indexOf(original) + 1, 0, {
+    ...original,
+    id: 'preset-grigdesk-glm',
+    config: {
+      ...original.config,
+      id: 'grigdesk-glm',
+      name: 'GLM GrigDesk',
+      plugins: glmForegroundPreset(original.config.plugins),
+    },
+  });
+}
+
+/**
  * Композиция убирает browser roster и автоматически монтируемый pi-ai.
  * Его пакет доступен только явному overlay; исходный YAML остаётся неизменным.
  */
@@ -87,9 +160,18 @@ export async function readRuntimeComposition(
   const layers: Record<string, any[]> = {};
 
   for (const bundle of ['base', 'web-app', 'acp-app']) {
-    const original = yaml.load(await fs.readFile(
-      path.join(sourceDir, `packages/bundle/${bundle}/cordis.patch.yml`), 'utf8',
-    ));
+    const directory = path.join(sourceDir, 'packages/bundle', bundle);
+    const original = [];
+
+    for (const file of await bundlePatchFiles(directory)) {
+      const entries = yaml.load(await fs.readFile(path.join(directory, file), 'utf8'));
+
+      if (!Array.isArray(entries)) {
+        throw new Error(`Слой bundle не содержит список patches: ${bundle}/${file}`);
+      }
+
+      original.push(...entries);
+    }
 
     layers[bundle] = original.map((patch: any) => {
       if (!Array.isArray(patch.insert)) {
@@ -106,6 +188,10 @@ export async function readRuntimeComposition(
 
       return { ...patch, insert: rows.filter((row: any) => !omitBundlePackage(row.name ?? '')) };
     });
+
+    if (bundle === 'web-app') {
+      addGlmPreset(layers[bundle]);
+    }
   }
 
   return layers;
@@ -131,6 +217,7 @@ export async function discoverRuntimeClosure(
   const reasons: Record<string, string[]> = {};
   const external: Record<string, Record<string, string>> = {};
   const packages = new Map<string, WorkspacePackage>();
+  const byRoot = new Map([...index.values()].map((item) => [item.root, item]));
 
   /**
    * Имя plugin subpath разрешается к единственному workspace package.
@@ -186,21 +273,37 @@ export async function discoverRuntimeClosure(
 
     packages.set(current.name, current);
 
-    const dependencies = { ...current.manifest.dependencies, ...current.manifest.peerDependencies };
+    const dependencies = {
+      ...current.manifest.dependencies,
+      ...current.manifest.peerDependencies,
+      ...Object.fromEntries(Object.entries(current.manifest.devDependencies ?? {})
+        .filter(([name]) => name.startsWith('@types/'))),
+    };
+    const importer = lock.importers[current.root];
 
     for (const [name, range] of Object.entries(dependencies)) {
-      if (current.root.startsWith('packages/bundle/') && omitBundlePackage(name)) {
+      if (omitBundlePackage(name)) {
         continue;
       }
 
-      if (index.has(name)) {
+      const entry = importer?.dependencies?.[name] ?? importer?.devDependencies?.[name];
+      const reference = entry?.version;
+
+      if (typeof reference === 'string' && reference.startsWith('link:')) {
+        const root = path.posix.normalize(path.posix.join(current.root, reference.slice(5)));
+        const linked = byRoot.get(root);
+
+        if (!linked || linked.name !== name) {
+          throw new Error(`${current.name}: неверная workspace link для ${name}`);
+        }
+
+        add(linked.name, `${current.name}: pnpm workspace link`);
+      } else if (index.has(name)) {
         add(name, `${current.name}: dependency/peer`);
       } else {
-        const importer = lock.importers[current.root];
-        const entry = importer?.dependencies?.[name] ?? importer?.devDependencies?.[name];
-        const version = entry?.version?.split('(')[0];
+        const version = reference?.split('(')[0];
 
-        if (!version || version.startsWith('link:')) {
+        if (!version) {
           throw new Error(`${current.name}: нет exact lock для ${name} ${range}`);
         }
 
@@ -210,47 +313,27 @@ export async function discoverRuntimeClosure(
     }
 
     if (current.name === '@deepseek-ai/node-addon-system') {
-      add(`@deepseek-ai/node-addon-system-${process.platform}-${process.arch}`, 'native host addon');
-    }
-
-    const configPath = path.join(sourceDir, current.root, 'tsconfig.host.json');
-    const fallback = path.join(sourceDir, current.root, 'tsconfig.json');
-    let config: any;
-
-    try {
-      config = JSON.parse(await fs.readFile(configPath, 'utf8'));
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
-        throw error;
-      }
-
-      try {
-        config = JSON.parse(await fs.readFile(fallback, 'utf8'));
-      } catch (fallbackError) {
-        if ((fallbackError as NodeJS.ErrnoException).code !== 'ENOENT') {
-          throw fallbackError;
-        }
+      for (const target of ['linux-x64', 'linux-arm64', 'darwin-arm64']) {
+        add(`@deepseek-ai/node-addon-system-${target}`, 'native host addon');
       }
     }
 
-    for (const reference of config?.references ?? []) {
+    const project = await hostProject(sourceDir, current.root);
+
+    for (const reference of project?.config.references ?? []) {
       const target = path.resolve(sourceDir, current.root, reference.path);
+
+      if (path.basename(target) === 'tsconfig.client.json') {
+        continue;
+      }
+
       const targetRoot = target.endsWith('.json') ? path.dirname(target) : target;
       const relative = path.relative(sourceDir, targetRoot);
-      const targetPackage = [...index.values()].find((item) => item.root === relative);
+      const targetPackage = byRoot.get(relative);
 
-      if (targetPackage && !omitBundlePackage(targetPackage.name)) {
+      if (targetPackage && (!omitBundlePackage(targetPackage.name)
+        || target.endsWith('tsconfig.host.json'))) {
         add(targetPackage.name, `${current.name}: host type reference`);
-      }
-    }
-
-    if (current.name === '@deepseek-ai/dsh-agent-presets') {
-      for (const preset of ['standard', 'minimal', 'cordis', 'ptc']) {
-        const resource = `presets/${preset}/agent.cordis.yml`;
-
-        addRows(runtimeYaml(dependencyDirectory).load(await fs.readFile(
-          path.join(sourceDir, current.root, resource), 'utf8',
-        )), `${current.name}: ${resource}`);
       }
     }
   }
@@ -259,6 +342,95 @@ export async function discoverRuntimeClosure(
     packages: [...packages.values()].sort((a, b) => a.root.localeCompare(b.root)),
     reasons,
     external,
+  };
+}
+
+/**
+ * Перечисляет каталоги компиляции и каждый унаследованный tsconfig в source snapshot.
+ * Обход повторяется для полного upstream tree перед подготовкой candidate.
+ */
+export async function discoverRuntimeSelection(
+  sourceDir: string,
+  dependencyDirectory?: string,
+): Promise<VendorSelection> {
+  const requireBuild = createRequire(dependencyDirectory
+    ? path.join(dependencyDirectory, 'package.json')
+    : new URL('../build/runtime-deps/package.json', import.meta.url));
+  const ts = requireBuild('typescript');
+  const closure = await discoverRuntimeClosure(sourceDir, dependencyDirectory);
+  const roots = new Map(closure.packages.map(({ root, name }) => [root, closure.reasons[name]!.join('; ')]));
+  const visited = new Set<string>();
+
+  /**
+   * Extends разрешается относительно содержащего проекта и удерживается внутри source tree.
+   * В selection попадают и родительские конфиги вложенных workspace-пакетов.
+   */
+  const includeConfig = async (file: string, config?: any): Promise<void> => {
+    if (visited.has(file)) {
+      return;
+    }
+
+    visited.add(file);
+
+    const parsed = config === undefined
+      ? ts.parseConfigFileTextToJson(file, await fs.readFile(path.join(sourceDir, file), 'utf8'))
+      : { config };
+
+    if (parsed.error) {
+      throw new Error(`Не удалось прочитать tsconfig ${file}: ${parsed.error.messageText}`);
+    }
+
+    roots.set(file, 'Конфигурация TypeScript для host runtime');
+
+    for (const spec of [parsed.config.extends ?? []].flat()) {
+      if (typeof spec !== 'string' || !spec.startsWith('.')) {
+        throw new Error(`Неизвестный tsconfig extends: ${file}`);
+      }
+
+      const target = path.posix.normalize(path.posix.join(path.posix.dirname(file), spec));
+
+      if (target.startsWith('../') || !target.endsWith('.json')) {
+        throw new Error(`Неизвестный tsconfig extends: ${file}`);
+      }
+
+      await includeConfig(target);
+    }
+  };
+
+  for (const { root } of closure.packages) {
+    const project = await hostProject(sourceDir, root);
+
+    if (project) {
+      await includeConfig(project.file, project.config);
+    }
+  }
+
+  roots.set('native/system', 'Исходники и скрипт сборки нативного модуля для трёх целей');
+  roots.set('pnpm-workspace.yaml', 'Опись workspace и патчей внешних пакетов');
+
+  const workspace = runtimeYaml(dependencyDirectory).load(await fs.readFile(
+    path.join(sourceDir, 'pnpm-workspace.yaml'), 'utf8',
+  ));
+
+  for (const patch of Object.values<string>(workspace.patchedDependencies ?? {})) {
+    if (!/^patches\/[\w@.-]+\.patch$/u.test(patch)) {
+      throw new Error('Некорректное имя патча внешней зависимости');
+    }
+
+    roots.set(patch, 'Патч внешней зависимости из pnpm-workspace.yaml');
+  }
+
+  const files = [...roots.keys()].sort();
+  const selected = files.filter((file) => !files
+    .some((parent) => file.startsWith(parent + '/')));
+
+  return {
+    roots: selected.map((file) => ({
+      path: file,
+      reason: roots.get(file)!,
+    })),
+    versionFile: 'package.json',
+    dependencyLockPath: 'pnpm-lock.yaml',
   };
 }
 
@@ -345,9 +517,9 @@ export function glmForegroundPreset(rows: any[]): any[] {
       count += 1;
       next.config = {
         ...row.config,
-        enableRunInBackground: false,
-        backgroundMode: 'one-shot',
-        modelSelectionSettings: false,
+        modelSelection: false,
+        modelDiscovery: false,
+        grigdeskForeground: true,
         maxDepth: 3,
       };
     }

@@ -6,6 +6,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { readDeepSeekArtifact as readPinnedArtifact, type DeepSeekWorkerRuntime }
+  from '../../shared/node/deepSeekArtifact.ts';
 import { sha256 } from '../../shared/node/hash.ts';
 import { acquireDirectoryLock } from '../../shared/node/directoryLock.ts';
 
@@ -22,8 +24,14 @@ const repositoryRoot = fileURLToPath(new URL('../..', import.meta.url));
  * Проверяется весь candidate, поэтому неизменный entry не скрывает повреждение dependency.
  * Внешний путь разрешён только как явно переданный тестовый артефакт.
  */
-export async function verifyTestDeepSeekArtifact(directory: string): Promise<Record<string, any>> {
-  readDeepSeekArtifact(directory);
+export async function verifyTestDeepSeekArtifact(
+  directory: string, worker?: DeepSeekWorkerRuntime,
+): Promise<Record<string, any>> {
+  if (worker) {
+    readPinnedArtifact(directory, worker);
+  } else {
+    readDeepSeekArtifact(directory);
+  }
 
   const metadata = JSON.parse(await fs.readFile(path.join(directory, 'runtime.json'), 'utf8'));
 

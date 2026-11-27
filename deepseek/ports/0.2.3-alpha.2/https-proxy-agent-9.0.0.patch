@@ -1,0 +1,15 @@
+Backport upstream 1852c750bb68a8a84ee96fda5977e7431aa22f92 (https-proxy-agent, MIT).
+
+--- a/dist/index.js
++++ b/dist/index.js
+@@ -135,7 +135,9 @@
+ }
+ HttpsProxyAgent.protocols = ['http', 'https'];
+ function resume(socket) {
+-    socket.resume();
++    setImmediate(() => {
++        socket.resume();
++    });
+ }
+ function omit(obj, ...keys) {
+     const ret = {};

@@ -21,6 +21,8 @@ const hint = "Справка: grigdesk-ctl --help"
 
 var delegated = []string{"desktop", "tracker", "pipeline", "voice", "mobile", "release", "dist"}
 
+// parse проверяет команды ctl до обращения к рабочему дереву.
+// Аргументы делегируемых инструментов остаются в их собственном формате.
 func parse(argv []string) (arguments, error) {
 	args := arguments{action: service.Action{Lines: 100}}
 	if len(argv) == 0 {
@@ -40,12 +42,13 @@ func parse(argv []string) (arguments, error) {
 
 	switch args.kind {
 	case "build":
+		targets := []string{"all", "server", "web", "window", "factory", "deepseek", "deepseek-admission", "apk"}
 		if len(args.tail) <= 1 && (len(args.tail) == 0 ||
-			slices.Contains([]string{"all", "server", "web", "window", "factory", "deepseek", "apk"}, args.tail[0])) {
+			slices.Contains(targets, args.tail[0])) {
 			return args, nil
 		}
-		const buildUsage = "Укажите цель: grigdesk-ctl build [all|server|web|window|factory|deepseek|apk]. %s"
-		return arguments{}, fmt.Errorf(buildUsage, hint)
+		const usage = "Укажите цель: grigdesk-ctl build [%s]. %s"
+		return arguments{}, fmt.Errorf(usage, strings.Join(targets, "|"), hint)
 	case "dev", "deps", "run":
 		if len(args.tail) != 0 {
 			return arguments{}, fmt.Errorf("Лишний аргумент: %s. %s", args.tail[0], hint)

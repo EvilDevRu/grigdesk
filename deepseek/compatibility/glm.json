@@ -5,11 +5,11 @@
   "admission": [
     {
       "mode": "coding-plan",
-      "compatibility": "3309e596b5bcbed44c57e600f780076f878e8487d2d22634bc0221f4eab7e5d1"
+      "compatibility": "f154cb3fb7f6c4299b10714ca002eaca3ff940abf5648f31defcd52a344fbd75"
     },
     {
       "mode": "api",
-      "compatibility": "3e64f54c10875b6109b12d260fc817794e3c3a39f8c68ae368f7e34757017946"
+      "compatibility": "32984b1b7d9571f1eefa6ecb49edecc473b6233398e2b5cfece210395a470ee7"
     }
   ]
 }

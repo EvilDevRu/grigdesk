@@ -1,29 +1,32 @@
-// Loopback-корень сохраняет штатную cookie authorization без browser application.
-// Авторизация и RPC принадлежат исходному Connection service.
-
 export const name = 'grigdesk-web-host';
-export const inject = ['webServer', 'connection'];
+export const inject = ['webServer'];
 
 /**
- * Только корневой GET участвует в штатном обмене process token на cookie.
- * Неизвестные пути остаются 404; host не публикует новую страницу или API.
+ * Корневой запрос после обмена токена проверяет cookie через штатный webserver.
+ * HTTP API и все остальные пути принадлежат исходным маршрутам Harness.
  */
 export function apply(ctx) {
-  ctx.effect(() => ctx.webServer.registerFallback((request, response) => {
-    const url = new URL(request.url ?? '/', 'http://127.0.0.1');
+  ctx.effect(() => ctx.webServer.register({
+    kind: 'exact',
+    path: '/',
+    auth: 'required',
+    /**
+     * Отвечает только на чтение, после проверки авторизации маршрута самим webserver.
+     * Ответ HEAD сохраняет заголовки GET и опускает тело.
+     */
+    handler(request, response) {
+      if (!['GET', 'HEAD'].includes(request.method)) {
+        response.writeHead(405, { allow: 'GET, HEAD' });
+        response.end();
 
-    if (url.pathname !== '/' || !['GET', 'HEAD'].includes(request.method)) {
-      response.writeHead(404);
-      response.end();
+        return;
+      }
 
-      return;
-    }
-
-    if (!ctx.connection.authorizeIndex(request, response)) {
-      return;
-    }
-
-    response.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
-    response.end(request.method === 'HEAD' ? '' : '{"ok":true}\n');
-  }), 'grigdesk-web-host: authentication root');
+      response.writeHead(200, {
+        'content-type': 'application/json',
+        'cache-control': 'no-store',
+      });
+      response.end(request.method === 'HEAD' ? undefined : '{"ok":true}\n');
+    },
+  }), 'grigdesk-web-host: корень после авторизации');
 }

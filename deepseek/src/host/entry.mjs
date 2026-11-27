@@ -13,6 +13,7 @@ import {
 } from '@deepseek-ai/dsh-launch-environment';
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths';
 import yaml from 'js-yaml';
+import { createSettingsProfile } from './settingsProfile.mjs';
 import { validateToolPermissionPolicy } from './toolPermissionGate.mjs';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
@@ -62,7 +63,12 @@ const expression = new yaml.Type('tag:yaml.org,2002:js', {
   construct: (value) => ({ __jsExpr: value }),
 });
 const schema = yaml.JSON_SCHEMA.extend(expression);
-const layers = [];
+let layers = [];
+const bundleRows = new Set();
+
+// Id формы входит в сохранённые overrides GrigDesk.
+const upstreamSubagentSettings = 'subagent-model-selection-settings';
+const grigdeskSubagentSettings = 'subagent-model-selection';
 
 for (const bundle of ['base', profile === 'web' ? 'web-app' : 'acp-app']) {
   const source = await readFile(path.join(root, `packages/bundle/${bundle}/cordis.patch.yml`), 'utf8');
@@ -70,9 +76,11 @@ for (const bundle of ['base', profile === 'web' ? 'web-app' : 'acp-app']) {
 
   for (const patch of patches) {
     for (const row of patch.insert || []) {
-      if (row.id === 'agent-presets') {
-        row.name = new URL('./presetsHost.mjs', import.meta.url).href;
+      if (row.id === upstreamSubagentSettings) {
+        row.id = grigdeskSubagentSettings;
       }
+
+      bundleRows.add(row.id);
     }
   }
 
@@ -82,7 +90,7 @@ for (const bundle of ['base', profile === 'web' ? 'web-app' : 'acp-app']) {
 if (profile === 'web') {
   layers.push({ insert: [
     { id: 'grigdesk-web-auth', name: new URL('./webHost.mjs', import.meta.url).href },
-  ] });
+  ] }, { id: 'remote-connection', disabled: true });
 } else {
   layers.push({ insert: [
     { id: 'settings-controller', name: '@deepseek-ai/dsh-api-settings-controller' },
@@ -90,18 +98,86 @@ if (profile === 'web') {
   ] });
 }
 
+/**
+ * Переносит ровно профиль сервера с прежним именем реестра.
+ * Закрытый запуск получает один объявленный preset и не читает пользовательские корни.
+ */
+function selectGlmPreset(patch) {
+  if (patch.config?.default !== 'grigdesk-glm' || patch.config.includeUserRoot !== false
+    || !bundleRows.has('agent-preset-registry') || !bundleRows.has('preset-grigdesk-glm')) {
+    throw new Error('Незнакомая конфигурация закрытого GLM preset');
+  }
+
+  layers = layers.map((layer) => Array.isArray(layer.insert) ? {
+    ...layer,
+    insert: layer.insert.filter((row) => row.name !== '@deepseek-ai/dsh-agent-preset'
+      || row.id === 'preset-grigdesk-glm'),
+  } : layer);
+
+  return {
+    id: 'agent-preset-registry',
+    config: {
+      default: 'grigdesk-glm',
+      selectedDefault: 'grigdesk-glm',
+    },
+  };
+}
+
+let legacySettingsPath;
+const requiredMcp = new Map();
+
 for (const overlay of overlays) {
-  const patches = loadOverlayPatches('dsh', overlay);
+  const patches = loadOverlayPatches('dsh', overlay).filter((patch) => {
+    if (patch.id !== 'settings' || !Object.hasOwn(patch.config || {}, 'path')) {
+      return true;
+    }
+
+    const file = patch.config.path;
+
+    if (legacySettingsPath || typeof file !== 'string' || !path.isAbsolute(file)
+      || Object.keys(patch).some((key) => !['id', 'config'].includes(key))
+      || Object.keys(patch.config).length !== 1) {
+      throw new Error('Настройки DeepSeek требуют единственный абсолютный путь документа');
+    }
+
+    legacySettingsPath = file;
+
+    return false;
+  });
+  const hasGlmRoute = patches.some((patch) =>
+    patch.insert?.some((row) => row.id === 'llm-pi-ai' && row.config?.providers?.zai));
+  const disablesDeepSeek = patches.some((patch) => patch.id === 'llm-deepseek' && patch.disabled === true);
+
+  if (hasGlmRoute && disablesDeepSeek) {
+    if (!bundleRows.has('llm-deepseek') || !bundleRows.has('llm-deepseek-account')) {
+      throw new Error('Не распознаны оба штатных маршрута DeepSeek');
+    }
+
+    patches.push({
+      id: 'llm-deepseek-account',
+      disabled: true,
+    });
+  }
 
   for (const patch of patches) {
+    if (patch.id === upstreamSubagentSettings) {
+      patch.id = grigdeskSubagentSettings;
+    }
+
     for (const row of patch.insert || []) {
+      if (row.name === '@deepseek-ai/dsh-mcp-client' && row.config?.failOnStartupError === true) {
+        requiredMcp.set(row.id, row.config.serverName);
+      }
+
       if (row.name === 'grigdesk:glm-gate') {
         row.name = new URL('./glmGate.mjs', import.meta.url).href;
       }
     }
   }
 
-  layers.push(...patches);
+  const hostPatches = patches.map((patch) => patch.id === 'agent-presets' ? selectGlmPreset(patch) : patch);
+
+  layers.push(...hostPatches);
 }
 
 if (toolPolicy) {
@@ -117,10 +193,18 @@ if (process.env.DSH_TELEMETRY_DISABLED) {
 }
 
 const home = resolveDshHome();
-const config = path.join(home, 'grigdesk-profile', profile, 'cordis.yml');
+const settingsDir = path.join(home, 'grigdesk-profile', profile);
+const settingsPath = legacySettingsPath
+  ? `${legacySettingsPath}.cordis.yml` : path.join(settingsDir, 'settings.patch.yml');
+const config = path.join(root, 'empty-root.yml');
 
-await mkdir(path.dirname(config), { recursive: true });
-await writeFile(config, '[]\n');
+await mkdir(path.dirname(settingsPath), { recursive: true, mode: 0o700 });
+layers.push({ id: 'config-editor', disabled: false }, { id: 'settings', disabled: false });
+
+const settingsStartup = Promise.withResolvers();
+const settingsProfile = createSettingsProfile(
+  layers, settingsPath, legacySettingsPath, settingsStartup.promise,
+);
 
 let context;
 let stopping = false;
@@ -159,8 +243,18 @@ process.once('SIGTERM', () => void stop(0));
 process.once('SIGINT', () => void stop(130));
 
 try {
-  context = await boot('dsh', config, layers, (ctx) => {
+  context = await boot('dsh', config, [
+    ...settingsProfile.base,
+    ...settingsProfile.read(),
+  ], (ctx) => {
     context = ctx;
+    ctx.provide('embeddedSettingsProfile', settingsProfile);
+
+    if (profile === 'web') {
+      ctx.provide('grigdeskResumeNamedSession', true);
+      ctx.provide('grigdeskLegacyToolResult', true);
+    }
+
     ctx.provide(DSH_LAUNCH_ENVIRONMENT_KEY, createLaunchEnvironmentSnapshot([
       { source: 'process', values: { ...process.env } },
     ]));
@@ -181,10 +275,33 @@ try {
     });
   }, new URL('./', import.meta.url).href);
 
+  if (!context.get('settings') || !context.get('configEditor')) {
+    throw new Error('Приватный редактор настроек DeepSeek не запущен');
+  }
+
+  // Loader alpha.2 предупреждает об отказе необязательных плагинов и запускает
+  // остальные. Служебные MCP с failOnStartupError должны быть активны до web-ready.
+  const entries = new Map([...context.loader.entries()].map((entry) => [entry.options.id, entry]));
+  const activeFiber = 2; // Cordis FiberState.ACTIVE, как в аудите app-boot.
+
+  for (const [id, server] of requiredMcp) {
+    if (entries.get(id)?.fiber?.state !== activeFiber) {
+      throw new Error(`mcp-client(${server}): initial connection or tool synchronization failed`);
+    }
+  }
+
+  await context.get('settings').restoreEmbeddedDocument();
+  await writeFile(settingsPath, '[]\n', { flag: 'wx', mode: 0o600 }).catch((error) => {
+    if (error.code !== 'EEXIST') {
+      throw error;
+    }
+  });
+
   if (toolPolicy && context.get('grigdeskToolPermissions')?.ready !== true) {
     throw new Error('Обязательная проверка разрешений DeepSeek не установлена');
   }
 
+  settingsStartup.resolve(true);
   ready = true;
 
   for (const listener of readyListeners) {
@@ -193,6 +310,7 @@ try {
 
   readyListeners.clear();
 } catch (error) {
+  settingsStartup.resolve(false);
   console.error(error);
   await stop(1);
 }

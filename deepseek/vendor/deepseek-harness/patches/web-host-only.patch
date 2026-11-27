@@ -1,19 +1,20 @@
 diff --git a/packages/bundle/web-app/src/index.ts b/packages/bundle/web-app/src/index.ts
+index 6b903d52..8adcef3b 100644
 --- a/packages/bundle/web-app/src/index.ts
 +++ b/packages/bundle/web-app/src/index.ts
-@@ -20,7 +20,6 @@
+@@ -19,7 +19,6 @@ import { Context } from '@deepseek-ai/cordis'
  import z from '@deepseek-ai/schemastery'
- import { addHarnessSourceSection } from '@deepseek-ai/dsh-app-boot'
+ import { auditStartupEntries } from '@deepseek-ai/dsh-app-boot'
  import type {} from '@deepseek-ai/dsh-client-connection'
 -import * as FrontendStatic from '@deepseek-ai/dsh-host-frontend-static'
+ import { bindUrlHost, isLoopbackHost, type WebEntryUrl } from '@deepseek-ai/dsh-host-webserver'
  import { launchedThroughSsh, launchEnvironmentOf } from '@deepseek-ai/dsh-launch-environment'
  import { scrubbedParentEnv } from '@deepseek-ai/dsh-subprocess'
- import type {} from '@deepseek-ai/cordis-plugin-loader'
-@@ -229,7 +228,6 @@
-   const handoffBrowser = config.openBrowser && !launchedThroughSsh(launchEnvironmentOf(ctx))
-   // Release dependent rows only after bind-dependent trust has been sampled once.
-   ctx.provide(WEB_RUNTIME_SERVICE, runtime)
+@@ -213,7 +212,6 @@ export function apply(ctx: Context, config: Config): void {
+   /** The advertised root: the canonical `publicUrl`, or the listener's own origin. */
+   const appRootUrl = (): string => publicUrl ?? ctx.webServer.getOrigin()
+   ctx.provide('webApp', { getAdvertisedUrl: appRootUrl } satisfies WebApp)
 -  ctx.plugin(FrontendStatic, { distIndex: internals.resolveDistIndex() })
    if (config.surfaceContext) {
-     ctx.inject(['systemPrompt'], (promptCtx) => {
-       addHarnessSourceSection(promptCtx, SOURCE_ROOT)
+     ctx.inject(['shellEnv'], (runtimeCtx) => {
+       runtimeCtx.shellEnv.register({

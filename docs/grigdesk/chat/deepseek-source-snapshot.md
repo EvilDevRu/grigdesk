@@ -1,10 +1,12 @@
 # Снимок исходников DeepSeek
 
-`deepseek/vendor/deepseek-harness/` закрепляет выбранный набор DeepSeek Harness `0.1.5-rc.2`,
-commit `c291e7961a515f6d7af9304e7fd1d257929aef26`: 183 выбранных корня, 2540 файлов,
-23 339 155 байт. Состав и настоящая host-сборка описаны в
-[отчёте композиции](deepseek-vendored-composition.md). Чаты и конвейеры используют
-автономный ELF, который включает проверенное поколение.
+
+`deepseek/vendor/deepseek-harness/` закрепляет выбранный набор DeepSeek Harness
+`0.2.3-alpha.2`, commit `4b399c39a6d1479cd84ca591b4d7c88e24d38a96`.
+Опись включает 244 выбранных корня и 5240 файлов. `deepseek/ports/0.2.3-alpha.2/`
+хранит исходную selection и патчи этого выпуска. Штатная сборка читает
+опубликованный manifest и его копии патчей. Чаты и конвейеры используют
+автономный ELF с проверенным поколением. [Состав runtime](deepseek-vendored-composition.md)
 
 ## Что лежит в Git, а что в кэше
 

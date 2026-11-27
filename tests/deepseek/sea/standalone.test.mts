@@ -14,7 +14,9 @@ import { glmCompatibilityIdentity } from '../../../server/src/lib/glm/contract.t
 import { GLM_ADMISSION } from '../../../deepseek/src/runtime/glmCompatibility.ts';
 import { startDeepSeekServer } from '../../../server/src/lib/deepseek/serverRuntime.ts';
 import { runDeepSeekServerTurn } from '../../../server/src/lib/deepseek/serverTurn.ts';
-import { startDeepSeekLoopback, writeDeepSeekLoopbackOverlay } from '../../helpers/deepseekLoopback.mts';
+import {
+  deepSeekUsesMessages, startDeepSeekLoopback, writeDeepSeekLoopbackOverlay,
+} from '../../helpers/deepseekLoopback.mts';
 
 const run = promisify(execFile);
 
@@ -200,6 +202,7 @@ test('ELF возобновляет журнал каждой объявленн�
   const scratch = await fs.mkdtemp(path.join(os.tmpdir(), 'standalone-journal-'));
   const mock = await startDeepSeekLoopback();
   const generation = path.join(candidate.cacheDir, 'packages', candidate.info.packageId, 'generation');
+  const flash = deepSeekUsesMessages(candidate.info.upstreamVersion) ? 'deepseek-flash' : 'deepseek-v4-flash';
   const rows = [
     {
       type: 'turn/start',
@@ -293,7 +296,7 @@ test('ELF возобновляет журнал каждой объявленн�
       },
       message: 'Продолжи существующий фикстурный журнал.',
       sessionId: id,
-      model: '["deepseek-official","deepseek-v4-flash"]',
+      model: JSON.stringify(['deepseek-official', flash]),
       effort: 'off',
       signal: AbortSignal.timeout(60000),
       startServer,

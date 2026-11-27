@@ -10,6 +10,7 @@ interface GlmTestRuntime {
   config: DeepSeekRuntimeConfig;
   artifact: string;
   identity: string;
+  runtimeVersion: string;
 }
 
 const selections = new Map<string, Promise<GlmTestRuntime>>();
@@ -63,5 +64,6 @@ async function prepareGlmTestRuntime(mode: 'binary' | 'embedded'): Promise<GlmTe
     config: Object.freeze(config),
     artifact,
     identity: glmCompatibilityIdentity(generation.runtime, 'api'),
+    runtimeVersion: generation.runtimeVersion,
   };
 }

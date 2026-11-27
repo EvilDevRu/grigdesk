@@ -5,7 +5,17 @@ import path from 'node:path';
 import type { TestContext } from 'node:test';
 import { promisify } from 'node:util';
 
+import { deepSeekPackagePaths } from '../../deepseek/scripts/paths.ts';
+
 const exec = promisify(execFile);
+
+/**
+ * Нативные проверки читают опись именно того дерева, из которого собран ELF.
+ * Вне проверки staging они используют обычный закреплённый снимок.
+ */
+export function selectedDeepSeekVendor(): string {
+  return process.env.GRIGDESK_TEST_DEEPSEEK_VENDOR_DIR ?? deepSeekPackagePaths().vendorDir;
+}
 
 /**
  * Настоящий локальный Git хранит provenance фикстуры независимо от рабочего дерева.

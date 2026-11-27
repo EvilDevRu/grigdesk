@@ -24,6 +24,7 @@ import { assertGlmGenerationAdmission, describeGlmGenerationAsync } from '../src
 import { glmAccessError } from '../src/lib/glm/env.ts';
 import { resolveDeepSeekRuntimeAsync } from '../src/lib/deepseek/runtimeProcess.ts';
 import chatModule from '../src/modules/chat/index.ts';
+import { writeGlmSmokeAdmission } from './glmSmokeAdmission.mts';
 import {
   cleanGlmSmokeDiagnostic,
   glmSmokeSecrets,
@@ -313,31 +314,6 @@ export async function runGlmLiveSmoke(options: GlmSmokeOptions) {
 }
 
 /**
- * Успешная живая проверка дописывает проверенный допуск в выпускную копию
- * compatibility-файла той же рабочей tree, откуда запущен скрипт. Запись режима
- * заменяется целиком, остальные режимы и ревизии не меняются. Следующая сборка
- * замораживает новый список в metadata ELF.
- */
-async function admitSmokeCompatibility(mode: GlmAccessMode, compatibility: string): Promise<void> {
-  const file = fileURLToPath(new URL('../../deepseek/compatibility/glm.json', import.meta.url));
-  const current = JSON.parse(await fs.readFile(file, 'utf8')) as {
-    admission?: Array<{ mode: string; compatibility: string }>;
-  };
-
-  if (!Array.isArray(current.admission)) {
-    throw new TypeError('Файл compatibility не содержит список admission');
-  }
-
-  current.admission = [
-    ...current.admission.filter((entry) => entry.mode !== mode),
-    { mode, compatibility },
-  ];
-
-  await fs.writeFile(file, `${JSON.stringify(current, null, 2)}\n`);
-  process.stdout.write(`ADMIT ${mode} ${compatibility}\n`);
-}
-
-/**
  * Точка входа человека: режим и явное подтверждение живого запуска обязательны.
  * Отчёт пишется в каталог артефактов этапа, временные homes удаляются.
  * `--admit` дописывает допуск только после полностью успешного сценария.
@@ -384,7 +360,10 @@ async function main(): Promise<void> {
     process.exitCode = report.ok ? 0 : 1;
 
     if (report.ok && process.argv.includes('--admit')) {
-      await admitSmokeCompatibility(mode, report.compatibility);
+      const compatibilityFile = fileURLToPath(new URL('../../deepseek/compatibility/glm.json', import.meta.url));
+
+      await writeGlmSmokeAdmission(compatibilityFile, mode, report.compatibility);
+      process.stdout.write(`ADMIT ${mode} ${report.compatibility}\n`);
       process.stdout.write('Повторите сборку поставки, чтобы заморозить новый допуск в metadata.\n');
     }
   } finally {

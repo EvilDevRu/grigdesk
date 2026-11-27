@@ -93,7 +93,7 @@ for (const target of ['all', 'server', 'web', 'window', 'deepseek', 'apk']) {
         assert.match(output, locale.startsWith('ru') ? /новый сервер ещё не выбран/u : /not selected yet/u);
       } else if (target === 'deepseek') {
         assert.match(output, locale.startsWith('ru')
-          ? /Поставлен DeepSeek: /u : /Installed DeepSeek: /u);
+          ? /Поставлен DeepSeek Harness: /u : /Installed DeepSeek Harness: /u);
         assert.match(output, locale.startsWith('ru')
           ? /Новый ELF получит следующий ход DeepSeek/u : /next DeepSeek turn/u);
       } else if (target === 'apk') {

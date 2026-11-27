@@ -17,7 +17,9 @@ import { testDeepSeekBinarySelection } from '../helpers/deepseekBinary.mts';
 import { ensureTestDeepSeekBinary, ensureTestDeepSeekBinaryPair } from '../helpers/deepseekBinary.mts';
 import { runtimeInfoFixture } from '../helpers/deepseekMetadataFixture.mts';
 import { writeDeepSeekBinaryStub } from '../helpers/deepseekBinaryStub.mts';
-import { startDeepSeekLoopback, writeDeepSeekLoopbackOverlay } from '../helpers/deepseekLoopback.mts';
+import {
+  deepSeekUsesMessages, startDeepSeekLoopback, writeDeepSeekLoopbackOverlay,
+} from '../helpers/deepseekLoopback.mts';
 
 const factory = await import('../../server/src/lib/executorSettings/factorySettings.ts').catch(() => null);
 const exec = promisify(execFile);
@@ -65,7 +67,6 @@ async function factoryLoopbackLaunch(args, endpoint) {
     root: launch.launchDir,
     artifact,
     endpoint,
-    document: path.join(launch.launchDir, 'native-settings.yaml'),
   });
   const combined = path.join(launch.launchDir, 'combined.yml');
 
@@ -178,7 +179,8 @@ function registerFactoryOverrides(delivery) {
   test(`${delivery}: настоящий Factory wrapper читает общие overrides каждого узла`, async (t) => {
     const f = await fixture(t);
     const candidate = await ensureTestDeepSeekBinary();
-    const artifact = path.join(candidate.cacheDir, 'packages', candidate.info.packageId, 'generation');
+    const flash = deepSeekUsesMessages(candidate.info.upstreamVersion)
+      ? 'deepseek-flash' : 'deepseek-v4-flash';
     const mock = await startDeepSeekLoopback();
     const events = [];
     const launches = [];
@@ -206,7 +208,7 @@ function registerFactoryOverrides(delivery) {
       await runDeepSeekFactory([
         '--bin', candidate.binary, '--cache-dir', candidate.cacheDir,
         '--cwd', f.root, '--run-dir', runDir, '--runtime-home', runtimeHome,
-        '--prompt-file', prompt, '--model', '["deepseek-official","deepseek-v4-flash"]',
+        '--prompt-file', prompt, '--model', JSON.stringify(['deepseek-official', flash]),
         '--effort', 'off', '--mode', 'workspace-write',
       ], {
         PATH: process.env.PATH,

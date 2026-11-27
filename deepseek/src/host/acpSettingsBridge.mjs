@@ -40,7 +40,8 @@ export function apply(ctx) {
   ctx.provide('grigdeskAcpSettingsBridge', {
     capabilities: { 'grigdesk.settings': { contract: 1 } },
     configure(app) {
-      app.onRequest('_grigdesk/settings/describe', parameters, () => delegate(() => controller.describe()));
+      app.onRequest('_grigdesk/settings/describe', parameters, () =>
+        delegate(() => controller.describeWhenReady()));
       app.onRequest('_grigdesk/settings/mutate', parameters, async ({ params }) => {
         if (
           typeof params.ns !== 'string' || !Array.isArray(params.ops) ||

@@ -3,7 +3,7 @@ import { cp, mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import type { TestContext } from 'node:test';
 
-import { goCandidate } from '../../helpers/goCandidate.mts';
+import { fixtureGo } from '../../helpers/goBuildFixture.mts';
 import { fixture } from '../../server/helpers/ctlBuildFixture.js';
 import { repository, menuTitle, down } from './menuFixture.mts';
 import { startPty } from './pty.mts';
@@ -93,11 +93,21 @@ export async function terminalBuildFixture(t: TestContext, useGo = process.env.G
     await writeFile(file, original.replace('process.exit(', insert + '\nprocess.exit('), { mode: 0o755 });
   }
 
-  const executable = useGo ? goCandidate('grigdesk-ctl') : '/bin/bash';
+  const executable = useGo ? fixtureGo('grigdesk-ctl') : '/bin/bash';
   const prefix = useGo ? [] : [path.join(box.root, 'bin/grigdesk-ctl')];
 
   if (useGo) {
     Object.assign(env, { GRIGDESK_CTL_CHECKOUT_ROOT: box.root });
+
+    const backport = 'deepseek/scripts/glm54Backport.mts';
+    const vendor = path.join(box.root, 'deepseek/vendor/deepseek-harness');
+
+    await cp(path.join(repository, backport), path.join(box.root, backport));
+    await mkdir(vendor, { recursive: true });
+    await writeFile(path.join(vendor, 'upstream.lock.json'), JSON.stringify({
+      version: '0.2.0',
+      commit: 'test',
+    }));
   }
 
   return {

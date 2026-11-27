@@ -12,7 +12,7 @@ export function deepSeekPackagePaths(): {
   dynamicImportsFile: string;
   licensesDir: string;
   hostFiles: Record<
-    'entry' | 'webHost' | 'presetsHost' | 'acpSettingsBridge'
+    'entry' | 'settingsProfile' | 'webHost' | 'acpSettingsBridge'
     | 'toolPermissionGate' | 'toolPermissionPolicy' | 'toolPermissionPaths', string
   >;
   scripts: Record<'composition' | 'inputs' | 'licenses' | 'vendor' | 'sync' | 'runtime', string>;
@@ -27,8 +27,8 @@ export function deepSeekPackagePaths(): {
     licensesDir: path.join(root, 'build/licenses'),
     hostFiles: {
       entry: path.join(root, 'src/host/entry.mjs'),
+      settingsProfile: path.join(root, 'src/host/settingsProfile.mjs'),
       webHost: path.join(root, 'src/host/webHost.mjs'),
-      presetsHost: path.join(root, 'src/host/presetsHost.mjs'),
       acpSettingsBridge: path.join(root, 'src/host/acpSettingsBridge.mjs'),
       toolPermissionGate: path.join(root, 'src/host/toolPermissionGate.mjs'),
       toolPermissionPolicy: path.join(root, 'src/host/toolPermissionPolicy.mjs'),

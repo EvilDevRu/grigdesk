@@ -101,7 +101,8 @@ async function buildCandidate(
       env: {
         PATH: process.env.PATH,
         TMPDIR: process.env.TMPDIR,
-        NODE_OPTIONS: '--max-old-space-size=1024',
+        NODE_OPTIONS: '--max-old-space-size=768',
+        MALLOC_ARENA_MAX: '2',
       },
     });
 

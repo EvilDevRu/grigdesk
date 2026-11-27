@@ -1,0 +1,15 @@
+diff --git a/packages/session/session-format-v3-to-v4/src/extension-identities.ts b/packages/session/session-format-v3-to-v4/src/extension-identities.ts
+--- a/packages/session/session-format-v3-to-v4/src/extension-identities.ts
++++ b/packages/session/session-format-v3-to-v4/src/extension-identities.ts
+@@ -24,6 +24,11 @@
+   'feedback/message-put',
+   'feedback/record',
+   'goal/change',
++  // Фиксированные события, которые записывал GLM в поставке GrigDesk с форматом V3.
++  'grigdesk/glm-ready',
++  'grigdesk/glm-policy',
++  'grigdesk/glm-policy-error',
++  'grigdesk/glm-delegation',
+   'hook/invoked',
+   'hook/result',
+   'image/offload',

@@ -4,6 +4,16 @@ import { createServer } from 'node:http';
 import { pathToFileURL } from 'node:url';
 import type { AddressInfo } from 'node:net';
 
+import { writeDeepSeekMessagesReply } from './deepseekMessagesLoopback.mjs';
+
+/**
+ * Выбирает форму запросов проверяемого ELF.
+ * Фикстуры перехода сохраняют поддержку предыдущего транспорта.
+ */
+export function deepSeekUsesMessages(version: string): boolean {
+  return /^0\.2\./u.test(version);
+}
+
 /**
  * Mock слушает только loopback и записывает запросы собственного synthetic provider.
  * SSE соответствует реальному adapter/translate, внешний API здесь не нужен.
@@ -22,7 +32,9 @@ export async function startDeepSeekLoopback(options: {
       body += String(chunk);
     }
 
-    if (request.url !== '/chat/completions') {
+    const messages = request.url === '/v1/messages';
+
+    if (request.method !== 'POST' || !messages && request.url !== '/chat/completions') {
       response.writeHead(404).end();
 
       return;
@@ -38,9 +50,17 @@ export async function startDeepSeekLoopback(options: {
       return;
     }
 
+    const deltas = scripted?.deltas ?? [{ role: 'assistant', content: 'loopback-ok' }];
+
+    if (messages) {
+      writeDeepSeekMessagesReply(response, payload.model, { deltas, finishReason: scripted?.finishReason });
+
+      return;
+    }
+
     response.writeHead(200, { 'content-type': 'text/event-stream' });
 
-    for (const delta of scripted?.deltas ?? [{ role: 'assistant', content: 'loopback-ok' }]) {
+    for (const delta of deltas) {
       response.write(`data: ${JSON.stringify({
         id: 'mock-completion',
         model: 'deepseek-v4-flash',
@@ -89,7 +109,7 @@ export async function writeDeepSeekLoopbackOverlay(options: {
   root: string;
   artifact: string;
   endpoint: string;
-  document: string;
+  document?: string;
   restartOwner?: string;
 }) {
   const plugin = path.join(options.root, 'loopback-host.mjs');
@@ -121,9 +141,11 @@ export async function writeDeepSeekLoopbackOverlay(options: {
   const overlay = path.join(options.root, 'overlay.yml');
 
   await fs.writeFile(overlay, [
-    '- id: settings',
-    '  config:',
-    `    path: ${JSON.stringify(options.document)}`,
+    ...(options.document ? [
+      '- id: settings',
+      '  config:',
+      `    path: ${JSON.stringify(options.document)}`,
+    ] : []),
     '- id: session-title-llm',
     '  disabled: true',
     '- id: llm-deepseek',

@@ -6,7 +6,9 @@ import path from 'node:path';
 import test from 'node:test';
 
 import { ensureTestDeepSeekArtifact } from './deepseekRuntimeArtifact.mts';
-import { startDeepSeekLoopback, writeDeepSeekLoopbackOverlay } from './deepseekLoopback.mts';
+import {
+  deepSeekUsesMessages, startDeepSeekLoopback, writeDeepSeekLoopbackOverlay,
+} from './deepseekLoopback.mts';
 import { resolveDeepSeekRuntimeAsync } from '../../server/src/lib/deepseek/runtimeProcess.ts';
 import { startDeepSeekServer } from '../../server/src/lib/deepseek/serverRuntime.ts';
 import { runDeepSeekServerTurn } from '../../server/src/lib/deepseek/serverTurn.ts';
@@ -45,6 +47,11 @@ async function settingsFixture(t, mode) {
   const artifact = candidate
     ? path.join(candidate.cacheDir, 'packages', candidate.info.packageId, 'generation')
     : await ensureTestDeepSeekArtifact();
+  const version = candidate?.info.upstreamVersion
+    ?? JSON.parse(await fs.readFile(path.join(artifact, 'runtime.json'), 'utf8')).runtimeVersion;
+  const messages = deepSeekUsesMessages(version);
+  const flash = messages ? 'deepseek-flash' : 'deepseek-v4-flash';
+
   const config = candidate ? {
     deepseekRuntimeMode: 'binary',
     deepseekBin: candidate.binary,
@@ -65,6 +72,8 @@ async function settingsFixture(t, mode) {
     runtime,
     root,
     mock,
+    messages,
+    flash,
   };
 }
 
@@ -76,7 +85,7 @@ export function registerDeepSeekSettingsParity(mode = 'binary') {
   const fixture = (t) => settingsFixture(t, mode);
 
   test('настоящий web maxTokens 64/128 меняет max_tokens HTTP без внешнего API', async (t) => {
-    const { artifact, runtime, root, mock } = await fixture(t);
+    const { artifact, runtime, root, mock, messages, flash } = await fixture(t);
 
     for (const maxTokens of [64, 128]) {
       const home = path.join(root, String(maxTokens));
@@ -105,7 +114,7 @@ export function registerDeepSeekSettingsParity(mode = 'binary') {
         },
         nativeSettings: plan([['llm-deepseek', 'maxTokens', maxTokens]]),
         message: 'Ответь fixture',
-        model: '["deepseek-official","deepseek-v4-flash"]',
+        model: JSON.stringify(['deepseek-official', flash]),
         effort: 'off',
         signal: AbortSignal.timeout(30_000),
       });
@@ -118,7 +127,7 @@ export function registerDeepSeekSettingsParity(mode = 'binary') {
   });
 
   test('настоящий ACP maxTokens и restart owner переживают двухфазный запуск', async (t) => {
-    const { artifact, runtime, root, mock } = await fixture(t);
+    const { artifact, runtime, root, mock, messages, flash } = await fixture(t);
 
     for (const maxTokens of [64, 128]) {
       const home = path.join(root, String(maxTokens));
@@ -133,7 +142,7 @@ export function registerDeepSeekSettingsParity(mode = 'binary') {
         root: home,
         document,
         endpoint: mock.endpoint,
-        restartOwner: owner,
+        restartOwner: messages ? undefined : owner,
       });
       const options = {
         runtime,
@@ -148,15 +157,23 @@ export function registerDeepSeekSettingsParity(mode = 'binary') {
         },
       };
       const selected = plan([
-        ['llm-deepseek', 'maxTokens', maxTokens], ['grigdesk-restart-test', 'enabled', false],
+        ['llm-deepseek', 'maxTokens', maxTokens],
+        ...messages ? [] : [['grigdesk-restart-test', 'enabled', false]],
       ]);
       const preparatory = await startDeepSeekAcpSettings(options);
 
       try {
-        assert.equal(await fs.readFile(owner, 'utf8'), 'true');
+        if (!messages) {
+          assert.equal(await fs.readFile(owner, 'utf8'), 'true');
+        }
+
         await applyDeepSeekNativeSettings(preparatory.client, selected);
         await verifyDeepSeekNativeSettings(preparatory.client, selected);
-        assert.equal(await fs.readFile(owner, 'utf8'), 'true', 'Readback не означает смену restart owner');
+
+        if (!messages) {
+          assert.equal(await fs.readFile(owner, 'utf8'), 'true', 'Readback не означает смену restart owner');
+        }
+
         assert.equal(mock.payloads.length, maxTokens === 64 ? 0 : 1);
       } finally {
         await preparatory.stop();
@@ -177,7 +194,11 @@ export function registerDeepSeekSettingsParity(mode = 'binary') {
         const rpc = acpDeepSeekSettingsRpc(client, initialized);
 
         await verifyDeepSeekNativeSettings(rpc, selected);
-        assert.equal(await fs.readFile(owner, 'utf8'), 'false');
+
+        if (!messages) {
+          assert.equal(await fs.readFile(owner, 'utf8'), 'false');
+        }
+
 
         const session = await client.request('session/new', { cwd: home, mcpServers: [] });
 
@@ -207,7 +228,7 @@ export function registerDeepSeekSettingsParity(mode = 'binary') {
   });
 
   test('настоящий web boolean сохраняет false отдельно от значения base', async (t) => {
-    const { artifact, runtime, root, mock } = await fixture(t);
+    const { artifact, runtime, root, mock, messages, flash } = await fixture(t);
     const document = path.join(root, 'native-settings.yaml');
 
     await fs.writeFile(document, '{}\n');
@@ -225,7 +246,7 @@ export function registerDeepSeekSettingsParity(mode = 'binary') {
       '    enabled: true',
       '    allowedModels:',
       '      - provider: deepseek-official',
-      '        model: deepseek-v4-flash',
+      `        model: ${flash}`,
     ].join('\n') + '\n');
 
     const server = await startDeepSeekServer({
@@ -249,15 +270,18 @@ export function registerDeepSeekSettingsParity(mode = 'binary') {
       assert.equal(namespace.value.enabled, true);
       await applyDeepSeekNativeSettings(server.client, selected);
       await verifyDeepSeekNativeSettings(server.client, selected);
-      assert.match(await fs.readFile(document, 'utf8'), /enabled: false/u);
+
+      const saved = messages ? `${document}.cordis.yml` : document;
+
+      assert.match(await fs.readFile(saved, 'utf8'), /enabled: false/u);
       assert.equal(mock.payloads.length, 0);
     } finally {
       await server.stop();
     }
   });
 
-  test('настоящий web restart запускает owner из изменённого документа до prompt', async (t) => {
-    const { artifact, runtime, root, mock } = await fixture(t);
+  test('настоящий web применяет живое поле или перезапускает owner до prompt', async (t) => {
+    const { artifact, runtime, root, mock, messages, flash } = await fixture(t);
     const document = path.join(root, 'native-settings.yaml');
     const owner = path.join(root, 'owner.txt');
 
@@ -268,7 +292,7 @@ export function registerDeepSeekSettingsParity(mode = 'binary') {
       root,
       document,
       endpoint: mock.endpoint,
-      restartOwner: owner,
+      restartOwner: messages ? undefined : owner,
     });
     const observations = [];
     const result = await runDeepSeekServerTurn({
@@ -283,21 +307,28 @@ export function registerDeepSeekSettingsParity(mode = 'binary') {
         DSH_TELEMETRY_DISABLED: '1',
         DEEPSEEK_API_KEY: 'grigdesk-loopback-only',
       },
-      nativeSettings: plan([['grigdesk-restart-test', 'enabled', false]]),
+      nativeSettings: plan(messages
+        ? [['llm-deepseek', 'maxTokens', 64]]
+        : [['grigdesk-restart-test', 'enabled', false]]),
+      model: JSON.stringify(['deepseek-official', flash]),
       message: 'fixture',
       signal: AbortSignal.timeout(30_000),
       startServer: async (options) => {
         const server = await startDeepSeekServer(options);
 
-        observations.push(await fs.readFile(owner, 'utf8'));
+        observations.push(messages ? 'live' : await fs.readFile(owner, 'utf8'));
 
         return server;
       },
     });
 
     assert.equal(result.reply, 'loopback-ok');
-    assert.deepEqual(observations, ['true', 'false']);
+    assert.deepEqual(observations, messages ? ['live'] : ['true', 'false']);
     assert.equal(mock.payloads.length, 1);
+
+    if (messages) {
+      assert.equal(mock.payloads[0].max_tokens, 64);
+    }
   });
 
   test('настоящий ACP отклоняет override до worker, session и model HTTP', async (t) => {

@@ -32,7 +32,7 @@ const model = (name) => JSON.stringify(['zai', name]);
  * Подменены только адрес модели и сторож внешнего fetch (Р16); допуск — identity этой сборки.
  */
 async function fixture(t, loopbackOptions = {}) {
-  const { config: runtimeConfig, identity } = await ensureGlmTestRuntime();
+  const { config: runtimeConfig, identity, runtimeVersion } = await ensureGlmTestRuntime();
 
   await fs.mkdir(ARTIFACTS, { recursive: true });
 
@@ -69,6 +69,7 @@ async function fixture(t, loopbackOptions = {}) {
   return {
     cwd,
     mock,
+    runtimeVersion,
     run: (options = {}) => adapter.run({
       config,
       cwd,
@@ -197,28 +198,39 @@ test('настоящий ход: переполнение контекста с�
     // Факт G5: со старой историей DSH сжимает её запросом-выжимкой и повторяет запрос хода.
     await t.test('история есть', async (sub) => {
       const f = await fixture(sub, { respond: (_payload, index) => index === 1 ? overflow
-        : glmTextReply(['first', null, 'fixture-summary', 'after-compaction'][index]) });
+        : glmTextReply(['first', null, 'fixture-summary of second-prompt', 'after-compaction'][index]) });
       const first = await f.run();
       const second = await f.run({ sessionId: first.sessionId, message: 'second-prompt' });
       const retried = JSON.stringify(f.mock.requests[3].payload.messages);
 
       assert.equal(second.reply, 'after-compaction');
       assert.equal(f.mock.requests.length, 4);
-      assert.match(JSON.stringify(f.mock.requests[2].payload.messages), /compaction engine/u);
-      assert.match(retried, /fixture-summary/u);
-      assert.match(retried, /second-prompt/u);
+
+      const compaction = JSON.stringify(f.mock.requests[2].payload.messages);
+
+      assert.match(compaction, /compaction engine/u);
+      assert.match(compaction, /second-prompt/u);
+      assert.match(retried, /fixture-summary of second-prompt/u);
     });
 
-    // В первом ходе сжимать нечего: после запроса-выжимки ход — сбой доставки без повтора.
+    // Alpha.2 может сжать первый запрос. Прежняя линия после попытки выжимки завершает ход.
     await t.test('истории нет', async (sub) => {
       const f = await fixture(sub, { respond: (_payload, index) => index === 0 ? overflow
-        : glmTextReply('fixture-summary') });
+        : glmTextReply(index === 1 ? 'fixture-summary' : 'after-compaction') });
       const result = await f.run();
 
       await new Promise((resolve) => setTimeout(resolve, 500));
-      assert.equal(result.deliveryFailure, true);
-      assert.equal(f.mock.requests.length, 2);
+
+      const legacy = f.runtimeVersion.startsWith('0.1.');
+
+      assert.equal(Boolean(result.deliveryFailure), legacy);
+      assert.equal(f.mock.requests.length, legacy ? 2 : 3);
       assert.match(JSON.stringify(f.mock.requests[1].payload.messages), /compaction engine/u);
+
+      if (!legacy) {
+        assert.equal(result.reply, 'after-compaction');
+        assert.match(JSON.stringify(f.mock.requests[2].payload.messages), /fixture-summary/u);
+      }
     });
   });
 

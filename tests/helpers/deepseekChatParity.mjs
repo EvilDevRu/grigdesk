@@ -12,7 +12,9 @@ import { prepareChatNativeSettings } from '../../server/src/lib/executorSettings
 import { PrefsStore } from '../../server/src/lib/prefsStore.ts';
 import { artifactsPath } from '../../shared/runtime/dataHome.ts';
 import { ensureTestDeepSeekArtifact } from './deepseekRuntimeArtifact.mts';
-import { startDeepSeekLoopback, writeDeepSeekLoopbackOverlay } from './deepseekLoopback.mts';
+import {
+  deepSeekUsesMessages, startDeepSeekLoopback, writeDeepSeekLoopbackOverlay,
+} from './deepseekLoopback.mts';
 import { deepSeekTestArtifactsRoot, ensureTestDeepSeekBinary } from './deepseekBinary.mts';
 
 const REPO_ROOT = path.resolve(import.meta.dirname, '../..');
@@ -30,6 +32,11 @@ export async function deepSeekProductionChatFixture(t, mockOptions, {
   const artifact = candidate
     ? path.join(candidate.cacheDir, 'packages', candidate.info.packageId, 'generation')
     : await ensureTestDeepSeekArtifact();
+  const version = candidate?.info.upstreamVersion
+    ?? JSON.parse(await fs.readFile(path.join(artifact, 'runtime.json'), 'utf8')).runtimeVersion;
+  const messages = deepSeekUsesMessages(version);
+  const flash = messages ? 'deepseek-flash' : 'deepseek-v4-flash';
+
   const fixtures = mode === 'binary'
     ? path.join(deepSeekTestArtifactsRoot(), 's12/fs-fixtures')
     : path.join(artifactsPath({ env: process.env, home: os.homedir() }), 'deepseek-vendoring/fs-fixtures');
@@ -87,7 +94,7 @@ export async function deepSeekProductionChatFixture(t, mockOptions, {
         ? path.join(config.deepseekCacheDir, 'packages', options.runtime.metadata.packageId, 'generation')
         : artifact,
       endpoint: mock.endpoint,
-      document,
+      document: messages ? undefined : document,
     });
     const combined = path.join(launchDir, 'combined.yml');
 
@@ -122,7 +129,7 @@ export async function deepSeekProductionChatFixture(t, mockOptions, {
     projectRoot,
     chatKey: 'fixture-chat',
     message: 'first-fixture-prompt',
-    model: '["deepseek-official","deepseek-v4-flash"]',
+    model: JSON.stringify(['deepseek-official', flash]),
     effort: 'off',
     env: {
       PATH: process.env.PATH,
@@ -140,6 +147,8 @@ export async function deepSeekProductionChatFixture(t, mockOptions, {
     cwd,
     projectRoot,
     mock,
+    messages,
+    flash,
     config,
     launches,
     startServer,
@@ -193,11 +202,11 @@ export function registerDeepSeekChatParity(mode = 'binary') {
 
     assert.equal(second.sessionId, first.sessionId);
     assert.equal(second.reply, 'x'.repeat(20));
-    assert.equal(payload.model, 'deepseek-v4-flash');
+    assert.equal(payload.model, f.flash);
     assert.deepEqual(payload.thinking, { type: 'enabled' });
-    assert.equal(payload.reasoning_effort, 'high');
+    assert.equal(f.messages ? payload.output_config?.effort : payload.reasoning_effort, 'high');
     assert.match(JSON.stringify(payload.messages), /first-fixture-prompt/);
-    assert.match(JSON.stringify(payload.messages), /fixture-instructions-in-cwd/);
+    assert.match(JSON.stringify(payload), /fixture-instructions-in-cwd/);
     assert.match(JSON.stringify(payload.messages), /second-fixture-prompt/);
     assert.equal(second.contextMetric, 'deepseek-web-usage');
     assert.equal(second.contextTokens, 8);
@@ -381,7 +390,7 @@ export function registerDeepSeekChatParity(mode = 'binary') {
   test('настоящие host hooks блокируют прямые SSH и DB команды', async (t) => {
     for (const command of [
       'ssh -oBatchMode=yes -oConnectTimeout=1 -p 9 fixture@127.0.0.1',
-      'mysql --help',
+      'mysql --host db.example.invalid app',
     ]) {
       await t.test(command.split(' ')[0], async (scenario) => {
         const f = await fixture(scenario, { respond: async (_payload, index) => index === 0
@@ -399,9 +408,10 @@ export function registerDeepSeekChatParity(mode = 'binary') {
   test('настоящий host MCP вызывается и не наследует API key или canonical prefs path', async (t) => {
     let advertised;
     const f = await fixture(t, { respond: async (payload, index) => {
-      advertised ||= payload.tools.find((tool) => tool.function.name.includes('fixture'));
+      advertised ||= payload.tools.map((tool) => tool.function?.name ?? tool.name)
+        .find((name) => name.includes('fixture'));
 
-      return index === 0 ? toolResponse(advertised?.function.name || 'missing-fixture-tool', {})
+      return index === 0 ? toolResponse(advertised || 'missing-fixture-tool', {})
         : { deltas: [{ content: 'loopback-ok' }] };
     } });
     const server = path.join(f.root, 'fixture-mcp.mjs');

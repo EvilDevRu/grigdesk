@@ -23,10 +23,14 @@ TypeScript, esbuild, sharp, koffi и node-pty текущим Node. Marker зап
 затем staging атомарно переименовывается. Builder получает `--runtime-deps-dir` с этим prefix.
 Production binary, подготовленный `runtime-deps-node24` и исходный prefix не переписываются.
 
-Standalone-проверка `tests/deepseek/buildInputs.test.mts` получает тот же автоматически
-подготовленный prefix и передаёт его копии builder через CLI. Она также работает без
-установленных пакетов в исходном `deepseek/build/runtime-deps/`. Общий срок её сценария
-учитывает холодную подготовку и две сборки; отдельный срок каждой команды не увеличивается.
+Standalone-проверка сборки из `tests/deepseek/buildInputs.test.mts` запускает
+builder проверенным worker из подготовленного кэша и запускается из другого cwd.
+Перед проверкой результата она сверяет SHA и ABI worker. Тест сравнивает полный
+payload и отклоняет изменение сборочных входов между стартом и публикацией.
+
+Проверка source candidate передаёт staging во все ступени как
+`GRIGDESK_TEST_DEEPSEEK_VENDOR_DIR`. В тестах сравниваются версия и commit
+ELF с manifest staging, поэтому проверка работает до замены рабочего manifest.
 
 При повторном использовании проверяются marker, точные manifests, версии пакетов и загрузка
 native-модулей. Незавершённая установка, чужой ABI или повреждённая зависимость автоматически

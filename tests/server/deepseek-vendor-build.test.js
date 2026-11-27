@@ -16,6 +16,9 @@ import {
   probeDeepSeekRuntime,
 } from '../../server/src/lib/deepseek/runtimeProcess.ts';
 
+import { verifyDeepSeekVendorMetadata } from '../../deepseek/scripts/deepseekVendorManifest.ts';
+import { selectedDeepSeekVendor } from '../helpers/deepseekVendor.mts';
+
 const exec = promisify(execFile);
 
 test('closure называет missing peer, YAML plugin, generated и native входы вместе', () => {
@@ -102,7 +105,11 @@ test('настоящий runtime переносится и сохраняет we
 
   const version = await exec(binary, ['-V'], { cwd, env: { PATH: '' } });
 
-  assert.equal(version.stdout.trim(), '0.1.5-rc.2');
+  const source = await verifyDeepSeekVendorMetadata(selectedDeepSeekVendor());
+
+  assert.equal(version.stdout.trim(), source.version);
+  assert.equal(candidate.info.upstreamVersion, source.version);
+  assert.equal(candidate.info.glm?.inputs.source.commit, source.commit);
 
   const overlay = path.join(temporary, 'overlay.yml');
 

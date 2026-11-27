@@ -14,6 +14,13 @@ const ctx = new Context();
 
 await ctx.plugin(SystemPrompt, {});
 await ctx.plugin(ToolRuntime);
+await ctx.plugin(await load('@deepseek-ai/dsh-tool-executor-native'));
+ctx.provide('sessionProjections', {
+  register: async (definition) => ({
+    stateOf: (current) => current.events.reduce((state, event) => definition.apply(state, event),
+      definition.init()),
+  }),
+});
 await ctx.plugin(Approval, { policy: 'ask' });
 
 const root = process.cwd();
@@ -24,6 +31,7 @@ let sandboxMode = 'workspace-write';
 const events = [{ type: 'turn/start', data: {} }];
 const session = {
   id: 'registry-root',
+  events,
   header: { cwd: root },
   get seq() {
     return events.length;
@@ -33,11 +41,11 @@ const session = {
 };
 const agent = { id: session.id, session };
 const otherAgent = { id: 'other-root', session: { ...session, id: 'other-root' } };
-const rootAgents = scenario === 'swapped-agent' ? [agent, otherAgent] : [agent];
+const child = { id: 'child', session: { ...session, header: { cwd: root, origin: 'subagent' } } };
+const liveAgents = scenario === 'swapped-agent' ? [agent, otherAgent] : [agent, child];
 
 ctx.provide('agents', {
-  roots: () => rootAgents,
-  get: (id) => rootAgents.find((candidate) => candidate.id === id),
+  get: (id) => liveAgents.find((candidate) => candidate.id === id),
 });
 ctx.provide('sandboxPolicy', { resolve: () => ({ mode: sandboxMode, workspaceRoot: root }) });
 ctx.provide('permissionPresets', {
@@ -119,10 +127,10 @@ await ctx.plugin(gate, {
   revision: 'grigdesk-tool-permissions-v1',
   workActions: {},
 });
-ctx.emit('agent/session-start', { agent, source: 'new' });
+ctx.emit('agent/created', { agent, source: 'new' });
 
 if (scenario === 'swapped-agent') {
-  ctx.emit('agent/session-start', { agent: otherAgent, source: 'new' });
+  ctx.emit('agent/created', { agent: otherAgent, source: 'new' });
 }
 
 if (scenario === 'bypass') {
@@ -134,17 +142,36 @@ const argumentsForCall = toolName === 'bash'
   : toolName === 'web_search' ? { queries: ['Harness documentation'] }
     : toolName === 'web_fetch' ? { url: 'https://example.org/' }
       : { file_path: `${root}/new.txt`, content: 'ok' };
-const pending = ctx.tools.execute({
+/**
+ * Native executor alpha.2 принимает очередь model tool calls.
+ * Проба ждёт отдельный результат для каждого вызова.
+ */
+async function executeOne({ name, callId, arguments: input, signal, agent }) {
+  const result = await ctx.tools.execute({
+    agent,
+    signal,
+    calls: [{
+      type: 'tool-call',
+      id: callId,
+      name,
+      arguments: JSON.stringify(input),
+    }],
+  });
+
+  return result.results[0].result;
+}
+
+const pending = executeOne({
   name: toolName,
   callId: 'write-call',
   arguments: argumentsForCall,
   signal: controller.signal,
-  agent: scenario === 'child' ? { id: 'child', session } : agent,
+  agent: scenario === 'child' ? child : agent,
 });
 
 if (scenario === 'parallel') {
   let secondFinished = false;
-  const second = ctx.tools.execute({
+  const second = executeOne({
     name: 'write',
     callId: 'other-call',
     arguments: { file_path: `${root}/other.txt`, content: 'other' },

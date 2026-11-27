@@ -25,12 +25,56 @@ export function llmPiAiExternalDependencies(lock: Record<string, any>): LockedEx
   const roots = Object.entries(importer?.dependencies ?? {}) as [string, { version: string }][];
   const queue = roots.filter(([, entry]) => !entry.version.startsWith('link:'))
     .map(([name, entry]) => [name, entry.version] as const);
-  const visited = new Set<string>();
-  const resolved = new Map<string, LockedExternalDependency>();
 
   if (queue.length === 0) {
     throw new Error('В upstream lock отсутствуют внешние зависимости llm-pi-ai');
   }
+
+  return resolveExternalDependencies(lock, queue, true);
+}
+
+/**
+ * Включает exact внешние версии всех host workspace импортёров и их transitives.
+ * Сохраняет контекст snapshot, даже когда два контекста дают одну пару имени и версии.
+ */
+export function runtimeExternalDependencies(
+  lock: Record<string, any>,
+  closure: {
+    packages: readonly WorkspacePackage[];
+    external: Record<string, Record<string, string>>;
+  },
+): LockedExternalDependency[] {
+  const queue: Array<readonly [string, string]> = [];
+
+  for (const item of closure.packages) {
+    const importer = lock.importers?.[item.root];
+
+    for (const [name, version] of Object.entries(closure.external[item.name] ?? {})) {
+      const reference = (importer?.dependencies?.[name] ?? importer?.devDependencies?.[name])?.version;
+
+      if (typeof reference !== 'string' || reference.split('(')[0] !== version) {
+        throw new Error(`Не сходится exact importer ${item.root}: ${name}`);
+      }
+
+      queue.push([name, reference]);
+    }
+  }
+
+  return resolveExternalDependencies(lock, queue);
+}
+
+/**
+ * Сверяет имя, exact-версию и SRI каждого достижимого snapshot, включая optional зависимости.
+ * Узкая ветка GLM сохраняет отдельный запрет на нативную сборку pi-ai dependencies.
+ */
+function resolveExternalDependencies(
+  lock: Record<string, any>,
+  roots: ReadonlyArray<readonly [string, string]>,
+  forbidNative = false,
+): LockedExternalDependency[] {
+  const queue = [...roots];
+  const visited = new Set<string>();
+  const resolved = new Map<string, LockedExternalDependency>();
 
   for (let offset = 0; offset < queue.length; offset += 1) {
     const [name, reference] = queue[offset]!;
@@ -57,7 +101,7 @@ export function llmPiAiExternalDependencies(lock: Record<string, any>): LockedEx
       throw new Error(`Отсутствует exact версия или integrity: ${packageId}`);
     }
 
-    if (declaration.requiresBuild || snapshot.requiresBuild) {
+    if (forbidNative && (declaration.requiresBuild || snapshot.requiresBuild)) {
       throw new Error(`Замыкание llm-pi-ai требует нативной сборки: ${packageId}`);
     }
 

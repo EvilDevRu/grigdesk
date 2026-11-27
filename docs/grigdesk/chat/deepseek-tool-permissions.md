@@ -70,7 +70,8 @@ Native registry создаёт замороженную копию аргуме�
 инструмента и malformed-пара не дают обхода. Разовый grant не переносится на другой вызов
 и не меняет standing sandbox. В read-only расширение запрещено.
 
-Синхронный `agent/session-start` применяет ожидаемый preset до первой сборки system prompt.
+Обработчик `agent/created` в Harness alpha.2 устанавливает preset до первой сборки system prompt.
+Перед установкой preset проверяются регистрация живого агента и происхождение сессии.
 `agent/pre-step` и каждый tool guard повторно проверяют фактическую политику. Сохранённые
 `sandbox/mode=danger-full-access` и `approval/policy=never` не переопределяют режим чата.
 Один лишь launch default этого не гарантирует: overrides живут в native журнале.

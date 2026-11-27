@@ -21,6 +21,21 @@ Its absence does not disable other executors.
 
 ## Result
 
+### GLM admission when building from source
+
+In `grigdesk-ctl`, open **Build → DeepSeek Harness → Build and install**.
+The standard Harness 0.2.3-alpha.2 build includes GLM-5.4 automatically.
+If the built candidate lacks admission for the configured GLM mode, the terminal
+offers a live check. Select the required mode or both available modes. If both need
+admission, their checks run in parallel. Each uses its own Z.ai key and quota.
+After the selected checks succeed, the build continues with the new admission.
+If you defer the check, the current installation stays in place and the terminal
+shows the candidate path.
+
+To check admission for both modes, open **Build → DeepSeek Harness →
+Get GLM admission**. The corresponding commands are `grigdesk-ctl build deepseek`
+and `grigdesk-ctl build deepseek-admission`.
+
 ### GLM chat access
 
 Open **Available in this chat** next to the composer to check folder permissions, image input,
@@ -28,6 +43,7 @@ search configuration, available browser tabs, project MCP servers, and tool fail
 
 - For web search, set the service variable `GRIGDESK_GLM_SEARCH_API_KEY` to a DeepSeek search key.
 - Select a project MCP server in the dialog or send `/mcp name request`. Approve its startup and each call.
+  If the required `grigdesk-work` server fails to start, GLM stops before its first model request.
 - For extended work, send `/goal objective`. The activity feed shows each round and the outcome.
   Use **Stop** to interrupt the run. Send `/goal resume` to resume the goal.
 
@@ -38,8 +54,8 @@ Keys saved through the window apply on the server without manual file editing.
 
 GLM's ordinary API and Coding Plan are separate access profiles with separate keys and limits.
 One executor profile is active at a time.
-On Harness 0.1.5-rc.2, the optional patch adds GLM-5.4 to both profiles.
-It also adds GLM-5.3-FlashX and GLM-5.3-FlashX-Legal to the standard API profile.
+The GrigDesk build of Harness 0.2.3-alpha.2 lists GLM-5.4 in both profiles.
+The ordinary API catalog also lists GLM-5.3-FlashX and GLM-5.3-FlashX-Legal.
 Chat requires a build approved for the selected mode. Model responses depend on access at Z.ai.
 DeepSeek cannot identify the account belonging to a replacement key during sign-in.
 Replacement requires explicit confirmation; cancelling keeps the old key.
@@ -76,5 +92,8 @@ The operation is not repeated automatically. This general policy-check error can
 have other causes that need diagnosis.
 
 ## Related articles
+
+DeepSeek Harness alpha.2 carries additional settings across process restarts.
+The selected launch mode still controls chat permissions.
 
 [Conversations](chats.md) · [Working folder](chat-workdir.md) · [Settings](settings.md)

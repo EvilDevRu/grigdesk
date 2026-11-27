@@ -125,3 +125,71 @@ console.log(JSON.stringify({ code: codeResult.value, workflow: workflow.value })
 process.exit(0);
 `;
 
+
+export const ptcWorkerSource = `
+import path from 'node:path';
+import { createRequire } from 'node:module';
+import { pathToFileURL } from 'node:url';
+
+const requireRuntime = createRequire(path.join(process.argv[2], 'generation/package.json'));
+const load = (name) => import(pathToFileURL(requireRuntime.resolve(name)).href);
+const dsh = (name) => load('@deepseek-ai/dsh-' + name);
+const { Context } = await load('@deepseek-ai/cordis');
+const ctx = new Context();
+
+try {
+  for (const name of [
+    'session', 'session-projection', 'agent', 'system-prompt', 'fs-local',
+    'working-directory', 'subprocess-local', 'sandbox-local',
+  ]) {
+    await ctx.plugin((await dsh(name)).default, {});
+  }
+
+  await ctx.plugin((await dsh('sandbox-policy')).default, {
+    mode: 'read-only',
+    workspaceRoot: process.cwd(),
+  });
+  await ctx.plugin((await dsh('ptc-runtime-node')).default, {});
+  await ctx.plugin((await dsh('subagent')).default, {});
+
+  const code = await ctx.ptcRuntime.run(ctx.ptcRuntime.resolve({
+    program: 'const value: number = 42; value;',
+    bindings: [],
+  }));
+
+  if (code.error !== undefined) {
+    throw new Error(JSON.stringify(code));
+  }
+
+  ctx.subagents.registerProvider({
+    name: 'probe',
+    capabilities: { agentOptions: false, agentPreset: false, outputSchema: false, depthLimit: false },
+    inheritsParentContext: false,
+    start() { throw new Error('Arithmetic workflow must not create any agents'); },
+  });
+  await ctx.plugin((await dsh('workflow-ptc')).default, { provider: 'probe' });
+  const session = ctx.sessions.create(undefined, { meta: { cwd: process.cwd() } });
+  const parent = { id: session.id, ctx, session, options: {}, status: 'idle' };
+
+  ctx.agents.register(parent);
+  const workflow = ctx.workflowEngine.start({
+    script: 'return 6 * 7;',
+    meta: { name: 'bootstrap-probe', description: 'Проверка упакованного PTC runtime' },
+    parent,
+  });
+
+  try {
+    const result = await workflow.result;
+
+    if (result.stopReason !== 'completed' || result.agentsStarted !== 0) {
+      throw new Error(JSON.stringify(result));
+    }
+
+    console.log(JSON.stringify({ code: code.value, workflow: result.value }));
+  } finally {
+    await workflow.dispose();
+  }
+} finally {
+  await ctx.fiber.dispose();
+}
+`;

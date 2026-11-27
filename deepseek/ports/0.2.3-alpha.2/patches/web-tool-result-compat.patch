@@ -1,0 +1,107 @@
+diff --git a/packages/api/session-controller/src/index.ts b/packages/api/session-controller/src/index.ts
+--- a/packages/api/session-controller/src/index.ts
++++ b/packages/api/session-controller/src/index.ts
+@@ -15,7 +15,7 @@
+ import type { SessionObservation } from '@deepseek-ai/dsh-session-query'
+ import { Remote, RemoteError, TypertRemoteService, principalOf } from '@deepseek-ai/dsh-typert-protocol'
+ import { canonicalClientTimeZone } from '@deepseek-ai/dsh-util-time'
+-import { assertNever } from '@deepseek-ai/dsh-util-values'
++import { assertNever, type JsonValue } from '@deepseek-ai/dsh-util-values'
+ import type {} from '@deepseek-ai/dsh-api-remote-access'
+ import {
+   ApiSessionAgentController,
+@@ -51,7 +51,7 @@
+   SessionListValue,
+   SessionOpenWorkspacePathRequest,
+   SessionOpenWorkspacePathValue,
+-  SessionEventsPage, SessionPageRequest, SessionEventFrame, SessionObserveEventRequest,
++  SessionEventsPage, SessionPageRequest, SessionEventEntry, SessionEventFrame, SessionObserveEventRequest,
+   SessionProjectionFrame, SessionStateRequest, SessionState, SessionWaitRequest, SessionWaitValue,
+   SessionPromptRequest,
+   SessionPromptValue,
+@@ -76,7 +76,43 @@
+   interface Context {
+     /** Host Session business API and Remote namespace owner. */
+     sessionController: SessionController
+-  }
++    /** Совместимость с установленным web-клиентом GrigDesk. */
++    grigdeskLegacyToolResult: true
++  }
++}
++
++function isJsonObject(value: JsonValue | undefined): value is Record<string, JsonValue> {
++  return value !== null && typeof value === 'object' && !Array.isArray(value)
++}
++
++/**
++ * Web-клиент GrigDesk получает прежнюю обёртку результата инструмента.
++ * Журнал и модель продолжают использовать формат v4.
++ */
++function grigdeskToolResult(entry: SessionEventEntry): SessionEventEntry {
++  const event = entry.event
++
++  if (event.type !== 'tool/result' || !isJsonObject(event.data)) {
++    return entry
++  }
++
++  const message = event.data['message']
++
++  if (!isJsonObject(message) || message['role'] !== 'tool'
++    || typeof message['toolCallId'] !== 'string' || !Array.isArray(message['content'])) {
++    return entry
++  }
++
++  const { toolCallId, isError, content, ...rest } = message
++  const result = {
++    type: 'tool-result',
++    toolCallId,
++    content,
++    ...(typeof isError === 'boolean' ? { isError } : {}),
++  }
++  const data = { ...event.data, message: { ...rest, content: [result] } }
++
++  return { ...entry, event: { ...event, data } }
+ }
+ 
+ /** Session Controller deployment policy. */
+@@ -503,8 +539,14 @@
+    * @returns one chronological page with its inclusive cursor; an omitted `throughSeq` selects the observed log end.
+    */
+   @Remote('page')
+-  page(request: SessionPageRequest, signal: AbortSignal): Promise<SessionEventsPage> {
+-    return this.historyController.events(request, signal)
++  async page(request: SessionPageRequest, signal: AbortSignal): Promise<SessionEventsPage> {
++    const page = await this.historyController.events(request, signal)
++
++    if (this.ctx.get('grigdeskLegacyToolResult') !== true) {
++      return page
++    }
++
++    return { ...page, records: page.records.map(grigdeskToolResult) }
+   }
+ 
+   /**
+@@ -581,8 +623,21 @@
+    *   frames and optional cursorless assistant-stream frames.
+    */
+   @Remote({ mode: 'stream' })
+-  follow(request: SessionFollowRequest, signal: AbortSignal): AsyncIterable<SessionFollowFrame> {
+-    return this.webController.follow(request, signal)
++  async *follow(request: SessionFollowRequest, signal: AbortSignal): AsyncIterable<SessionFollowFrame> {
++    const stream = this.webController.follow(request, signal)
++
++    if (this.ctx.get('grigdeskLegacyToolResult') !== true) {
++      yield* stream
++      return
++    }
++
++    for await (const frame of stream) {
++      if (frame.type === 'snapshot') {
++        yield { ...frame, records: frame.records.map(grigdeskToolResult) }
++      } else {
++        yield frame.type === 'event' ? grigdeskToolResult(frame) : frame
++      }
++    }
+   }
+ 
+   /**

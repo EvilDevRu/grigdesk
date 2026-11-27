@@ -1,0 +1,547 @@
+diff --git a/packages/subagent/subagent/src/catalog.ts b/packages/subagent/subagent/src/catalog.ts
+index 836f725d..5dc00321 100644
+--- a/packages/subagent/subagent/src/catalog.ts
++++ b/packages/subagent/subagent/src/catalog.ts
+@@ -149,9 +149,20 @@ export const subagentCatalogProjectionDefinition = {
+ export function establishCatalogChild(
+   parent: Session,
+   child: SessionHeader,
+-  descriptor: { readonly mode: 'continuable'; readonly label: string },
++  descriptor: { readonly mode: 'continuable'; readonly label: string }
++    | { readonly mode: 'one-shot'; readonly label?: string },
+   name: string,
+ ): void {
++  if (descriptor.mode === 'one-shot') {
++    parent.append('subagent/catalog', {
++      version: 1,
++      childId: child.id,
++      childCreatedAt: child.createdAt,
++      mode: 'one-shot',
++      ...descriptor.label === undefined ? {} : { label: descriptor.label },
++    })
++    return
++  }
+   parent.append('subagent/catalog', {
+     version: SUBAGENT_CATALOG_VERSION,
+     childId: child.id,
+diff --git a/packages/subagent/subagent/src/manager.ts b/packages/subagent/subagent/src/manager.ts
+index 09bb74dd..9bee424b 100644
+--- a/packages/subagent/subagent/src/manager.ts
++++ b/packages/subagent/subagent/src/manager.ts
+@@ -28,7 +28,7 @@ import {
+   createAgentMessage, createSettlementMessage, withResultDeliveryGuidance,
+ } from './continuation-messages.ts'
+ import { installSubagentArchiveAdmission } from './archive-admission.ts'
+-import { foldSubagentDescriptor, snapshotSubagentDescriptor } from './descriptor.ts'
++import { SUBAGENT_DESCRIPTOR_VERSION, foldSubagentDescriptor, snapshotSubagentDescriptor } from './descriptor.ts'
+ import type { SubagentDescriptorData } from './descriptor.ts'
+ import { catalogNames, establishCatalogChild, establishExternalCatalogChild } from './catalog.ts'
+ import { SubagentError } from './error.ts'
+@@ -341,14 +341,21 @@ export class SubagentManager {
+       const agentProvider = agentOptions.provider
+       const agentModel = agentOptions.model
+       const agentReasoningEffort = agentOptions.reasoningEffort
+-      const descriptor = snapshotSubagentDescriptor({
+-        mode: 'continuable',
+-        provider: spec.provider,
+-        label: spec.label,
+-        ...agentProvider !== undefined ? { agentProvider } : {},
+-        ...agentModel !== undefined ? { agentModel } : {},
+-        ...agentReasoningEffort !== undefined ? { agentReasoningEffort } : {},
+-      })
++      const descriptor: SubagentDescriptorData = spec.grigdeskOneShot
++        ? {
++            version: SUBAGENT_DESCRIPTOR_VERSION,
++            mode: 'one-shot',
++            provider: spec.provider,
++            label: spec.label,
++          }
++        : snapshotSubagentDescriptor({
++            mode: 'continuable',
++            provider: spec.provider,
++            label: spec.label,
++            ...agentProvider !== undefined ? { agentProvider } : {},
++            ...agentModel !== undefined ? { agentModel } : {},
++            ...agentReasoningEffort !== undefined ? { agentReasoningEffort } : {},
++          })
+       // Capture before the first await: a later parent switch belongs to the
+       // parent's future, not to this child.
+       const delegatedPolicies = captureDelegatedPolicyOverrides(parent)
+@@ -1203,9 +1210,12 @@ export class SubagentManager {
+           return { messageId: await this.submitMaterialized(restored, content, options, root) }
+         }
+         if (activation.root !== root) throw new SubagentError('target belongs to another subagent tree', 'UNAUTHORIZED')
+-        requireLocalActivation(activation)
++        const local = requireLocalActivation(activation)
++        if (this.host.identityOf(local.handle.agent.session)?.mode === 'one-shot') {
++          throw new SubagentError(`subagent "${childId}" cannot be resumed`, 'NOT_RESUMABLE')
++        }
+         if (activation.closing === undefined && contentHasImage(content)) {
+-          await this.assertImageCapable(requireLocalActivation(activation).handle.agent, options.signal)
++          await this.assertImageCapable(local.handle.agent, options.signal)
+         }
+         if (activation.closing !== undefined) return { closing: activation.closing }
+         const messageId = this.submitAdmitted(activation, content, options, root)
+diff --git a/packages/subagent/subagent/src/types.ts b/packages/subagent/subagent/src/types.ts
+index 61f10589..dd600409 100644
+--- a/packages/subagent/subagent/src/types.ts
++++ b/packages/subagent/subagent/src/types.ts
+@@ -51,6 +51,8 @@ export interface SubagentActivationSpec extends Omit<SubagentStartRequest, 'labe
+   readonly signal: AbortSignal
+   /** Parent delivery notifies the model; caller delivery only returns the result. Local children always enter the parent catalog. */
+   readonly delivery: 'parent' | 'caller'
++  /** Доверенный foreground-вызов GrigDesk создаёт одноразовую сессию. */
++  readonly grigdeskOneShot?: true
+ }
+ 
+ /** A managed execution; disposal addresses this exact activation, never a later resume. */
+diff --git a/packages/subagent/tool-subagent/src/index.ts b/packages/subagent/tool-subagent/src/index.ts
+index 6e68a624..eddd355d 100644
+--- a/packages/subagent/tool-subagent/src/index.ts
++++ b/packages/subagent/tool-subagent/src/index.ts
+@@ -10,7 +10,7 @@ import type { Context } from '@deepseek-ai/cordis'
+ import z from '@deepseek-ai/schemastery'
+ import type {} from '@deepseek-ai/dsh-agent-preset-registry'
+ import { defineTool, ToolContextUnavailableError } from '@deepseek-ai/dsh-tools'
+-import type { ToolDefinition } from '@deepseek-ai/dsh-tools'
++import type { InferArgs, InferValue, ToolDefinition, ToolRunContext } from '@deepseek-ai/dsh-tools'
+ import type { AgentOptions } from '@deepseek-ai/dsh-agent'
+ import type { ReasoningEffortId } from '@deepseek-ai/dsh-llm/types'
+ import type { ContentBlock } from '@deepseek-ai/dsh-llm'
+@@ -20,7 +20,7 @@ import {
+   parentAgentOptionsForDelegation,
+   SubagentError,
+ } from '@deepseek-ai/dsh-subagent'
+-import type { SubagentProvider } from '@deepseek-ai/dsh-subagent'
++import type { SubagentActivation, SubagentProvider, SubagentResult } from '@deepseek-ai/dsh-subagent'
+ import {
+   delegationModelRequest,
+   hasConfiguredLlmSelection,
+@@ -57,6 +57,7 @@ export interface Config extends PresetSelectionConfig {
+    * Host setting, or restricts explicit selection to the current parent route.
+    */
+   modelSelection?: boolean
++  grigdeskForeground?: boolean
+   /**
+    * Register the shared `list_subagent_models` tool for this scope.
+    * Enable on only one instance per scope; defaults to false and does not
+@@ -84,6 +85,7 @@ export const Config: z<Config> = z.object({
+   provider: z.string().required(),
+   toolName: z.string().default('subagent'),
+   modelSelection: z.boolean().default(false),
++  grigdeskForeground: z.boolean().default(false),
+   modelDiscovery: z.boolean().default(false),
+   // Prevent Schemastery from materializing omitted agentOptions as `{}`.
+   agentOptions: z.object({
+@@ -102,6 +104,119 @@ export const Config: z<Config> = z.object({
+   maxDepth: z.union([z.natural().max(Number.MAX_SAFE_INTEGER), z.const('provider-managed' as const)]),
+ })
+ 
++/** Render text blocks from the canonical JSON block array without trusting arbitrary values. */
++function outputValueText(values: JsonValue[]): string {
++  return values
++    .filter((value): value is { type: 'text'; text: string } =>
++      typeof value === 'object' && value !== null && !Array.isArray(value)
++      && value.type === 'text' && typeof value.text === 'string')
++    .map(value => value.text)
++    .join('')
++}
++
++/** A non-`completed` stop reason means the child did not finish cleanly. */
++function stopReasonError(result: SubagentResult): string | undefined {
++  switch (result.stopReason) {
++    case 'completed':
++      return undefined
++    case 'aborted':
++      return 'subagent run was cancelled'
++    case 'error':
++      return 'subagent run failed'
++    case 'max-tokens':
++      return 'subagent run hit its token limit before finishing'
++    case 'refusal':
++      return 'subagent declined the task'
++    // Merge-extensible union: a backend may add stop reasons. Treat an unknown
++    // terminal reason as a failure rather than reporting partial output as success.
++    default:
++      return `subagent run ended abnormally (${String(result.stopReason)})`
++  }
++}
++
++/**
++ * Append provider-authored failure detail and the child's preserved partial
++ * answer to a stop-reason error, keeping diagnostic text separate from the
++ * child's assistant output.
++ * @param error - the stop-reason headline.
++ * @param result - the child's terminal result.
++ * @returns the headline, diagnostic, and partial text that are present.
++ */
++function withDiagnosticAndPartialText(error: string, result: SubagentResult): string {
++  const diagnostic = result.diagnostic === undefined
++    ? ''
++    : `\nDiagnostic: ${result.diagnostic}`
++  const text = result.output
++    .filter((block): block is Extract<ContentBlock, { type: 'text' }> => block.type === 'text')
++    .map(block => block.text)
++    .join('')
++  const partial = text.length === 0
++    ? ''
++    : `\nPartial output before the run ended:\n${text}`
++  return `${error}${diagnostic}${partial}`
++}
++
++
++type JsonValue = InferValue<{ type: 'json' }>
++
++type ForegroundToolResult = {
++  readonly kind: 'foreground'
++  readonly runId: string
++  readonly output: JsonValue[]
++}
++
++const foregroundOutput = {
++  schema: {
++    type: 'object',
++    additionalProperties: false,
++    properties: {
++      kind: { type: 'string', required: true, const: 'foreground' },
++      runId: { type: 'string', required: true },
++      output: { type: 'array', required: true, items: { type: 'json' } },
++    },
++  },
++  render: (_args: unknown, value: ForegroundToolResult) =>
++    [{ type: 'text' as const, text: outputValueText(value.output) }],
++  presentationMeta: (_args: unknown, value: ForegroundToolResult) =>
++    ({ kind: value.kind, runId: value.runId }),
++} as const
++
++/**
++ * Дожидается ответа и освобождает именно эту activation, в том числе при отмене.
++ * Ошибка результата сохраняет частичный текст и отдельную ошибку освобождения.
++ */
++async function settleForeground(started: SubagentActivation, signal: AbortSignal): Promise<ForegroundToolResult> {
++  let disposal: Promise<void> | undefined
++  const dispose = (): Promise<void> => disposal ??= Promise.resolve().then(() => started.dispose())
++  const abort = () => { void dispose().catch(() => undefined) }
++  signal.addEventListener('abort', abort, { once: true })
++  if (signal.aborted) abort()
++
++  const [execution] = await Promise.allSettled([started.result.then((result) => {
++    signal.throwIfAborted()
++    const failure = stopReasonError(result)
++    if (failure !== undefined) throw new Error(withDiagnosticAndPartialText(failure, result))
++    return {
++      kind: 'foreground' as const,
++      runId: started.childId,
++      output: result.output as unknown as JsonValue[],
++    }
++  })]).finally(() => signal.removeEventListener('abort', abort))
++  const [cleanup] = await Promise.allSettled([dispose()])
++
++  if (execution.status === 'rejected') {
++    if (cleanup.status === 'rejected') {
++      throw new AggregateError(
++        [execution.reason, cleanup.reason],
++        `subagent run failed: ${String(execution.reason)}; dispose failed: ${String(cleanup.reason)}`,
++      )
++    }
++    throw execution.reason
++  }
++  if (cleanup.status === 'rejected') throw cleanup.reason
++  return execution.value
++}
++
+ /**
+  * Model-facing wording from the provider's conversation-history descriptor
+  * ({@link SubagentProvider.inheritsParentContext}).
+@@ -161,6 +276,12 @@ export function apply(ctx: Context, config: Config): void {
+   if (config.maxDepth !== 'provider-managed') assertSubagentMaxDepth(config.maxDepth)
+   const toolName = config.toolName ?? 'subagent'
+ 
++
++  const foreground = config.grigdeskForeground === true
++  if (foreground && (!['spawn', 'fork'].includes(config.provider)
++    || config.modelSelection || config.modelDiscovery || config.agentOptions || presets.configured)) {
++    throw new Error('Некорректная конфигурация foreground-инструмента GrigDesk')
++  }
+   const modelSelectionEnabled = config.modelSelection === true
+ 
+   const assertSubagentProviderConfiguration = (subagentProvider: SubagentProvider): void => {
+@@ -205,8 +326,147 @@ export function apply(ctx: Context, config: Config): void {
+       : 'your current model and reasoning effort'
+     // Discovery visibility is per Agent; only a same-instance owner is known to exist at mount.
+     const providerSource = config.modelDiscovery === true ? ' Use a provider id listed by `list_subagent_models`.' : ''
+-    const definition = defineTool({
++    const parameters = {
++      description: {
++        type: 'string',
++        required: true,
++        description: 'A short (3-5 word) description of the delegated task, for display. '
++          + "Use the language of the user's current request.",
++      },
++      prompt: {
++        type: 'string',
++        required: true,
++        description: wording.promptDescription,
++      },
++      ...presets.choices === undefined ? {} : {
++        agent_preset: {
++          type: 'string' as const,
++          enum: [...presets.choices],
++          description: presets.description,
++        },
++      },
++      ...modelSelectionEnabled ? {
++        provider: {
++          type: 'string' as const,
++          description: 'LLM provider id for the subagent; requires `model`. Set only when the task needs a different model; '
++            + `omit \`provider\`, \`model\`, and \`reasoning_effort\` to run the subagent on ${defaultRoute}.${providerSource}`,
++        },
++        model: {
++          type: 'string' as const,
++          description: 'Model id within that provider; requires `provider`.',
++        },
++        reasoning_effort: {
++          type: 'string' as const,
++          description: 'Reasoning effort id; requires `provider` and `model`. Omit to use that model\'s default effort.',
++        },
++      } : {},
++    } as const
++    const activationParameters = {
++      ...parameters,
++      name: {
++        type: 'string',
++        description: 'Optional short name, unique among the subagents you create: lower-case letters, '
++          + 'digits, and hyphens, starting with a letter, at most 32 characters. '
++          + 'Omitted names default to agent-1, agent-2, and so on.',
++      },
++    } as const
++    const foregroundParameters = {
++      description: parameters.description,
++      prompt: parameters.prompt,
++      run_in_background: { type: 'boolean' },
++    } as const
++    const start = async (args: InferArgs<typeof activationParameters>, exec: ToolRunContext) => {
++      if (foreground) {
++        const raw = exec.arguments
++        if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
++          throw new Error('Foreground delegation requires an object')
++        }
++        const input = raw as Record<string, unknown>
++        if (Object.keys(input).some((key) => !['description', 'prompt', 'run_in_background'].includes(key))
++          || Object.hasOwn(input, 'run_in_background') && input.run_in_background !== false) {
++          throw new Error('Foreground delegation accepts only a description, prompt, and optional run_in_background=false')
++        }
++      }
++      const parent = exec.agent
++      if (!parent) {
++        // Non-agent callers provide no parent for delegation ownership.
++        throw new ToolContextUnavailableError('subagent tool requires a calling agent (exec.agent was undefined)')
++      }
++
++      const agentPreset = presets.resolve(args as PresetSelectionRequest)
++      const modelRequest = delegationModelRequest(args as DelegationModelRequest)
++      const routes = modelSelectionEnabled && hasDelegationModelRequest(modelRequest)
++        ? ctx.get('subagentModelSelection')?.allowedRoutes()
++        : undefined
++      const modelSelectionPolicy = routes === undefined ? undefined : { routes }
++      const parentOptions = parentAgentOptionsForDelegation(parent)
++      const requiresRoutePreflight = hasDelegationModelRequest(modelRequest)
++        || hasConfiguredLlmSelection(config.agentOptions)
++      const configuredChildAgentOptions = requiresRoutePreflight && providerRouteDefaults !== undefined
++        ? { ...providerRouteDefaults, ...config.agentOptions }
++        : config.agentOptions
++      const requestedChildAgentOptions = requestedAgentOptions(
++        configuredChildAgentOptions,
++        modelRequest,
++        modelSelectionEnabled,
++        modelSelectionPolicy,
++        parentOptions,
++        ctx.tools.get('list_subagent_models', parent, exec.toolSet) !== undefined,
++      )
++      if (requiresRoutePreflight) {
++        const llm = ctx.get('llm')
++        if (llm === undefined) {
++          throw new ToolContextUnavailableError('cannot resolve the selected child LLM route because the `llm` service is unavailable')
++        }
++        const inheritParentReasoningEffort = providerRouteDefaults === undefined && !hasDelegationModelRequest(modelRequest)
++        await preflightChildLlmRoute(
++          llm,
++          parentOptions,
++          requestedChildAgentOptions,
++          exec.signal,
++          inheritParentReasoningEffort,
++        )
++        if (ctx.subagents.getProvider(config.provider) !== subagentProvider) {
++          throw new SubagentError(
++            `subagent provider "${config.provider}" changed while resolving the child LLM route; retry the delegation`,
++            'PROVIDER_CHANGED',
++          )
++        }
++      }
++      exec.signal.throwIfAborted()
++      const maxDepth = ctx.subagents.resolveMaxDepth(config.maxDepth)
++      const request = {
++        prompt: [{ type: 'text', text: args.prompt }] as ContentBlock[],
++        parent,
++        ...agentPreset === undefined ? {} : { agentPreset },
++        ...requestedChildAgentOptions !== undefined ? { agentOptions: requestedChildAgentOptions } : {},
++        ...maxDepth !== undefined ? { maxDepth } : {},
++      }
++
++      return ctx.subagents.startActivation({
++        provider: config.provider,
++        label: args.description,
++        ...args.name === undefined ? {} : { name: args.name },
++        ...request,
++        signal: exec.signal,
++        delivery: foreground ? 'caller' : 'parent',
++        ...foreground ? { grigdeskOneShot: true as const } : {},
++      })
++    }
++    const common = {
+       name: toolName,
++      isConcurrencySafe: () => true,
++    }
++    const definition = foreground ? defineTool({
++      ...common,
++      description: wording.description + ' This call waits for the answer from the child.',
++      parameters: foregroundParameters,
++      output: foregroundOutput,
++      async execute(args, exec) {
++        return settleForeground(await start(args, exec), exec.signal)
++      },
++    }) : defineTool({
++      ...common,
+       description: wording.description
+         + ' This tool starts an independently managed subagent and immediately returns its name. If you are still online when it finishes, the runtime automatically delivers its completion notice. The notice includes the final answer unless the child sent you a message just before finishing.'
+         + (subagentProvider.prepareContinuable !== undefined
+@@ -215,46 +475,7 @@ export function apply(ctx: Context, config: Config): void {
+         + (modelSelectionEnabled && subagentProvider.inheritsParentContext
+           ? ' Changing the route can prevent provider-side reuse of the inherited conversation prefix.'
+           : ''),
+-      parameters: {
+-        description: {
+-          type: 'string',
+-          required: true,
+-          description: 'A short (3-5 word) description of the delegated task, for display. '
+-            + "Use the language of the user's current request.",
+-        },
+-        name: {
+-          type: 'string',
+-          description: 'Optional short name for the subagent, unique among the subagents you create: lower-case letters, '
+-            + 'digits, and hyphens, starting with a letter, at most 32 characters; lead is reserved for the root agent. Omitted names default to agent-1, agent-2, and so on.',
+-        },
+-        prompt: {
+-          type: 'string',
+-          required: true,
+-          description: wording.promptDescription,
+-        },
+-        ...presets.choices === undefined ? {} : {
+-          agent_preset: {
+-            type: 'string' as const,
+-            enum: [...presets.choices],
+-            description: presets.description,
+-          },
+-        },
+-        ...modelSelectionEnabled ? {
+-          provider: {
+-            type: 'string' as const,
+-            description: 'LLM provider id for the subagent; requires `model`. Set only when the task needs a different model; '
+-              + `omit \`provider\`, \`model\`, and \`reasoning_effort\` to run the subagent on ${defaultRoute}.${providerSource}`,
+-          },
+-          model: {
+-            type: 'string' as const,
+-            description: 'Model id within that provider; requires `provider`.',
+-          },
+-          reasoning_effort: {
+-            type: 'string' as const,
+-            description: 'Reasoning effort id; requires `provider` and `model`. Omit to use that model\'s default effort.',
+-          },
+-        } : {},
+-      },
++      parameters: activationParameters,
+       output: {
+         schema: {
+           type: 'object',
+@@ -267,72 +488,8 @@ export function apply(ctx: Context, config: Config): void {
+         render: (_args, value) => [{ type: 'text', text: `started subagent ${value.name}` }],
+         presentationMeta: (_args, value) => ({ kind: value.kind, name: value.name }),
+       },
+-      isConcurrencySafe: () => true,
+       async execute(args, exec) {
+-        const parent = exec.agent
+-        if (!parent) {
+-          // Non-agent callers provide no parent for delegation ownership.
+-          throw new ToolContextUnavailableError('subagent tool requires a calling agent (exec.agent was undefined)')
+-        }
+-
+-        const agentPreset = presets.resolve(args as PresetSelectionRequest)
+-        const modelRequest = delegationModelRequest(args as DelegationModelRequest)
+-        const routes = modelSelectionEnabled && hasDelegationModelRequest(modelRequest)
+-          ? ctx.get('subagentModelSelection')?.allowedRoutes()
+-          : undefined
+-        const modelSelectionPolicy = routes === undefined ? undefined : { routes }
+-        const parentOptions = parentAgentOptionsForDelegation(parent)
+-        const requiresRoutePreflight = hasDelegationModelRequest(modelRequest)
+-          || hasConfiguredLlmSelection(config.agentOptions)
+-        const configuredChildAgentOptions = requiresRoutePreflight && providerRouteDefaults !== undefined
+-          ? { ...providerRouteDefaults, ...config.agentOptions }
+-          : config.agentOptions
+-        const requestedChildAgentOptions = requestedAgentOptions(
+-          configuredChildAgentOptions,
+-          modelRequest,
+-          modelSelectionEnabled,
+-          modelSelectionPolicy,
+-          parentOptions,
+-          ctx.tools.get('list_subagent_models', parent, exec.toolSet) !== undefined,
+-        )
+-        if (requiresRoutePreflight) {
+-          const llm = ctx.get('llm')
+-          if (llm === undefined) {
+-            throw new ToolContextUnavailableError('cannot resolve the selected child LLM route because the `llm` service is unavailable')
+-          }
+-          const inheritParentReasoningEffort = providerRouteDefaults === undefined && !hasDelegationModelRequest(modelRequest)
+-          await preflightChildLlmRoute(
+-            llm,
+-            parentOptions,
+-            requestedChildAgentOptions,
+-            exec.signal,
+-            inheritParentReasoningEffort,
+-          )
+-          if (ctx.subagents.getProvider(config.provider) !== subagentProvider) {
+-            throw new SubagentError(
+-              `subagent provider "${config.provider}" changed while resolving the child LLM route; retry the delegation`,
+-              'PROVIDER_CHANGED',
+-            )
+-          }
+-        }
+-        exec.signal.throwIfAborted()
+-        const maxDepth = ctx.subagents.resolveMaxDepth(config.maxDepth)
+-        const request = {
+-          prompt: [{ type: 'text', text: args.prompt }] as ContentBlock[],
+-          parent,
+-          ...agentPreset === undefined ? {} : { agentPreset },
+-          ...requestedChildAgentOptions !== undefined ? { agentOptions: requestedChildAgentOptions } : {},
+-          ...maxDepth !== undefined ? { maxDepth } : {},
+-        }
+-
+-        const started = await ctx.subagents.startActivation({
+-          provider: config.provider,
+-          label: args.description,
+-          ...args.name === undefined ? {} : { name: args.name },
+-          ...request,
+-          signal: exec.signal,
+-          delivery: 'parent',
+-        })
++        const started = await start(args, exec)
+         return { kind: 'activation' as const, name: started.name }
+       },
+     })
+@@ -376,6 +533,7 @@ export function apply(ctx: Context, config: Config): void {
+         .sort()
+       if (visible[0] !== toolName) return ''
+       const names = visible.map(name => `\`${name}\``).join(' or ')
++      if (foreground) return `Use ${names} for scoped delegation. Each call completes with the child's answer.`
+       return `Start independent delegations with ${names} together in one assistant message and continue useful work while they run. The concurrency limit of all the subagents is ${ctx.subagents.maxActiveSubagents}. When only waiting for their results remains, end your turn instead of sleeping or polling; the next result starts a new turn. Collect the subagent results required to complete the task before giving the user a final answer.\n\nBash, formatters, code generators, and scripts can overwrite concurrent edits without conflict detection; coordinate their changes explicitly. The agent integrating the work must review the final diff and run relevant tests.`
+     },
+   })

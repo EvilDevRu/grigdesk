@@ -51,12 +51,15 @@ export async function runDeepSeekCandidateGate(
 
   const env: NodeJS.ProcessEnv = {
     ...process.env,
+    GRIGDESK_TEST_DEEPSEEK_VENDOR_DIR: options.vendorDir,
+    GRIGDESK_DEEPSEEK_NODE_CACHE: options.nodeCacheDir,
     GRIGDESK_TEST_DEEPSEEK_BINARY: path.join(options.outputDir, 'deepseek'),
     GRIGDESK_TEST_DEEPSEEK_CACHE_DIR: path.join(options.outputDir, 'test-cache'),
     GRIGDESK_TEST_DEEPSEEK_PAYLOAD: path.join(options.nodeCacheDir, 'payloads', payload, 'payload.zip'),
     GRIGDESK_TEST_GLM_DELIVERY: 'binary',
     GRIGDESK_RELEASE_PUBLISH_CONTRACT: '2',
     NODE_TEST_MAX_RSS_MB: '4096',
+    NODE_TEST_HEAP_MB: '768',
   };
 
   delete env.NODE_TEST_CONTEXT;

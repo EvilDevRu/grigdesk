@@ -32,7 +32,6 @@ type builder struct {
 	activeSteps   []string
 	finishedSteps int
 	totalSteps    int
-	screen        bool
 	target        string
 }
 
@@ -52,7 +51,10 @@ func Build(ctx context.Context, settings service.Settings, target string, screen
 	if target == "" {
 		target = "all"
 	}
-	runner := &builder{settings: settings, term: term, target: target, screen: screen}
+	runner := &builder{settings: settings, term: term, target: target, lang: i18n.CLIForEnvironment(settings.Env)}
+	if !screen {
+		runner.term.Choose = nil
+	}
 	if settings.Env["GRIGDESK_CTL_BUILD_OBSERVED"] == "1" {
 		fd := os.NewFile(3, "build-events")
 		if _, err := fd.Stat(); err == nil {
@@ -66,13 +68,18 @@ func Build(ctx context.Context, settings service.Settings, target string, screen
 		}
 		defer log.Close()
 		runner.log = log
-		runner.lang = i18n.CLIForEnvironment(settings.Env)
 		runner.progress = ctlterm.NewProgress(term.Stderr, settings.Env, true)
 		runner.totalSteps = buildStageCount(target)
 		defer runner.progress.Close()
+
+		label := target
+		if target == "deepseek" || target == "deepseek-admission" {
+			label = runner.lang.Text("deepseek")
+			runner.enableHarnessQuestions(ctx)
+		}
 		if term.Screen == nil || !term.Screen.Positioned() {
 			console := ctlterm.NewScreen(term.Stdout, settings.Env)
-			title := runner.lang.Text("build") + " GrigDesk · " + target
+			title := runner.lang.Text("build") + " GrigDesk · " + label
 			terminalWrite(term.Stdout, console.Label(title, ctlterm.Accent)+"\n")
 		}
 		terminalWrite(term.Stdout, logLabel(runner.lang, log.Name)+"\n")
@@ -184,9 +191,13 @@ func (runner *builder) execute(ctx context.Context, cwd, command string, argv ..
 	return child
 }
 
-// step пишет весь вывод в журнал, а пользователю сообщает текущую стадию.
-// События fd 3 и коды дочерней команды сохраняются.
 func (runner *builder) step(ctx context.Context, id, cwd, command string, argv ...string) int {
+	return runner.runStep(ctx, id, cwd, 0, command, argv...)
+}
+
+// runStep пишет весь вывод в журнал и сохраняет исходный код для событий fd 3.
+// Дополнительный допустимый код обозначает результат проверки, а не сбой команды.
+func (runner *builder) runStep(ctx context.Context, id, cwd string, accepted int, command string, argv ...string) int {
 	if id != "" {
 		runner.event("start", id)
 	}
@@ -210,7 +221,7 @@ func (runner *builder) step(ctx context.Context, id, cwd, command string, argv .
 	}
 	if runner.log != nil && id != "" {
 		runner.log.Record(id, time.Since(start))
-		if rc != 0 {
+		if rc != 0 && rc != accepted {
 			runner.progress.Line()
 			terminalWrite(runner.term.Stderr, fmt.Sprintf("Сбой стадии %s (код %d)\n", id, rc))
 		}
@@ -232,7 +243,7 @@ func (runner *builder) run(ctx context.Context) int {
 		return runner.factory(ctx)
 	case "apk":
 		return runner.step(ctx, "apk.build", root, filepath.Join(root, "tools", "mobile"), "build")
-	case "deepseek":
+	case "deepseek", "deepseek-admission":
 		return runner.deepseek(ctx)
 	case "server":
 		if code := runner.dependencies(ctx, false, false); code != 0 {
@@ -335,11 +346,11 @@ func (runner *builder) chainedWindow(ctx context.Context) int {
 	return runner.packageWindow(ctx)
 }
 
-func (runner *builder) all(ctx context.Context) int {
-	root := runner.settings.Root
-	var statuses [3]int
+// parallelSteps дожидается всех независимых стадий, в том числе при отказе одной.
+// Итоговый код выбирается по порядку стадий, независимо от времени их завершения.
+func parallelSteps(ctx context.Context, operations ...func(context.Context) int) int {
+	statuses := make([]int, len(operations))
 	var group sync.WaitGroup
-	operations := []func(context.Context) int{runner.server, runner.chainedWindow, runner.utilities}
 	for index, operation := range operations {
 		group.Go(func() { statuses[index] = operation(ctx) })
 	}
@@ -348,6 +359,16 @@ func (runner *builder) all(ctx context.Context) int {
 		if code != 0 {
 			return code
 		}
+	}
+	return 0
+}
+
+// all собирает независимые части параллельно и устанавливает окно после проверок.
+// Выбор сервера откладывается до следующего запуска окна.
+func (runner *builder) all(ctx context.Context) int {
+	root := runner.settings.Root
+	if code := parallelSteps(ctx, runner.server, runner.chainedWindow, runner.utilities); code != 0 {
+		return code
 	}
 	if code := runner.installWindow(ctx); code != 0 {
 		return code
@@ -439,97 +460,6 @@ func (runner *builder) selectServerHint() {
 	runner.event("hint", "select-server")
 	terminalWrite(runner.term.Stdout, fmt.Sprintf("Для выбора этого сервера окном: grigdesk-ctl desktop use-server %q\n",
 		filepath.Join(runner.settings.Root, "bin", "grigdesk-server")))
-}
-
-func (runner *builder) deepseek(ctx context.Context) int {
-	root := runner.settings.Root
-	directory := filepath.Join(root, "deepseek")
-	data := runner.settings.DataHome
-	cache := runner.settings.Env["XDG_CACHE_HOME"]
-	if cache == "" {
-		cache = filepath.Join(runner.settings.Home, ".cache")
-	}
-	cache = filepath.Join(cache, "grigdesk", "deepseek-binary")
-	nodeCache := filepath.Join(cache, "cache")
-	out := filepath.Join(cache, "out")
-	binary := filepath.Join(out, "deepseek")
-	host := filepath.Join(root, "server", "deepseek-host-contract.json")
-	helper := filepath.Join(root, "server", "scripts", "ctlBuild.mts")
-	modeCommand := runner.execute(ctx, root, "node", helper, "glm-mode", filepath.Join(data, ".env"))
-	mode, err := modeCommand.Output()
-	if err != nil {
-		return service.ExitCode(err)
-	}
-	glm := strings.TrimSpace(string(mode))
-	if glm != "api" && glm != "coding-plan" {
-		return runner.term.Fail("Неверный режим допуска DeepSeek.", 1)
-	}
-	step := func(id string, args ...string) int {
-		return runner.step(ctx, "deepseek."+id, root, "npm", append([]string{"--prefix", directory}, args...)...)
-	}
-	if _, err := os.Stat(filepath.Join(directory, "node_modules")); err != nil {
-		if code := step("deps", "install", "--no-audit", "--no-fund"); code != 0 {
-			return code
-		}
-	} else {
-		runner.event("start", "deepseek.deps")
-		runner.event("end", "deepseek.deps", 0)
-	}
-	if code := step("prepare", "run", "--silent", "prepare:runtime", "--", "--node-cache-dir", nodeCache); code != 0 {
-		return code
-	}
-	build := func() int {
-		if code := step("build", "run", "build", "--", "--out-dir", out, "--node-cache-dir", nodeCache); code != 0 {
-			return code
-		}
-		return step("verify", "run", "verify", "--", "--binary", binary)
-	}
-	if code := build(); code != 0 {
-		return code
-	}
-	admission := func(mode string) int {
-		return step("admission-"+mode, "run", "--silent", "admission:check", "--",
-			"--binary", binary, "--mode", mode, "--host-contract", host)
-	}
-	smoke := runner.settings.Env["GRIGDESK_DEEPSEEK_SMOKE"]
-	for _, mode := range []string{"api", "coding-plan"} {
-		wanted := smoke == "both" || smoke == "consumer" && mode == glm
-		if wanted && admission(mode) != 0 {
-			live := filepath.Join(root, "server", "scripts", "glmLiveSmoke.mts")
-			if code := runner.step(ctx, "deepseek.smoke-"+mode, root, "env", "GRIGDESK_HOME="+data,
-				"node", live, "--mode", mode, "--confirm-live", "--binary", binary,
-				"--cache-dir", filepath.Join(cache, "smoke"), "--admit"); code != 0 {
-				return code
-			}
-			if code := build(); code != 0 {
-				return code
-			}
-		} else {
-			for _, id := range []string{"admission-", "smoke-"} {
-				runner.event("start", "deepseek."+id+mode)
-				runner.event("end", "deepseek."+id+mode, 0)
-			}
-		}
-	}
-	if admission(glm) != 0 {
-		runner.event("hint", "deepseek-deferred")
-		runner.term.Say("DeepSeek собран и проверен: " + binary)
-		runner.term.Say("Установка не выполнена: не хватает живого допуска GLM (" + glm + ").")
-		return 0
-	}
-	target := filepath.Join(root, "bin", "deepseek")
-	releases := filepath.Join(data, "runtimes", "deepseek", "releases")
-	if code := step("install", "run", "--silent", "install:binary", "--", "--binary", binary,
-		"--target", target, "--host-contract", host, "--releases-dir", releases, "--glm-mode", glm); code != 0 {
-		runner.term.Fail("DeepSeek собран и проверен: "+binary+"; установка не выполнена.", code)
-		return code
-	}
-	_ = os.Remove(binary)
-	if code := step("prune", "run", "--silent", "prune:cache", "--", "--cache-dir", filepath.Dir(releases)); code != 0 {
-		runner.term.Fail("Чистка кэша DeepSeek не выполнена; поколения и резервы остаются.", code)
-	}
-	runner.term.Say("Поставлен DeepSeek: " + target)
-	return runner.term.Say("Новый ELF получит следующий ход DeepSeek; перезапуск сервера не нужен.")
 }
 
 // Development оставляет npm и Node явными инструментами режима разработки.

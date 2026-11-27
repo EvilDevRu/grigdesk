@@ -2,6 +2,7 @@ import { execFile } from 'node:child_process';
 import { copyFile, mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
+import { fileURLToPath } from 'node:url';
 
 import { decodeDeepSeekRuntimeInfo } from '../../shared/chat/deepSeekBinary.ts';
 import { canonicalJson } from '../../shared/lib/canonicalJson.ts';
@@ -18,7 +19,6 @@ import { createReadStream } from 'node:fs';
 import { binaryPackageInputs } from './binaryInputs.mts';
 import { deepSeekBuildInputs } from './buildRuntime.mts';
 import type { BinaryBuildOptions } from './buildSteps.mts';
-import { GLM_54_BACKPORT_ENV, GLM_54_BACKPORT_PATCH } from './glm54Backport.mts';
 import { packagePayload } from './packagePayload.mts';
 import { deepSeekPackagePaths } from './paths.ts';
 import { readPreparedRuntimeDependencies } from './prepareRuntimeDeps.mts';
@@ -29,8 +29,8 @@ const run = promisify(execFile);
  * Закрытый reusable payload всегда сопровождается полным manifest предыдущей упаковки.
  * Перед переупаковкой сверяются packageId, весь ZIP и индекс, без пересборки generation.
  */
-async function reusePayload(file: string, work: string): Promise<DeepSeekManifest> {
-  const value = JSON.parse(await readFile(`${file}.manifest.json`, 'utf8'));
+async function verifyReusedPayload(file: string, sidecar: string): Promise<DeepSeekManifest> {
+  const value = JSON.parse(await readFile(sidecar, 'utf8'));
   const info = decodeDeepSeekRuntimeInfo(value);
   const payload = decodePayloadDescriptor(value.payload);
 
@@ -39,9 +39,24 @@ async function reusePayload(file: string, work: string): Promise<DeepSeekManifes
   }
 
   await consumePayloadArchive(createReadStream(file), payload);
-  await copyFile(file, path.join(work, 'payload.zip'));
 
   return value;
+}
+
+/**
+ * Отдельный процесс освобождает память полного ZIP до пика postject.
+ * Проверяются байты рабочей копии, которую затем упакует сборщик.
+ */
+async function reusePayload(file: string, work: string): Promise<DeepSeekManifest> {
+  const packed = path.join(work, 'payload.zip');
+
+  await copyFile(file, packed);
+
+  const { stdout } = await run(process.execPath, [
+    fileURLToPath(import.meta.url), packed, `${file}.manifest.json`,
+  ], { maxBuffer: 16 * 1024 * 1024 });
+
+  return JSON.parse(stdout);
 }
 
 /**
@@ -106,7 +121,6 @@ async function generation(work: string, options: BinaryBuildOptions, target: Nod
           HOME: home,
           TMPDIR: temporary,
           XDG_CACHE_HOME: path.join(options.nodeCacheDir, 'build-cache'),
-          ...(inputs.hashes[GLM_54_BACKPORT_PATCH] ? { [GLM_54_BACKPORT_ENV]: '1' } : {}),
         },
         timeout: 300000,
         maxBuffer: 16 * 1024 * 1024,
@@ -239,4 +253,16 @@ export async function prepareBinaryPayload(
   });
 
   return result;
+}
+
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  const [file, sidecar] = process.argv.slice(2);
+
+  if (!file || !sidecar || process.argv.length !== 4) {
+    throw new Error('Проверка payload ожидает архив и его manifest');
+  }
+
+  const manifest = await verifyReusedPayload(file, sidecar);
+
+  process.stdout.write(JSON.stringify(manifest));
 }

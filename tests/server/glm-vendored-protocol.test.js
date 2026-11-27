@@ -621,9 +621,9 @@ test('настоящий web-профиль стартует с выключен
   assert.equal(f.mock.requests.length, 0);
 });
 
-test('настоящий settings-документ с секцией llm-pi-ai переопределяет маршрут', async (t) => {
-  const other = await startGlmLoopback({ expectedKey: GLM_RESEARCH_KEY, scenarios: [textReply('other')] });
-  const f = await fixture(t);
+test('настоящий settings-документ сохраняет маршрут launcher на alpha', async (t) => {
+  const other = await startGlmLoopback({ expectedKey: GLM_RESEARCH_KEY, respond: () => textReply('other') });
+  const f = await fixture(t, { respond: () => textReply() });
 
   t.after(() => other.stop());
 
@@ -641,8 +641,10 @@ test('настоящий settings-документ с секцией llm-pi-ai �
     model: 'glm-5.3',
   });
 
-  assert.equal(f.mock.requests.length, 0);
-  assert.equal(other.requests.length, 1);
+  const legacy = f.runtime.upstreamVersion.startsWith('0.1.');
+
+  assert.equal(f.mock.requests.length, legacy ? 0 : 1);
+  assert.equal(other.requests.length, legacy ? 1 : 0);
 });
 
 test('настоящий ответ 429 и обрыв потока дают ровно один запрос при maxRetries 0', async (t) => {
@@ -809,7 +811,7 @@ test('настоящий сигнал готовности MCP-сервера д
     // Адрес web выдаётся только после initialize и медленного tools/list.
     const methods = (await fs.readFile(marker, 'utf8')).split('\n').filter(Boolean);
 
-    assert.deepEqual(methods, ['initialize', 'tools/list']);
+    assert.deepEqual(methods.slice(-2), ['initialize', 'tools/list']);
   });
 
   await t.test('broken', async (sub) => {

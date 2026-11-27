@@ -1,18 +1,16 @@
 # Состав host runtime DeepSeek
 
-Выбранные исходники Harness `0.1.5-rc.2` закреплены commit
-`c291e7961a515f6d7af9304e7fd1d257929aef26`. Сборка использует upstream host-проекты,
-TypeScript 6.0.3, upstream Typert generator и отдельный npm lock. Проверены Linux x64
-с glibc и закреплённым worker Node 24; серверный Node может отличаться. Остальные платформы не подтверждены этой проверкой.
 
-Состав содержит 180 workspace-пакетов для компиляции; 179 входят в готовый runtime.
-Compiler, bundler, их executable dependencies и Typert generator удаляются после
-генерации reflection. Проверенный артефакт — 29 946 файлов, 266 437 337 байт (около
-254 MiB); до добавления модельного плагина GLM было 16 719 файлов и 197 993 126 байт.
-Точное содержание каждой сборки находится в `composition.json`, а лицензии 480
-workspace/npm-пакетов — в `licenses/index.json`. Исходный snapshot — 2540 файлов,
-23 339 155 байт; в Git лежит только его manifest, исходники подготавливаются в кэш
-([снимок](deepseek-source-snapshot.md)).
+Выбранные исходники Harness `0.2.3-alpha.2` закреплены commit
+`4b399c39a6d1479cd84ca591b4d7c88e24d38a96`. Сборка использует upstream host-проекты,
+закреплённый TypeScript, Typert generator и отдельный npm lock. Проверен Linux x64
+с glibc и worker Node 24.22.3. Нативная приёмка остальных платформ выполняется отдельно.
+
+Состав записан в `composition.json`, а лицензии 577 workspace/npm-позиций
+проверенной поставки в `licenses/index.json`. Патчи включают GLM-5.4 и
+совместимость чата и настроек с GrigDesk. Office использует fontkitten,
+HTTP(S) proxy работает через закреплённые proxy agents. В Git лежат manifest,
+патчи и лицензии. [Подготовка исходного снимка](deepseek-source-snapshot.md)
 
 ## Композиция
 
@@ -34,8 +32,7 @@ base YAML: процесс DeepSeek pi-ai не загружает (провере
 external dependency доступны владельцам через внутренние относительные ссылки.
 
 Статические зависимости проверяются TypeScript-компилятором. YAML plugin names,
-presets и host references входят в closure. Двенадцать известных dynamic references
-(восемь host и четыре в dist pi-ai) имеют точные выражения и причины в
+presets и host references входят в closure. Разрешённые dynamic references имеют точные выражения и причины в
 `deepseek/build/dynamic-imports.json`;
 новая неизвестная ссылка запрещает сборку. После компиляции проверяются generated
 exports, worker bundles и native addon. Workspace package boundary сохраняется:

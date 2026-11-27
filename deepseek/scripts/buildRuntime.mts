@@ -18,9 +18,9 @@ import {
   verifyDeepSeekVendorMetadata,
 } from './deepseekVendorManifest.ts';
 import { writeDeepSeekLicenseInventory } from './deepseekBuildLicenses.ts';
-import { GLM_54_BACKPORT_PATCH, glm54BackportEnabled } from './glm54Backport.mts';
 import {
   assertKnownDynamicReferences,
+  runtimeExternalDependencies,
   scanDynamicRuntimeReferences,
   verifyCompiledResources,
 } from './deepseekBuildInputs.ts';
@@ -28,7 +28,6 @@ import {
   COMPOSITION_REVISION,
   RUNTIME_WORKER_PACKAGES,
   discoverRuntimeClosure,
-  glmForegroundPreset,
   runtimeYaml,
   readRuntimeComposition,
 } from './runtimeComposition.ts';
@@ -36,6 +35,224 @@ import {
 const exec = promisify(execFile);
 const repositoryRoot = fileURLToPath(new URL('../..', import.meta.url));
 const defaultDependencyRoot = deepSeekPackagePaths().runtimeDependenciesDir;
+
+// Локальный порт разрешён для точного lock alpha.2. Для остальных lock действует исходная сверка SRI.
+const alphaLockHash = 'dbe5dc43a686cad2e2c6d20c94a7d56abbfad8dd62213a7a8a7c91662b3537d1';
+const socketRacePatch = {
+  path: 'deepseek/ports/0.2.3-alpha.2/https-proxy-agent-9.0.0.patch',
+  sha256: '5a0727771871c142652b66ee416ece42f1c9918d4cd880ddae4c25eaa7352ae4',
+};
+const proxyAgentPort = {
+  'http-proxy-agent': {
+    integrity: 'sha512-'
+      + 'FcF8VhXYLQcxWCnt/cCpT2apKsRDUGeVEeMqGu4HSTu29U8Yw0TLOjdYIlDsYk3IkUh+taX4IDWpPcCqKDhCjA==',
+    locations: ['node_modules/http-proxy-agent'],
+  },
+  'https-proxy-agent': {
+    integrity: 'sha512-'
+      + '/MVmHp58WkOypgFhCLk4fzpPcFQvTJ/e6LBI7irpIO2HfxUbpmYoHF+KzipzJpxxzJu7aJNWQ0xojJ/dzV2G5g==',
+    locations: [
+      'node_modules/@earendil-works/pi-ai/node_modules/https-proxy-agent',
+      'node_modules/grigdesk-https-proxy-agent-9.0.0',
+    ],
+  },
+};
+
+const proxyAgentPortPackages = new Map(Object.entries(proxyAgentPort));
+const officeKitLocation = 'node_modules/@deepseek-ai/libreoffice-kit';
+const officeFontLocation = officeKitLocation + '/node_modules/fontkit';
+const officeKitId = '@deepseek-ai/libreoffice-kit@0.2.3';
+const officeFontVersion = '1.0.3';
+const officeFontSRI = 'sha512-'
+  + 'Wp1zXWPVUPBmfoa3Cqc9ctaKuzKAV6uLstRqlR56kSjplf5uAce+qeyYym7F+PHbGTk+tCEdkCW6RD7DX/gBZw==';
+const officeFontCachePatch = {
+  path: 'deepseek/ports/0.2.3-alpha.2/libreoffice-font-cache.patch',
+  sha256: '7247c05cad6055323ca4114d173792ace59bcb3ab103cef60be39aa61edb9474',
+};
+
+/**
+ * Сверяет SHA патча из зафиксированных входов и меняет только npm-пакет своей generation.
+ * Git проверяет весь diff до записи и работает вне checkout.
+ */
+async function applyExternalPatch(directory: string, file: string, expected: string) {
+  if (!/^[a-f0-9]{64}$/u.test(expected) || sha256(await fs.readFile(file)) !== expected) {
+    throw new Error(`SHA патча внешнего пакета изменился: ${file}`);
+  }
+
+  const env = {
+    PATH: process.env.PATH,
+    GIT_CEILING_DIRECTORIES: path.dirname(directory),
+  };
+
+  await exec('git', ['apply', '--check', file], { cwd: directory, env });
+  await exec('git', ['apply', file], { cwd: directory, env });
+}
+
+/**
+ * Пересчитывает замыкание alpha.2 после замены единственного ребра LibreOffice Kit → fontkit.
+ * Исходный lock сохраняется, а traversal проверяет и tiny-inflate, нужный новому парсеру.
+ */
+function lockWithOfficeFontPort(upstream: Record<string, any>): Record<string, any> {
+  const snapshot = upstream.snapshots?.[officeKitId];
+  const { fontkit, ...dependencies } = snapshot?.dependencies ?? {};
+
+  if (fontkit !== '2.0.4') {
+    throw new Error('Изменилась исходная зависимость LibreOffice Kit от fontkit');
+  }
+
+  const replacement = `fontkitten@${officeFontVersion}`;
+
+  return {
+    ...upstream,
+    packages: {
+      ...upstream.packages,
+      [replacement]: {
+        resolution: {
+          integrity: officeFontSRI,
+        },
+      },
+    },
+    snapshots: {
+      ...upstream.snapshots,
+      [officeKitId]: {
+        ...snapshot,
+        dependencies: {
+          ...dependencies,
+          fontkitten: officeFontVersion,
+        },
+      },
+      [replacement]: {
+        dependencies: {
+          'tiny-inflate': '1.0.3',
+        },
+      },
+    },
+  };
+}
+
+/**
+ * Проверяет exact npm lock и upstream SRI до компиляции, затем переносит патчи в staging.
+ * Optional-пакеты других платформ учитываются в lock, их отсутствующие файлы не патчатся.
+ */
+async function patchExternalDependencies(
+  staging: string,
+  dependencyRoot: string,
+  closure: Awaited<ReturnType<typeof discoverRuntimeClosure>>,
+  sourceLockHash: string,
+): Promise<void> {
+  const yaml = runtimeYaml(dependencyRoot);
+  const upstreamBytes = await fs.readFile(path.join(staging, 'pnpm-lock.yaml'));
+  const originalLock = yaml.load(upstreamBytes.toString('utf8'));
+  // Хэш verified snapshot выбирает порт. Staging lock может содержать патчи importers.
+  const useAlphaPort = sourceLockHash === alphaLockHash;
+  const upstream = useAlphaPort ? lockWithOfficeFontPort(originalLock) : originalLock;
+  const workspace = yaml.load(await fs.readFile(path.join(staging, 'pnpm-workspace.yaml'), 'utf8'));
+  const npm = JSON.parse(await fs.readFile(path.join(dependencyRoot, 'package-lock.json'), 'utf8'));
+  const locked = runtimeExternalDependencies(upstream, closure);
+  const installed = new Set<string>();
+  const patches: Array<{
+    directory: string;
+    file: string;
+    sha256: string;
+  }> = [];
+
+  if (useAlphaPort) {
+    const fontEntry = npm.packages[officeFontLocation];
+
+    if (fontEntry?.name !== 'fontkitten' || fontEntry.version !== officeFontVersion
+      || fontEntry.integrity !== officeFontSRI) {
+      throw new Error('В lock отсутствует закреплённая замена fontkit у LibreOffice Kit');
+    }
+
+    patches.push({
+      directory: path.join(staging, officeKitLocation),
+      file: path.join(repositoryRoot, officeFontCachePatch.path),
+      sha256: officeFontCachePatch.sha256,
+    });
+
+    for (const [name, { locations }] of proxyAgentPortPackages) {
+      for (const location of locations) {
+        if (npm.packages[location]?.version !== '9.0.0') {
+          throw new Error(`В lock отсутствует закреплённый порт ${name}: ${location}`);
+        }
+      }
+    }
+  }
+
+  for (const [location, pkg] of Object.entries<any>(npm.packages)) {
+    if (location === '') {
+      continue;
+    }
+
+    if (!location.startsWith('node_modules/') || location.split('/').some((part) => part === '..')) {
+      throw new Error(`Некорректный путь npm lock: ${location}`);
+    }
+
+    const name = pkg.name ?? location.split('node_modules/').at(-1);
+    const id = `${name}@${pkg.version}`;
+    const port = useAlphaPort ? proxyAgentPortPackages.get(name) : undefined;
+
+    if (useAlphaPort && (['proxy-agent-negotiate', 'fontkit', 'dfa', 'brotli'].includes(name)
+      || port && pkg.version === '9.1.0')) {
+      throw new Error(`В alpha.2 осталась зависимость до замены: ${id}`);
+    }
+
+    if (useAlphaPort && name === 'fontkitten' && location !== officeFontLocation) {
+      throw new Error(`Замена fontkit найдена вне LibreOffice Kit: ${location}`);
+    }
+
+    const replacesProxyAgent = port && port.locations.includes(location) && pkg.version === '9.0.0';
+    const sri = replacesProxyAgent ? port.integrity : upstream.packages?.[id]?.resolution?.integrity;
+
+    if (typeof sri !== 'string' || sri !== pkg.integrity) {
+      throw new Error(`У ${id} в npm lock отсутствует совпадающая версия или SRI upstream`);
+    }
+
+    installed.add(id);
+
+    const sha256 = upstream.patchedDependencies?.[id];
+
+    const directory = path.join(staging, location);
+
+    if (replacesProxyAgent && name === 'https-proxy-agent') {
+      patches.push({
+        directory,
+        file: path.join(repositoryRoot, socketRacePatch.path),
+        sha256: socketRacePatch.sha256,
+      });
+    } else if (sha256 && await fs.access(directory).then(() => true, () => false)) {
+      const relative = workspace.patchedDependencies?.[id] ?? '';
+
+      if (!/^patches\/[\w@.-]+\.patch$/u.test(relative)) {
+        throw new Error(`Неизвестное объявление патча внешнего пакета: ${relative}`);
+      }
+
+      patches.push({
+        directory,
+        file: path.join(staging, relative),
+        sha256,
+      });
+    }
+  }
+
+  for (const { name, version } of locked) {
+    if (useAlphaPort && name === 'proxy-agent-negotiate' && version === '1.1.0') {
+      continue;
+    }
+
+    const expectedVersion = useAlphaPort && version === '9.1.0' && proxyAgentPortPackages.has(name)
+      ? '9.0.0'
+      : version;
+
+    if (!installed.has(`${name}@${expectedVersion}`)) {
+      throw new Error(`В npm lock отсутствует закреплённая версия: ${name}@${expectedVersion}`);
+    }
+  }
+
+  for (const patch of patches) {
+    await applyExternalPatch(patch.directory, patch.file, patch.sha256);
+  }
+}
 
 /**
  * Fingerprint охватывает manifest исходников, код сборки, композицию, launcher и exact lock.
@@ -65,22 +282,18 @@ export async function deepSeekBuildInputs(
     'deepseek/scripts/deepseekVendorManifest.ts', 'deepseek/scripts/paths.ts',
     'deepseek/scripts/deepseekBuildLicenses.ts',
     'deepseek/scripts/runtimeComposition.ts', 'deepseek/src/host/entry.mjs', 'deepseek/src/host/webHost.mjs',
-    'deepseek/src/host/acpSettingsBridge.mjs',
-    'deepseek/src/host/presetsHost.mjs', 'deepseek/src/host/glmGate.mjs',
+    'deepseek/src/host/acpSettingsBridge.mjs', 'deepseek/src/host/settingsProfile.mjs',
+    'deepseek/src/host/glmGate.mjs',
     'deepseek/src/host/toolPermissionGate.mjs',
     'deepseek/src/host/toolPermissionPolicy.mjs',
     'deepseek/src/host/toolPermissionPaths.mjs',
     'shared/node/glmGateProtocol.ts', 'shared/lib/canonicalJson.ts',
     'deepseek/build/runtime-deps/package.json', 'deepseek/build/runtime-deps/package-lock.json',
     'deepseek/build/dynamic-imports.json', 'deepseek/build/licenses/sources.json',
+    socketRacePatch.path, officeFontCachePatch.path,
     'deepseek/build/licenses/xterm-6.0.0-LICENSE.txt',
     'deepseek/build/licenses/LGPL-3.0.txt', 'deepseek/build/licenses/GPL-3.0.txt'];
   const hashes: Record<string, string> = {};
-
-  if (glm54BackportEnabled(source)) {
-    inputs.push(GLM_54_BACKPORT_PATCH);
-  }
-
   const licenses = JSON.parse(await fs.readFile(
     path.join(deepSeekPackagePaths().licensesDir, 'sources.json'), 'utf8',
   ));
@@ -134,7 +347,7 @@ export async function glmRuntimeIdentity(options: {
   const dependencyRoot = options.dependencyRoot ?? defaultDependencyRoot;
   const manifest = await verifyDeepSeekVendorMetadata(vendorDir);
   const inputs = await deepSeekBuildInputs(vendorDir, dependencyRoot);
-  const llmPiAi = await llmPiAiContract(manifest, dependencyRoot, inputs.hashes[GLM_54_BACKPORT_PATCH]);
+  const llmPiAi = await llmPiAiContract(manifest, dependencyRoot);
 
   return {
     source: { commit: manifest.commit },
@@ -243,6 +456,11 @@ async function compileWorkspace(
 
     const configFile = path.join(root, config);
     const project = JSON.parse(await fs.readFile(configFile, 'utf8'));
+
+    if (Array.isArray(project.references)) {
+      project.references = project.references.filter(({ path: name }: { path: string }) =>
+        path.basename(name) !== 'tsconfig.client.json');
+    }
 
     for (const reference of project.references ?? []) {
       const target = path.resolve(path.dirname(configFile), reference.path);
@@ -360,7 +578,7 @@ async function compileWorkspace(
 async function llmPiAiContract(manifest: {
   files: readonly { path: string; sha256: string }[];
   patches: readonly { path: string; sha256: string }[];
-}, dependencyRoot: string, backportHash?: string): Promise<Record<string, unknown> | null> {
+}, dependencyRoot: string): Promise<Record<string, unknown> | null> {
   const sources = manifest.files
     // Сборка переписывает tsconfig пакета; commit upstream и так входит в identity допуска.
     .filter((file) => file.path.startsWith('packages/llm/llm-pi-ai/'))
@@ -379,19 +597,13 @@ async function llmPiAiContract(manifest: {
     throw new Error('В lock сборки нет exact pi-ai с integrity');
   }
 
-  const patches = manifest.patches.map((patch) => ({ path: patch.path, sha256: patch.sha256 }));
-
-  if (backportHash) {
-    patches.push({ path: GLM_54_BACKPORT_PATCH, sha256: backportHash });
-  }
-
   return {
     piAi: {
       version: piAi.version,
       integrity: piAi.integrity,
     },
     sourceHash: sha256(JSON.stringify(sources)),
-    patches,
+    patches: manifest.patches.map((patch) => ({ path: patch.path, sha256: patch.sha256 })),
   };
 }
 
@@ -433,12 +645,9 @@ export async function buildDeepSeekRuntime(options: {
 
   const container = await fs.mkdtemp(path.join(stagingParent, '.deepseek-build-'));
   const staging = path.join(container, 'generation');
-  const backport = originalInputs.hashes[GLM_54_BACKPORT_PATCH]
-    ? path.join(repositoryRoot, GLM_54_BACKPORT_PATCH)
-    : undefined;
 
   try {
-    await checkDeepSeekPatches(options.vendorDir, staging, backport);
+    await checkDeepSeekPatches(options.vendorDir, staging);
     await fs.cp(path.join(dependencyRoot, 'node_modules'), path.join(staging, 'node_modules'), {
       recursive: true,
       dereference: false,
@@ -459,26 +668,11 @@ export async function buildDeepSeekRuntime(options: {
     await fs.writeFile(eventCatalog, catalogSource.replace(catalogAnchor,
       `${catalogAnchor}\n${GLM_SESSION_EVENTS.map((name) => `  '${name}',`).join('\n')}`));
 
-    // Ограничение GLM входит в запрос и persistence header до вычисления отпечатка.
-    // В других процессах сервис отсутствует, и штатный набор Harness сохраняется.
-    const agentLoop = path.join(staging, 'packages/core/agent-loop/src/agent.ts');
-    const assemblySource = await fs.readFile(agentLoop, 'utf8');
-    const assemblyAnchor = '    return { ...decision, assembly }';
-
-    if (assemblySource.split(assemblyAnchor).length !== 2) {
-      throw new Error('Изменилось место сборки инструментов Harness');
-    }
-
-    await fs.writeFile(agentLoop, assemblySource.replace(assemblyAnchor, [
-      "    const visible = this.loopCtx.get('grigdeskGlmToolVisible' as never) as",
-      '      ((name: string, agent: Agent) => boolean) | undefined',
-      '    if (!visible) return { ...decision, assembly }',
-      '    const tools = assembly.tools.filter(({ name }) => visible(name, this))',
-      '    return { ...decision, assembly: { ...assembly, tools } }',
-    ].join('\n')));
-
     const closure = await discoverRuntimeClosure(staging, dependencyRoot);
     const composition = await readRuntimeComposition(staging, dependencyRoot);
+
+    await patchExternalDependencies(staging, dependencyRoot, closure, manifest.dependencyLock.sha256);
+
     const dynamicImports = JSON.parse(await fs.readFile(
       deepSeekPackagePaths().dynamicImportsFile, 'utf8',
     ));
@@ -496,19 +690,6 @@ export async function buildDeepSeekRuntime(options: {
         runtimeYaml(dependencyRoot).dump(patches));
     }
 
-    const presetRoot = path.join(staging, 'packages/preset/agent-presets/presets');
-    const glmPreset = path.join(presetRoot, 'grigdesk-glm');
-    const yaml = runtimeYaml(dependencyRoot);
-    const standard = yaml.load(await fs.readFile(path.join(presetRoot, 'standard/agent.cordis.yml'), 'utf8'));
-
-    await fs.mkdir(glmPreset);
-    await fs.writeFile(path.join(glmPreset, 'agent.cordis.yml'), yaml.dump(glmForegroundPreset(standard)));
-    await fs.writeFile(path.join(glmPreset, 'preset.yml'), yaml.dump({
-      name: 'GLM GrigDesk',
-      description: 'Синхронное делегирование в границах чата',
-      order: 10,
-    }));
-
     await linkWorkspace(staging, closure, dependencyRoot);
     await compileWorkspace(staging, closure, dependencyRoot);
     await exec(process.execPath, ['native/system/scripts/build.ts', '--host-addon-only'], {
@@ -521,12 +702,13 @@ export async function buildDeepSeekRuntime(options: {
     });
     await verifyCompiledResources(staging, closure.packages);
     await fs.copyFile(deepSeekPackagePaths().hostFiles.entry, path.join(staging, 'entry.mjs'));
+    await fs.copyFile(deepSeekPackagePaths().hostFiles.settingsProfile,
+      path.join(staging, 'settingsProfile.mjs'));
+    await fs.writeFile(path.join(staging, 'empty-root.yml'), '[]\n');
     await fs.copyFile(deepSeekPackagePaths().hostFiles.webHost,
       path.join(staging, 'webHost.mjs'));
     await fs.copyFile(deepSeekPackagePaths().hostFiles.acpSettingsBridge,
       path.join(staging, 'acpSettingsBridge.mjs'));
-    await fs.copyFile(deepSeekPackagePaths().hostFiles.presetsHost,
-      path.join(staging, 'presetsHost.mjs'));
 
     for (const role of ['toolPermissionGate', 'toolPermissionPolicy', 'toolPermissionPaths'] as const) {
       await fs.copyFile(deepSeekPackagePaths().hostFiles[role], path.join(staging, `${role}.mjs`));
@@ -557,6 +739,16 @@ export async function buildDeepSeekRuntime(options: {
     closure.packages = closure.packages.filter((item) => item.name !== '@deepseek-ai/dsh-typert-generator');
     await fs.writeFile(path.join(staging, 'composition.json'), JSON.stringify(closure, null, 2));
     await writeDeepSeekLicenseInventory(staging, closure.packages);
+
+    // Ссылки на пакеты типов созданы в staging для компиляции и удаляются вместе с целями.
+    for (const item of closure.packages) {
+      const linked = Object.keys(closure.external[item.name] ?? {});
+
+      if (linked.some((name) => name.startsWith('@types/'))) {
+        await fs.rm(path.join(staging, item.root, 'node_modules/@types'), { recursive: true, force: true });
+      }
+    }
+
     await fs.rm(path.join(staging, 'node_modules/@types'), { recursive: true, force: true });
 
     const finalInputs = await deepSeekBuildInputs(options.vendorDir, dependencyRoot);

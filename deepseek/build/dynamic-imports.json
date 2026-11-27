@@ -58,5 +58,45 @@
     "file": "node_modules/@earendil-works/pi-ai/dist/api/bedrock-converse-stream.lazy.js",
     "expression": "import(__rewriteRelativeImportExtension(runtimeSpecifier))",
     "reason": "Относительный bedrock-converse-stream.js сохранён вместе с exact AWS closure; GLM использует zai."
+  },
+  {
+    "file": "packages/boot/hmr/src/package-manifest.ts",
+    "expression": "require(id)",
+    "reason": "HMR читает известные внутренние модули Node только при явном флаге --expose-internals."
+  },
+  {
+    "file": "packages/document/office-kit/src/index.ts",
+    "expression": "import(kit.entry)",
+    "reason": "Плагин загружает entry обнаруженной установки LibreOffice Kit после проверки наличия."
+  },
+  {
+    "file": "packages/extensions/creation-recommendations/src/index.ts",
+    "expression": "import.meta.resolve('@deepseek-ai/dsh-creation-recommendations/references/'\n              + { 'sidebar-right': 'sidebar-right.md', page: 'session-tab.md', 'sidebar-left': 'sidebar-entry.md' }[card.slot])",
+    "reason": "Штатные подсказки для размещения карточки разрешаются из конечного списка ресурсов пакета."
+  },
+  {
+    "file": "packages/extensions/creation-recommendations/src/index.ts",
+    "expression": "import.meta.resolve('@deepseek-ai/dsh-creation-recommendations/references/' + file)",
+    "reason": "Имена трёх справочных файлов берутся из массива литералов рядом с вызовом."
+  },
+  {
+    "file": "packages/ptc-runtime/ptc-runtime-node/src/imports/vm-modules.ts",
+    "expression": "import.meta.resolve(marker)",
+    "reason": "Маркер связывает локальный registerHooks с одним вызовом разрешения импорта VM."
+  },
+  {
+    "file": "packages/util/lazy-require/src/index.ts",
+    "expression": "require(specifier)",
+    "reason": "Ленивая загрузка переданного host-модулем specifier при первом обращении."
+  },
+  {
+    "file": "vendor/loader/src/config/tree.ts",
+    "expression": "import(/* @vite-ignore */ url)",
+    "reason": "Cordis Loader загружает проверенный URL plugin из состава запуска и overlays."
+  },
+  {
+    "file": "vendor/loader/src/resolve.ts",
+    "expression": "import(/* @vite-ignore */ helperUrl)",
+    "reason": "Резолвер импортирует собственный resolve.mjs рядом с родительским модулем."
   }
 ]

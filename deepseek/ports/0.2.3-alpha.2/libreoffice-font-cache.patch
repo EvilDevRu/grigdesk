@@ -1,0 +1,11 @@
+--- a/lib/font-snapshot-worker.js
++++ b/lib/font-snapshot-worker.js
+@@ -282,7 +282,7 @@
+ const VERSION = {
+ 	format: 1,
+ 	extractor: 2,
+-	fontkit: "2.0.4"
++	fontkit: "fontkitten@1.0.3"
+ };
+ const digest = (records) => createHash("sha256").update(JSON.stringify(records)).digest("hex");
+ function object(value) {

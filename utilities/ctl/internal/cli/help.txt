@@ -27,9 +27,11 @@ grigdesk-ctl artifacts-cleanup --inventory [--topic <имя>] [--json]
                                 Занятое место по категориям и крупнейшим папкам, без удаления
 grigdesk-ctl desktop … | tracker … | pipeline … | voice … | mobile … | release …
 grigdesk-ctl desktop use-server <ELF|R>  Выбрать серверный ELF или прежний SEA-комплект для окна
-grigdesk-ctl build [all|server|web|window|factory|deepseek|apk]
+grigdesk-ctl build [all|server|web|window|factory|deepseek|deepseek-admission|apk]
                                 Без аргументов: сервер, окно, tasks и voice (all)
                                 factory: автономный движок в bin/factory
+                                deepseek: собрать и установить DeepSeek Harness
+                                deepseek-admission: проверить допуск GLM для обоих режимов
                                 apk: Android-приложение со встроенным вебом
 grigdesk-ctl dist build [--target linux-x64|windows-x64] [--channel release|dev]
                                 Прогон в снимке исходников; Windows x64 — локальный ZIP канала dev

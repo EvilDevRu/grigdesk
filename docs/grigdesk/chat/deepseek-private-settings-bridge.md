@@ -41,3 +41,25 @@ web/ACP startup, bridge/CAS и проверки фактического HTTP pa
 Для web preset roster host-обёртка задаёт base URL поколения вместо приватного home.
 Исходные discovery, validation, shipped/user presets и lifecycle остаются у upstream
 service. Это позволяет новой сессии разрешить plugin packages из собственной generation.
+
+## Закрытый профиль в alpha.2
+
+Launcher передаёт штатному ConfigEditor готовые слои GrigDesk в памяти.
+Начальный запуск и перезагрузка используют один состав плагинов и ограничений.
+Общий `$DSH_HOME/cordis.patch.yml` и менеджер пакетов в этот профиль не входят.
+Приватный документ хранит только конфигурацию существующих строк. Смена имени,
+добавление строки и новые Loader-выражения отклоняются, а права, модельные
+маршруты GLM и служебные hooks сохраняет launcher.
+
+Для одноразового запуска с overrides alpha.2 создаёт файл рядом с приватной
+копией `native-settings.yaml` и восстанавливает из этой копии известные разделы.
+Metadata worker и рабочий запуск используют один `native-settings.yaml.cordis.yml`.
+RPC ждёт завершения начального чтения. Исходная копия остаётся доступной для
+отката. Запуск без заданного документа использует отдельный файл в
+`$DSH_HOME/grigdesk-profile/<transport>/`. Имя формы
+`subagent-model-selection` сохраняется для записанных overrides GrigDesk.
+
+Регрессия `deepseek-alpha-settings.test.js` на собранном ELF проверяет describe,
+mutation, CAS, повторный запуск, запрет правки состава Loader и запросы Messages
+к loopback. Legacy проверка с `/chat/completions` и тестовым `settings.register`
+относится к прежнему runtime.

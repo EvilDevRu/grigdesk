@@ -16,7 +16,7 @@ import {
   ensureTestDeepSeekBinary,
   testDeepSeekRuntimeDependencies,
 } from '../../helpers/deepseekBinary.mts';
-import { nativeSource, workerSource } from '../../helpers/deepseekNativeProbes.mts';
+import { nativeSource, ptcWorkerSource, workerSource } from '../../helpers/deepseekNativeProbes.mts';
 
 const run = promisify(execFile);
 
@@ -62,7 +62,10 @@ test('изолированный Node 24 runtime работает через ELF
   await mkdir(binaryDir);
   await copyFile(candidate.binary, binary);
   await writeFile(nativeProbe, nativeSource);
-  await writeFile(workerProbe, workerSource);
+
+  const ptc = candidate.info.upstreamVersion.startsWith('0.2.');
+
+  await writeFile(workerProbe, ptc ? ptcWorkerSource : workerSource);
   assert.deepEqual(await readdir(binaryDir), ['deepseek']);
   assert.equal((await readdir(path.dirname(path.dirname(candidate.binary))))
     .some((name) => name.startsWith('source-')), false, 'Приватная source fixture удалена helper-ом');
@@ -119,7 +122,8 @@ test('изолированный Node 24 runtime работает через ELF
   const nativeInfo = JSON.parse(native.stdout);
   const helpers = await run(path.join(payload, 'node'), [workerProbe, payload], {
     cwd: temporary,
-    env: environment,
+    // PTC starts a subprocess under the host sandbox. The driver still runs with the packaged Node.
+    env: ptc ? { ...environment, PATH: process.env.PATH ?? '' } : environment,
     timeout: 15000,
   });
   const helperInfo = JSON.parse(helpers.stdout);

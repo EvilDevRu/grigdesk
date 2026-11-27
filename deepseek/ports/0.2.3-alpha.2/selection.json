@@ -1,0 +1,982 @@
+{
+  "roots": [
+    {
+      "path": "native/system",
+      "reason": "Исходники и скрипт сборки нативного модуля для трёх целей"
+    },
+    {
+      "path": "packages/account/deepseek-account",
+      "reason": "host YAML composition; @deepseek-ai/dsh-deepseek-auth: pnpm workspace link; @deepseek-ai/dsh-deepseek-auth: host type reference; @deepseek-ai/dsh-llm-deepseek-account: pnpm workspace link; @deepseek-ai/dsh-llm-deepseek-account: host type reference; @deepseek-ai/dsh-client-product-analytics: host type reference; @deepseek-ai/dsh-api-remotes: host type reference; @deepseek-ai/dsh-base: pnpm workspace link"
+    },
+    {
+      "path": "packages/account/deepseek-auth",
+      "reason": "host YAML composition; @deepseek-ai/dsh-web-search-deepseek: pnpm workspace link; @deepseek-ai/dsh-web-search-deepseek: host type reference; @deepseek-ai/dsh-web-deepseek-api: pnpm workspace link; @deepseek-ai/dsh-web-deepseek-api: host type reference; @deepseek-ai/dsh-llm-deepseek-api-key: pnpm workspace link; @deepseek-ai/dsh-llm-deepseek-api-key: host type reference; @deepseek-ai/dsh-llm-deepseek-account: pnpm workspace link; @deepseek-ai/dsh-llm-deepseek-account: host type reference; @deepseek-ai/dsh-base: pnpm workspace link"
+    },
+    {
+      "path": "packages/acp/acp",
+      "reason": "host YAML composition; @deepseek-ai/dsh-acp-app: pnpm workspace link"
+    },
+    {
+      "path": "packages/api/gateway",
+      "reason": "host YAML composition; @deepseek-ai/dsh-api-session-controller: pnpm workspace link; @deepseek-ai/dsh-api-session-controller: host type reference; @deepseek-ai/dsh-api-workspace-controller: pnpm workspace link; @deepseek-ai/dsh-cordis-host-runner: host type reference; @deepseek-ai/dsh-api-remotes: host type reference; @deepseek-ai/dsh-base: pnpm workspace link"
+    },
+    {
+      "path": "packages/api/job-controller",
+      "reason": "host YAML composition; @deepseek-ai/dsh-web-app: pnpm workspace link"
+    },
+    {
+      "path": "packages/api/remote-access",
+      "reason": "host YAML composition; @deepseek-ai/dsh-api-gateway: host type reference; @deepseek-ai/dsh-api-session-controller: host type reference; @deepseek-ai/dsh-api-workspace-controller: host type reference; @deepseek-ai/dsh-client-remote-connection: host type reference; @deepseek-ai/dsh-action-cards: host type reference; @deepseek-ai/dsh-creation-recommendations: host type reference; @deepseek-ai/dsh-plugin-recommendations: host type reference; @deepseek-ai/dsh-base: pnpm workspace link"
+    },
+    {
+      "path": "packages/api/remotes",
+      "reason": "host YAML composition; @deepseek-ai/dsh-web-app: pnpm workspace link"
+    },
+    {
+      "path": "packages/api/session-controller",
+      "reason": "host YAML composition; @deepseek-ai/dsh-tool-session-control: pnpm workspace link; @deepseek-ai/dsh-tool-session-control: host type reference; @deepseek-ai/dsh-schedule: pnpm workspace link; @deepseek-ai/dsh-schedule: host type reference; @deepseek-ai/dsh-web-app: pnpm workspace link; @deepseek-ai/dsh-api-remotes: host type reference"
+    },
+    {
+      "path": "packages/api/settings-controller",
+      "reason": "host YAML composition; @deepseek-ai/dsh-web-app: pnpm workspace link"
+    },
+    {
+      "path": "packages/api/terminal-controller",
+      "reason": "host YAML composition; @deepseek-ai/dsh-web-app: pnpm workspace link; @deepseek-ai/dsh-api-remotes: host type reference"
+    },
+    {
+      "path": "packages/api/workspace-controller",
+      "reason": "host YAML composition; @deepseek-ai/dsh-web-app: pnpm workspace link; @deepseek-ai/dsh-api-remotes: host type reference"
+    },
+    {
+      "path": "packages/api/workspace-files",
+      "reason": "host YAML composition; @deepseek-ai/dsh-web-app: pnpm workspace link; @deepseek-ai/dsh-api-remotes: host type reference; @deepseek-ai/dsh-office-kit: host type reference"
+    },
+    {
+      "path": "packages/attachment/attachment",
+      "reason": "@deepseek-ai/dsh-llm: host type reference; @deepseek-ai/dsh-attachment-local: pnpm workspace link; @deepseek-ai/dsh-attachment-local: host type reference; @deepseek-ai/dsh-tool-fs: pnpm workspace link; @deepseek-ai/dsh-tool-fs: host type reference; @deepseek-ai/dsh-commands: pnpm workspace link; @deepseek-ai/dsh-commands: host type reference; @deepseek-ai/dsh-subagent: pnpm workspace link; @deepseek-ai/dsh-subagent: host type reference; @deepseek-ai/dsh-spill-policy: pnpm workspace link; @deepseek-ai/dsh-spill-policy: host type reference; @deepseek-ai/dsh-session-log-export: host type reference; @deepseek-ai/dsh-api-session-controller: pnpm workspace link; @deepseek-ai/dsh-api-session-controller: host type reference; @deepseek-ai/dsh-client-connection: host type reference; @deepseek-ai/dsh-client-file-upload: host type reference; @deepseek-ai/dsh-tool-office: pnpm workspace link; @deepseek-ai/dsh-tool-office: host type reference; @deepseek-ai/dsh-acp: pnpm workspace link; @deepseek-ai/dsh-acp: host type reference; @deepseek-ai/dsh-mcp-client: pnpm workspace link; @deepseek-ai/dsh-llm-pi-ai: pnpm workspace link; @deepseek-ai/dsh-llm-pi-ai: host type reference; @deepseek-ai/dsh-ptc-runtime: pnpm workspace link; @deepseek-ai/dsh-ptc-runtime: host type reference; @deepseek-ai/dsh-llm-deepseek: pnpm workspace link; @deepseek-ai/dsh-llm-deepseek: host type reference"
+    },
+    {
+      "path": "packages/attachment/attachment-local",
+      "reason": "host YAML composition; @deepseek-ai/dsh-base: pnpm workspace link"
+    },
+    {
+      "path": "packages/boot/app-boot",
+      "reason": "launcher / metadata compiler; @deepseek-ai/dsh-plugin-manager: pnpm workspace link; @deepseek-ai/dsh-plugin-manager: host type reference; @deepseek-ai/dsh-hmr: pnpm workspace link; @deepseek-ai/dsh-hmr: host type reference; @deepseek-ai/dsh-typert-loader: host type reference; @deepseek-ai/dsh-plugin-package-inventory-deepseek: host type reference; @deepseek-ai/dsh-config-editor: pnpm workspace link; @deepseek-ai/dsh-config-editor: host type reference; @deepseek-ai/dsh-shell-env: pnpm workspace link; @deepseek-ai/dsh-shell-env: host type reference; @deepseek-ai/dsh-upstream-skills: host type reference; @deepseek-ai/dsh-host-plugin-inventory: host type reference; @deepseek-ai/dsh-tool-cordis: pnpm workspace link; @deepseek-ai/dsh-tool-cordis: host type reference; @deepseek-ai/dsh-web-app: pnpm workspace link; @deepseek-ai/dsh-web-app: host type reference; @deepseek-ai/dsh-creation-recommendations: host type reference; @deepseek-ai/dsh-agent-preset-registry: pnpm workspace link; @deepseek-ai/dsh-agent-preset-registry: host type reference; @deepseek-ai/dsh-plugin-market: pnpm workspace link; @deepseek-ai/dsh-plugin-market: host type reference"
+    },
+    {
+      "path": "packages/boot/cmdline",
+      "reason": "launcher / metadata compiler; @deepseek-ai/dsh-hmr: pnpm workspace link; @deepseek-ai/dsh-hmr: host type reference; @deepseek-ai/dsh-api-gateway: host type reference; @deepseek-ai/dsh-web-app: pnpm workspace link; @deepseek-ai/dsh-web-app: host type reference; @deepseek-ai/dsh-acp-app: pnpm workspace link; @deepseek-ai/dsh-acp-app: host type reference"
+    },
+    {
+      "path": "packages/boot/config-editor",
+      "reason": "host YAML composition; @deepseek-ai/dsh-agent-default-model: pnpm workspace link; @deepseek-ai/dsh-agent-default-model: host type reference; @deepseek-ai/dsh-settings: pnpm workspace link; @deepseek-ai/dsh-settings: host type reference; @deepseek-ai/dsh-base: pnpm workspace link; @deepseek-ai/dsh-base: host type reference"
+    },
+    {
+      "path": "packages/boot/hmr",
+      "reason": "host YAML composition; @deepseek-ai/dsh-plugin-manager: pnpm workspace link; @deepseek-ai/dsh-plugin-manager: host type reference; @deepseek-ai/dsh-config-editor: pnpm workspace link; @deepseek-ai/dsh-config-editor: host type reference; @deepseek-ai/dsh-agent-preset-registry: host type reference; @deepseek-ai/dsh-base: pnpm workspace link"
+    },
+    {
+      "path": "packages/boot/plugin-manager",
+      "reason": "host YAML composition; @deepseek-ai/dsh-web-app: pnpm workspace link; @deepseek-ai/dsh-api-remotes: host type reference; @deepseek-ai/dsh-creation-recommendations: pnpm workspace link; @deepseek-ai/dsh-creation-recommendations: host type reference; @deepseek-ai/dsh-plugin-recommendations: pnpm workspace link; @deepseek-ai/dsh-plugin-recommendations: host type reference; @deepseek-ai/dsh-plugin-market: pnpm workspace link; @deepseek-ai/dsh-plugin-market: host type reference; @deepseek-ai/dsh-base: pnpm workspace link"
+    },
+    {
+      "path": "packages/boot/plugin-market",
+      "reason": "host YAML composition; @deepseek-ai/dsh-web-app: pnpm workspace link; @deepseek-ai/dsh-api-remotes: host type reference"
+    },
+    {
+      "path": "packages/bundle/acp-app",
+      "reason": "host YAML composition; launcher / metadata compiler"
+    },
+    {
+      "path": "packages/bundle/base",
+      "reason": "launcher / metadata compiler"
+    },
+    {
+      "path": "packages/bundle/web-app",
+      "reason": "host YAML composition; launcher / metadata compiler; @deepseek-ai/dsh-harness-dev-context: host type reference; @deepseek-ai/dsh-client-remote-connection: host type reference"
+    },
+    {
+      "path": "packages/client/connection",
+      "reason": "host YAML composition; @deepseek-ai/dsh-plugin-manager: host type reference; @deepseek-ai/dsh-api-gateway: host type reference; @deepseek-ai/dsh-api-session-controller: pnpm workspace link; @deepseek-ai/dsh-api-session-controller: host type reference; @deepseek-ai/dsh-api-workspace-controller: pnpm workspace link; @deepseek-ai/dsh-web-app: pnpm workspace link; @deepseek-ai/dsh-web-app: host type reference; @deepseek-ai/dsh-host-authentication-token: pnpm workspace link; @deepseek-ai/dsh-host-authentication-token: host type reference; @deepseek-ai/dsh-client-file-upload: host type reference; @deepseek-ai/dsh-client-remote-connection: host type reference; @deepseek-ai/dsh-plugin-market: host type reference; @deepseek-ai/dsh-host-frontend-static: pnpm workspace link; @deepseek-ai/dsh-host-frontend-static: host type reference"
+    },
+    {
+      "path": "packages/client/file-upload",
+      "reason": "host YAML composition; @deepseek-ai/dsh-api-session-controller: pnpm workspace link; @deepseek-ai/dsh-api-session-controller: host type reference; @deepseek-ai/dsh-web-app: pnpm workspace link"
+    },
+    {
+      "path": "packages/client/product-analytics",
+      "reason": "host YAML composition; @deepseek-ai/dsh-web-app: pnpm workspace link"
+    },
+    {
+      "path": "packages/client/remote-connection",
+      "reason": "host YAML composition; @deepseek-ai/dsh-web-app: pnpm workspace link"
+    },
+    {
+      "path": "packages/client/shortcuts",
+      "reason": "host YAML composition; @deepseek-ai/dsh-web-app: pnpm workspace link"
+    },
+    {
+      "path": "packages/client/ui-connector-account",
+      "reason": "@deepseek-ai/dsh-cli-account: host type reference; @deepseek-ai/dsh-mcp-account: host type reference"
+    },
+    {
+      "path": "packages/compaction/command-compact",
+      "reason": "host YAML composition; @deepseek-ai/dsh-web-app: pnpm workspace link; @deepseek-ai/dsh-base: pnpm workspace link"
+    },
+    {
+      "path": "packages/compaction/compaction",
+      "reason": "@deepseek-ai/dsh-token-meter: pnpm workspace link; @deepseek-ai/dsh-token-meter: host type reference; @deepseek-ai/dsh-compaction-basic: pnpm workspace link; @deepseek-ai/dsh-compaction-basic: host type reference; @deepseek-ai/dsh-command-compact: pnpm workspace link; @deepseek-ai/dsh-command-compact: host type reference; @deepseek-ai/dsh-compaction-tool-result-pruner: pnpm workspace link; @deepseek-ai/dsh-compaction-tool-result-pruner: host type reference; @deepseek-ai/dsh-compaction-image-offload: pnpm workspace link; @deepseek-ai/dsh-compaction-image-offload: host type reference; @deepseek-ai/dsh-client-product-analytics: host type reference; @deepseek-ai/dsh-session-reference: pnpm workspace link; @deepseek-ai/dsh-session-reference: host type reference"
+    },
+    {
+      "path": "packages/compaction/compaction-basic",
+      "reason": "host YAML composition; @deepseek-ai/dsh-web-app: pnpm workspace link; @deepseek-ai/dsh-base: pnpm workspace link"
+    },
+    {
+      "path": "packages/compaction/compaction-image-offload",
+      "reason": "host YAML composition; @deepseek-ai/dsh-token-meter: pnpm workspace link; @deepseek-ai/dsh-token-meter: host type reference; @deepseek-ai/dsh-base: pnpm workspace link; @deepseek-ai/dsh-session-format-catalog: pnpm workspace link; @deepseek-ai/dsh-session-format-catalog: host type reference"
+    },
+    {
+      "path": "packages/compaction/compaction-tool-result-pruner",
+      "reason": "host YAML composition; @deepseek-ai/dsh-compaction-basic: pnpm workspace link; @deepseek-ai/dsh-compaction-basic: host type reference; @deepseek-ai/dsh-web-app: pnpm workspace link; @deepseek-ai/dsh-base: pnpm workspace link"
+    },
+    {
+      "path": "packages/connector/cli-account",
+      "reason": "host YAML composition; @deepseek-ai/dsh-base: pnpm workspace link"
+    },
+    {
+      "path": "packages/connector/upstream-skills",
+      "reason": "host YAML composition; @deepseek-ai/dsh-base: pnpm workspace link"
+    },
+    {
+      "path": "packages/context/agent-instructions",
+      "reason": "host YAML composition; @deepseek-ai/dsh-web-app: pnpm workspace link; @deepseek-ai/dsh-base: pnpm workspace link"
+    },
+    {
+      "path": "packages/context/file-reference",
+      "reason": "@deepseek-ai/dsh-file-reference-local: pnpm workspace link; @deepseek-ai/dsh-file-reference-local: host type reference; @deepseek-ai/dsh-api-session-controller: pnpm workspace link; @deepseek-ai/dsh-api-session-controller: host type reference; @deepseek-ai/dsh-web-app: pnpm workspace link"
+    },
+    {
+      "path": "packages/context/file-reference-local",
+      "reason": "host YAML composition; @deepseek-ai/dsh-web-app: pnpm workspace link"
+    },
+    {
+      "path": "packages/context/harness-dev-context",
+      "reason": "host YAML composition; @deepseek-ai/dsh-web-app: pnpm workspace link"
+    },
+    {
+      "path": "packages/context/session-reference",
+      "reason": "host YAML composition; @deepseek-ai/dsh-web-app: pnpm workspace link"
+    },
+    {
+      "path": "packages/context/time-context",
+      "reason": "host YAML composition; @deepseek-ai/dsh-web-app: pnpm workspace link"
+    },
+    {
+      "path": "packages/core/agent",
+      "reason": "host YAML composition; @deepseek-ai/dsh-plugin-manager: host type reference; @deepseek-ai/dsh-session-title: pnpm workspace link; @deepseek-ai/dsh-session-title: host type reference; @deepseek-ai/dsh-user-questions: pnpm workspace link; @deepseek-ai/dsh-user-questions: host type reference; @deepseek-ai/dsh-plugin-package-inventory-deepseek: pnpm workspace link; @deepseek-ai/dsh-plugin-package-inventory-deepseek: host type reference; @deepseek-ai/dsh-agent-default-model: pnpm workspace link; @deepseek-ai/dsh-agent-default-model: host type reference; @deepseek-ai/dsh-jobs-local: pnpm workspace link; @deepseek-ai/dsh-jobs-local: host type reference; @deepseek-ai/dsh-llm-retry: pnpm workspace link; @deepseek-ai/dsh-llm-retry: host type reference; @deepseek-ai/dsh-working-directory: pnpm workspace link; @deepseek-ai/dsh-working-directory: host type reference; @deepseek-ai/dsh-sandbox-policy: pnpm workspace link; @deepseek-ai/dsh-sandbox-policy: host type reference; @deepseek-ai/dsh-user-approval: pnpm workspace link; @deepseek-ai/dsh-user-approval: host type reference; @deepseek-ai/dsh-permission-presets: pnpm workspace link; @deepseek-ai/dsh-tool-bash: pnpm workspace link; @deepseek-ai/dsh-tool-bash: host type reference; @deepseek-ai/dsh-tool-pwsh: pnpm workspace link; @deepseek-ai/dsh-tool-pwsh: host type reference; @deepseek-ai/dsh-tool-jobs: pnpm workspace link; @deepseek-ai/dsh-tool-jobs: host type reference; @deepseek-ai/dsh-agent-instructions: pnpm workspace link; @deepseek-ai/dsh-agent-instructions: host type reference; @deepseek-ai/dsh-tool-skill: pnpm workspace link; @deepseek-ai/dsh-tool-skill: host type reference; @deepseek-ai/dsh-commands: pnpm workspace link; @deepseek-ai/dsh-commands: host type reference; @deepseek-ai/dsh-goal: pnpm workspace link; @deepseek-ai/dsh-goal: host type reference; @deepseek-ai/dsh-goal-round-driver: pnpm workspace link; @deepseek-ai/dsh-goal-round-driver: host type reference; @deepseek-ai/dsh-plan-mode: pnpm workspace link; @deepseek-ai/dsh-plan-mode: host type reference; @deepseek-ai/dsh-compaction-basic: pnpm workspace link; @deepseek-ai/dsh-compaction-basic: host type reference; @deepseek-ai/dsh-subagent: pnpm workspace link; @deepseek-ai/dsh-subagent: host type reference; @deepseek-ai/dsh-agent-team: pnpm workspace link; @deepseek-ai/dsh-agent-team: host type reference; @deepseek-ai/dsh-tool-agent-team: pnpm workspace link; @deepseek-ai/dsh-tool-agent-team: host type reference; @deepseek-ai/dsh-subagent-fork-in-process: pnpm workspace link; @deepseek-ai/dsh-subagent-fork-in-process: host type reference; @deepseek-ai/dsh-tool-subagent-control: pnpm workspace link; @deepseek-ai/dsh-tool-subagent-control: host type reference; @deepseek-ai/dsh-tool-subagent: pnpm workspace link; @deepseek-ai/dsh-tool-subagent: host type reference; @deepseek-ai/dsh-workflow-ptc: pnpm workspace link; @deepseek-ai/dsh-workflow-ptc: host type reference; @deepseek-ai/dsh-tool-workflow: pnpm workspace link; @deepseek-ai/dsh-tool-workflow: host type reference; @deepseek-ai/dsh-session-checkpoint-policy: pnpm workspace link; @deepseek-ai/dsh-session-checkpoint-policy: host type reference; @deepseek-ai/dsh-compaction-image-offload: pnpm workspace link; @deepseek-ai/dsh-compaction-image-offload: host type reference; @deepseek-ai/dsh-tool-todo: pnpm workspace link; @deepseek-ai/dsh-tool-todo: host type reference; @deepseek-ai/dsh-tool-goal: pnpm workspace link; @deepseek-ai/dsh-tool-goal: host type reference; @deepseek-ai/dsh-repeat-tool-reminder: pnpm workspace link; @deepseek-ai/dsh-repeat-tool-reminder: host type reference; @deepseek-ai/dsh-web-search-deepseek: pnpm workspace link; @deepseek-ai/dsh-web-search-deepseek: host type reference; @deepseek-ai/dsh-web-deepseek-api: pnpm workspace link; @deepseek-ai/dsh-web-deepseek-api: host type reference; @deepseek-ai/dsh-tools: pnpm workspace link; @deepseek-ai/dsh-tools: host type reference; @deepseek-ai/dsh-tool-executor-ptc: pnpm workspace link; @deepseek-ai/dsh-tool-executor-ptc: host type reference; @deepseek-ai/dsh-agent-loop: pnpm workspace link; @deepseek-ai/dsh-agent-loop: host type reference; @deepseek-ai/dsh-llm-deepseek-account: pnpm workspace link; @deepseek-ai/dsh-llm-deepseek-account: host type reference; @deepseek-ai/dsh-session-reference: pnpm workspace link; @deepseek-ai/dsh-session-reference: host type reference; @deepseek-ai/dsh-file-reference-local: pnpm workspace link; @deepseek-ai/dsh-file-reference-local: host type reference; @deepseek-ai/dsh-api-session-controller: pnpm workspace link; @deepseek-ai/dsh-api-session-controller: host type reference; @deepseek-ai/dsh-api-job-controller: host type reference; @deepseek-ai/dsh-api-terminal-controller: host type reference; @deepseek-ai/dsh-schedule: pnpm workspace link; @deepseek-ai/dsh-schedule: host type reference; @deepseek-ai/dsh-cordis-host-runner: pnpm workspace link; @deepseek-ai/dsh-cordis-host-runner: host type reference; @deepseek-ai/dsh-tool-cordis: pnpm workspace link; @deepseek-ai/dsh-tool-cordis: host type reference; @deepseek-ai/dsh-harness-dev-context: pnpm workspace link; @deepseek-ai/dsh-harness-dev-context: host type reference; @deepseek-ai/dsh-client-file-upload: host type reference; @deepseek-ai/dsh-workspace-changes: pnpm workspace link; @deepseek-ai/dsh-workspace-changes: host type reference; @deepseek-ai/dsh-action-cards: host type reference; @deepseek-ai/dsh-creation-recommendations: host type reference; @deepseek-ai/dsh-plugin-recommendations: host type reference; @deepseek-ai/dsh-agent-preset-registry: pnpm workspace link; @deepseek-ai/dsh-agent-preset-registry: host type reference; @deepseek-ai/dsh-time-context: pnpm workspace link; @deepseek-ai/dsh-time-context: host type reference; @deepseek-ai/dsh-tool-ask-user: pnpm workspace link; @deepseek-ai/dsh-tool-ask-user: host type reference; @deepseek-ai/dsh-tool-present: pnpm workspace link; @deepseek-ai/dsh-tool-present: host type reference; @deepseek-ai/dsh-tool-office: pnpm workspace link; @deepseek-ai/dsh-tool-office: host type reference; @deepseek-ai/dsh-terminal: pnpm workspace link; @deepseek-ai/dsh-terminal: host type reference; @deepseek-ai/dsh-terminal-bash: pnpm workspace link; @deepseek-ai/dsh-terminal-bash: host type reference; @deepseek-ai/dsh-tool-bash-persistent: pnpm workspace link; @deepseek-ai/dsh-tool-bash-persistent: host type reference; @deepseek-ai/dsh-tool-pwsh-persistent: pnpm workspace link; @deepseek-ai/dsh-tool-pwsh-persistent: host type reference; @deepseek-ai/dsh-acp: pnpm workspace link; @deepseek-ai/dsh-acp: host type reference; @deepseek-ai/dsh-hooks-claude-code: pnpm workspace link; @deepseek-ai/dsh-hooks-claude-code: host type reference; @deepseek-ai/dsh-mcp-client: pnpm workspace link; @deepseek-ai/dsh-mcp-client: host type reference; @deepseek-ai/dsh-base: pnpm workspace link; @deepseek-ai/dsh-jobs: pnpm workspace link; @deepseek-ai/dsh-jobs: host type reference; @deepseek-ai/dsh-session-telemetry: pnpm workspace link; @deepseek-ai/dsh-session-telemetry: host type reference; @deepseek-ai/dsh-workflow: pnpm workspace link; @deepseek-ai/dsh-workflow: host type reference; @deepseek-ai/dsh-file-reference: pnpm workspace link; @deepseek-ai/dsh-file-reference: host type reference; @deepseek-ai/dsh-loader-smoke: pnpm workspace link; @deepseek-ai/dsh-loader-smoke: host type reference"
+    },
+    {
+      "path": "packages/core/agent-default-model",
+      "reason": "host YAML composition; @deepseek-ai/dsh-api-session-controller: pnpm workspace link; @deepseek-ai/dsh-api-session-controller: host type reference; @deepseek-ai/dsh-base: pnpm workspace link"
+    },
+    {
+      "path": "packages/core/agent-loop",
+      "reason": "host YAML composition; @deepseek-ai/dsh-base: pnpm workspace link"
+    },
+    {
+      "path": "packages/core/agent-tool-presentation",
+      "reason": "@deepseek-ai/dsh-web-app: pnpm workspace link"
+    },
+    {
+      "path": "packages/core/scope",
+      "reason": "@deepseek-ai/dsh-session: pnpm workspace link; @deepseek-ai/dsh-session: host type reference; @deepseek-ai/dsh-user-questions: pnpm workspace link; @deepseek-ai/dsh-user-questions: host type reference; @deepseek-ai/dsh-agent: pnpm workspace link; @deepseek-ai/dsh-agent: host type reference; @deepseek-ai/dsh-jobs-local: pnpm workspace link; @deepseek-ai/dsh-jobs-local: host type reference; @deepseek-ai/dsh-user-approval: pnpm workspace link; @deepseek-ai/dsh-user-approval: host type reference; @deepseek-ai/dsh-skill: pnpm workspace link; @deepseek-ai/dsh-skill: host type reference; @deepseek-ai/dsh-tool-skill: host type reference; @deepseek-ai/dsh-commands: pnpm workspace link; @deepseek-ai/dsh-commands: host type reference; @deepseek-ai/dsh-goal: pnpm workspace link; @deepseek-ai/dsh-goal: host type reference; @deepseek-ai/dsh-subagent: pnpm workspace link; @deepseek-ai/dsh-subagent: host type reference; @deepseek-ai/dsh-tool-agent-team: host type reference; @deepseek-ai/dsh-mcp-resources: pnpm workspace link; @deepseek-ai/dsh-mcp-resources: host type reference; @deepseek-ai/dsh-tools: pnpm workspace link; @deepseek-ai/dsh-tools: host type reference; @deepseek-ai/dsh-tool-executor-ptc: pnpm workspace link; @deepseek-ai/dsh-tool-executor-ptc: host type reference; @deepseek-ai/dsh-system-prompt: pnpm workspace link; @deepseek-ai/dsh-system-prompt: host type reference; @deepseek-ai/dsh-agent-loop: pnpm workspace link; @deepseek-ai/dsh-agent-loop: host type reference; @deepseek-ai/dsh-api-session-controller: pnpm workspace link; @deepseek-ai/dsh-api-session-controller: host type reference; @deepseek-ai/dsh-cordis-host-runner: pnpm workspace link; @deepseek-ai/dsh-cordis-host-runner: host type reference; @deepseek-ai/dsh-client-connection: pnpm workspace link; @deepseek-ai/dsh-client-connection: host type reference; @deepseek-ai/dsh-api-remotes: pnpm workspace link; @deepseek-ai/dsh-api-remotes: host type reference; @deepseek-ai/dsh-agent-preset-registry: pnpm workspace link; @deepseek-ai/dsh-agent-preset-registry: host type reference; @deepseek-ai/dsh-mcp-client: pnpm workspace link; @deepseek-ai/dsh-mcp-client: host type reference"
+    },
+    {
+      "path": "packages/core/session",
+      "reason": "host YAML composition; @deepseek-ai/dsh-session-log-deepseek: pnpm workspace link; @deepseek-ai/dsh-session-log-deepseek: host type reference; @deepseek-ai/dsh-session-title: pnpm workspace link; @deepseek-ai/dsh-session-title: host type reference; @deepseek-ai/dsh-session-title-first-prompt-llm: pnpm workspace link; @deepseek-ai/dsh-user-questions: pnpm workspace link; @deepseek-ai/dsh-user-questions: host type reference; @deepseek-ai/dsh-agent: pnpm workspace link; @deepseek-ai/dsh-agent: host type reference; @deepseek-ai/dsh-plugin-package-inventory-deepseek: pnpm workspace link; @deepseek-ai/dsh-plugin-package-inventory-deepseek: host type reference; @deepseek-ai/dsh-llm-retry: pnpm workspace link; @deepseek-ai/dsh-llm-retry: host type reference; @deepseek-ai/dsh-settings: pnpm workspace link; @deepseek-ai/dsh-session-persistence-jsonl: pnpm workspace link; @deepseek-ai/dsh-session-persistence-jsonl: host type reference; @deepseek-ai/dsh-session-query-sqlite: pnpm workspace link; @deepseek-ai/dsh-session-query-sqlite: host type reference; @deepseek-ai/dsh-working-directory: pnpm workspace link; @deepseek-ai/dsh-working-directory: host type reference; @deepseek-ai/dsh-session-projection: pnpm workspace link; @deepseek-ai/dsh-session-projection: host type reference; @deepseek-ai/dsh-session-projection-cache: pnpm workspace link; @deepseek-ai/dsh-session-projection-cache: host type reference; @deepseek-ai/dsh-otel: pnpm workspace link; @deepseek-ai/dsh-otel: host type reference; @deepseek-ai/dsh-session-telemetry-otel: pnpm workspace link; @deepseek-ai/dsh-session-telemetry-otel: host type reference; @deepseek-ai/dsh-sandbox-local: pnpm workspace link; @deepseek-ai/dsh-sandbox-local: host type reference; @deepseek-ai/dsh-sandbox-policy: pnpm workspace link; @deepseek-ai/dsh-sandbox-policy: host type reference; @deepseek-ai/dsh-user-approval: pnpm workspace link; @deepseek-ai/dsh-user-approval: host type reference; @deepseek-ai/dsh-permission-presets: pnpm workspace link; @deepseek-ai/dsh-permission-presets: host type reference; @deepseek-ai/dsh-tool-fs: pnpm workspace link; @deepseek-ai/dsh-tool-fs-search: pnpm workspace link; @deepseek-ai/dsh-tool-fs-search: host type reference; @deepseek-ai/dsh-agent-instructions: pnpm workspace link; @deepseek-ai/dsh-agent-instructions: host type reference; @deepseek-ai/dsh-commands: pnpm workspace link; @deepseek-ai/dsh-commands: host type reference; @deepseek-ai/dsh-command-feedback: pnpm workspace link; @deepseek-ai/dsh-command-feedback: host type reference; @deepseek-ai/dsh-goal: pnpm workspace link; @deepseek-ai/dsh-goal: host type reference; @deepseek-ai/dsh-goal-round-driver: pnpm workspace link; @deepseek-ai/dsh-goal-round-driver: host type reference; @deepseek-ai/dsh-plan-mode: pnpm workspace link; @deepseek-ai/dsh-plan-mode: host type reference; @deepseek-ai/dsh-token-meter: pnpm workspace link; @deepseek-ai/dsh-token-meter: host type reference; @deepseek-ai/dsh-compaction-basic: pnpm workspace link; @deepseek-ai/dsh-compaction-basic: host type reference; @deepseek-ai/dsh-subagent: pnpm workspace link; @deepseek-ai/dsh-agent-team: pnpm workspace link; @deepseek-ai/dsh-agent-team: host type reference; @deepseek-ai/dsh-tool-agent-team: pnpm workspace link; @deepseek-ai/dsh-tool-agent-team: host type reference; @deepseek-ai/dsh-subagent-fork-in-process: pnpm workspace link; @deepseek-ai/dsh-subagent-fork-in-process: host type reference; @deepseek-ai/dsh-tool-subagent-control: pnpm workspace link; @deepseek-ai/dsh-tool-subagent-control: host type reference; @deepseek-ai/dsh-tool-subagent: pnpm workspace link; @deepseek-ai/dsh-tool-subagent: host type reference; @deepseek-ai/dsh-ptc-runtime-node: pnpm workspace link; @deepseek-ai/dsh-ptc-runtime-node: host type reference; @deepseek-ai/dsh-workflow-ptc: pnpm workspace link; @deepseek-ai/dsh-workflow-ptc: host type reference; @deepseek-ai/dsh-tool-workflow: pnpm workspace link; @deepseek-ai/dsh-tool-workflow: host type reference; @deepseek-ai/dsh-spill-policy: pnpm workspace link; @deepseek-ai/dsh-spill-policy: host type reference; @deepseek-ai/dsh-session-checkpoint-policy: pnpm workspace link; @deepseek-ai/dsh-session-checkpoint-policy: host type reference; @deepseek-ai/dsh-compaction-tool-result-pruner: pnpm workspace link; @deepseek-ai/dsh-compaction-tool-result-pruner: host type reference; @deepseek-ai/dsh-compaction-image-offload: pnpm workspace link; @deepseek-ai/dsh-compaction-image-offload: host type reference; @deepseek-ai/dsh-tool-todo: pnpm workspace link; @deepseek-ai/dsh-tool-todo: host type reference; @deepseek-ai/dsh-tool-goal: pnpm workspace link; @deepseek-ai/dsh-tool-goal: host type reference; @deepseek-ai/dsh-web-search-deepseek: pnpm workspace link; @deepseek-ai/dsh-web-search-deepseek: host type reference; @deepseek-ai/dsh-web-deepseek-api: pnpm workspace link; @deepseek-ai/dsh-web-deepseek-api: host type reference; @deepseek-ai/dsh-tools: pnpm workspace link; @deepseek-ai/dsh-tools: host type reference; @deepseek-ai/dsh-tool-executor-ptc: pnpm workspace link; @deepseek-ai/dsh-tool-executor-ptc: host type reference; @deepseek-ai/dsh-system-prompt: pnpm workspace link; @deepseek-ai/dsh-system-prompt: host type reference; @deepseek-ai/dsh-agent-loop: pnpm workspace link; @deepseek-ai/dsh-agent-loop: host type reference; @deepseek-ai/dsh-client-product-analytics: host type reference; @deepseek-ai/dsh-message-feedback: pnpm workspace link; @deepseek-ai/dsh-message-feedback: host type reference; @deepseek-ai/dsh-session-log-export: pnpm workspace link; @deepseek-ai/dsh-session-log-export: host type reference; @deepseek-ai/dsh-workspace: pnpm workspace link; @deepseek-ai/dsh-workspace: host type reference; @deepseek-ai/dsh-session-reference: pnpm workspace link; @deepseek-ai/dsh-session-reference: host type reference; @deepseek-ai/dsh-session-stats: pnpm workspace link; @deepseek-ai/dsh-session-stats: host type reference; @deepseek-ai/dsh-session-turn-outline: pnpm workspace link; @deepseek-ai/dsh-session-turn-outline: host type reference; @deepseek-ai/dsh-api-session-controller: pnpm workspace link; @deepseek-ai/dsh-api-session-controller: host type reference; @deepseek-ai/dsh-tool-session-control: pnpm workspace link; @deepseek-ai/dsh-tool-session-control: host type reference; @deepseek-ai/dsh-api-job-controller: host type reference; @deepseek-ai/dsh-api-terminal-controller: host type reference; @deepseek-ai/dsh-api-workspace-files: host type reference; @deepseek-ai/dsh-schedule: pnpm workspace link; @deepseek-ai/dsh-schedule: host type reference; @deepseek-ai/dsh-api-settings-controller: pnpm workspace link; @deepseek-ai/dsh-api-settings-controller: host type reference; @deepseek-ai/dsh-api-workspace-controller: pnpm workspace link; @deepseek-ai/dsh-api-workspace-controller: host type reference; @deepseek-ai/dsh-cordis-host-runner: pnpm workspace link; @deepseek-ai/dsh-cordis-host-runner: host type reference; @deepseek-ai/dsh-harness-dev-context: pnpm workspace link; @deepseek-ai/dsh-harness-dev-context: host type reference; @deepseek-ai/dsh-client-connection: host type reference; @deepseek-ai/dsh-client-file-upload: host type reference; @deepseek-ai/dsh-api-remotes: host type reference; @deepseek-ai/dsh-office-kit: host type reference; @deepseek-ai/dsh-workspace-changes: pnpm workspace link; @deepseek-ai/dsh-workspace-changes: host type reference; @deepseek-ai/dsh-action-cards: pnpm workspace link; @deepseek-ai/dsh-action-cards: host type reference; @deepseek-ai/dsh-creation-recommendations: pnpm workspace link; @deepseek-ai/dsh-creation-recommendations: host type reference; @deepseek-ai/dsh-plugin-recommendations: host type reference; @deepseek-ai/dsh-agent-preset-registry: pnpm workspace link; @deepseek-ai/dsh-agent-preset-registry: host type reference; @deepseek-ai/dsh-time-context: pnpm workspace link; @deepseek-ai/dsh-time-context: host type reference; @deepseek-ai/dsh-tool-present: pnpm workspace link; @deepseek-ai/dsh-tool-present: host type reference; @deepseek-ai/dsh-terminal-bash: pnpm workspace link; @deepseek-ai/dsh-terminal-bash: host type reference; @deepseek-ai/dsh-acp: pnpm workspace link; @deepseek-ai/dsh-acp: host type reference; @deepseek-ai/dsh-hooks-claude-code: pnpm workspace link; @deepseek-ai/dsh-hooks-claude-code: host type reference; @deepseek-ai/dsh-base: pnpm workspace link; @deepseek-ai/dsh-sandbox: pnpm workspace link; @deepseek-ai/dsh-sandbox: host type reference; @deepseek-ai/dsh-session-title-llm: pnpm workspace link; @deepseek-ai/dsh-jobs: pnpm workspace link; @deepseek-ai/dsh-jobs: host type reference; @deepseek-ai/dsh-session-format-catalog: pnpm workspace link; @deepseek-ai/dsh-session-format-catalog: host type reference; @deepseek-ai/dsh-session-persistence: pnpm workspace link; @deepseek-ai/dsh-session-persistence: host type reference; @deepseek-ai/dsh-session-query: pnpm workspace link; @deepseek-ai/dsh-session-query: host type reference; @deepseek-ai/dsh-session-telemetry: pnpm workspace link; @deepseek-ai/dsh-session-telemetry: host type reference; @deepseek-ai/dsh-spill: pnpm workspace link; @deepseek-ai/dsh-spill: host type reference; @deepseek-ai/dsh-compaction: pnpm workspace link; @deepseek-ai/dsh-compaction: host type reference; @deepseek-ai/dsh-workflow: pnpm workspace link; @deepseek-ai/dsh-workflow: host type reference; @deepseek-ai/dsh-loader-smoke: pnpm workspace link; @deepseek-ai/dsh-loader-smoke: host type reference; @deepseek-ai/dsh-hook-protocol: pnpm workspace link; @deepseek-ai/dsh-hook-protocol: host type reference; @deepseek-ai/dsh-session-format-v0-to-v1: host type reference"
+    },
+    {
+      "path": "packages/core/system-prompt",
+      "reason": "host YAML composition; @deepseek-ai/dsh-agent: pnpm workspace link; @deepseek-ai/dsh-agent: host type reference; @deepseek-ai/dsh-working-directory: pnpm workspace link; @deepseek-ai/dsh-working-directory: host type reference; @deepseek-ai/dsh-cli-account: pnpm workspace link; @deepseek-ai/dsh-cli-account: host type reference; @deepseek-ai/dsh-sandbox-policy: pnpm workspace link; @deepseek-ai/dsh-sandbox-policy: host type reference; @deepseek-ai/dsh-user-approval: pnpm workspace link; @deepseek-ai/dsh-user-approval: host type reference; @deepseek-ai/dsh-tool-bash: pnpm workspace link; @deepseek-ai/dsh-tool-bash: host type reference; @deepseek-ai/dsh-tool-pwsh: pnpm workspace link; @deepseek-ai/dsh-tool-pwsh: host type reference; @deepseek-ai/dsh-tool-jobs: pnpm workspace link; @deepseek-ai/dsh-tool-jobs: host type reference; @deepseek-ai/dsh-tool-fs: pnpm workspace link; @deepseek-ai/dsh-tool-fs: host type reference; @deepseek-ai/dsh-tool-fs-search: pnpm workspace link; @deepseek-ai/dsh-tool-fs-search: host type reference; @deepseek-ai/dsh-plan-mode: pnpm workspace link; @deepseek-ai/dsh-plan-mode: host type reference; @deepseek-ai/dsh-subagent: pnpm workspace link; @deepseek-ai/dsh-subagent: host type reference; @deepseek-ai/dsh-tool-agent-team: pnpm workspace link; @deepseek-ai/dsh-tool-agent-team: host type reference; @deepseek-ai/dsh-tool-subagent-control: pnpm workspace link; @deepseek-ai/dsh-tool-subagent-control: host type reference; @deepseek-ai/dsh-tool-subagent: pnpm workspace link; @deepseek-ai/dsh-tool-subagent: host type reference; @deepseek-ai/dsh-tool-workflow: pnpm workspace link; @deepseek-ai/dsh-tool-workflow: host type reference; @deepseek-ai/dsh-tool-goal: pnpm workspace link; @deepseek-ai/dsh-tool-goal: host type reference; @deepseek-ai/dsh-tool-web: pnpm workspace link; @deepseek-ai/dsh-tool-web: host type reference; @deepseek-ai/dsh-mcp-resources: pnpm workspace link; @deepseek-ai/dsh-mcp-resources: host type reference; @deepseek-ai/dsh-tools: pnpm workspace link; @deepseek-ai/dsh-tools: host type reference; @deepseek-ai/dsh-agent-loop: pnpm workspace link; @deepseek-ai/dsh-agent-loop: host type reference; @deepseek-ai/dsh-session-reference: pnpm workspace link; @deepseek-ai/dsh-session-reference: host type reference; @deepseek-ai/dsh-file-reference-local: pnpm workspace link; @deepseek-ai/dsh-file-reference-local: host type reference; @deepseek-ai/dsh-harness-dev-context: pnpm workspace link; @deepseek-ai/dsh-harness-dev-context: host type reference; @deepseek-ai/dsh-deliverable-file-references: pnpm workspace link; @deepseek-ai/dsh-deliverable-file-references: host type reference; @deepseek-ai/dsh-agent-preset-registry: pnpm workspace link; @deepseek-ai/dsh-agent-preset-registry: host type reference; @deepseek-ai/dsh-persona: pnpm workspace link; @deepseek-ai/dsh-persona: host type reference; @deepseek-ai/dsh-time-context: host type reference; @deepseek-ai/dsh-tool-schedule: pnpm workspace link; @deepseek-ai/dsh-tool-schedule: host type reference; @deepseek-ai/dsh-tool-ask-user: host type reference; @deepseek-ai/dsh-mcp-client: pnpm workspace link; @deepseek-ai/dsh-mcp-client: host type reference; @deepseek-ai/dsh-base: pnpm workspace link"
+    },
+    {
+      "path": "packages/core/tool-executor-native",
+      "reason": "host YAML composition; @deepseek-ai/dsh-base: pnpm workspace link; @deepseek-ai/dsh-agent-tool-presentation: pnpm workspace link; @deepseek-ai/dsh-agent-tool-presentation: host type reference"
+    },
+    {
+      "path": "packages/core/tool-executor-ptc",
+      "reason": "host YAML composition; @deepseek-ai/dsh-user-questions: host type reference; @deepseek-ai/dsh-spill-policy: host type reference; @deepseek-ai/dsh-web-app: pnpm workspace link; @deepseek-ai/dsh-base: pnpm workspace link; @deepseek-ai/dsh-agent-tool-presentation: pnpm workspace link; @deepseek-ai/dsh-agent-tool-presentation: host type reference"
+    },
+    {
+      "path": "packages/core/tools",
+      "reason": "host YAML composition; @deepseek-ai/dsh-plugin-manager: pnpm workspace link; @deepseek-ai/dsh-plugin-manager: host type reference; @deepseek-ai/dsh-shell-env: pnpm workspace link; @deepseek-ai/dsh-shell-env: host type reference; @deepseek-ai/dsh-tool-bash: pnpm workspace link; @deepseek-ai/dsh-tool-bash: host type reference; @deepseek-ai/dsh-tool-pwsh: pnpm workspace link; @deepseek-ai/dsh-tool-pwsh: host type reference; @deepseek-ai/dsh-tool-jobs: pnpm workspace link; @deepseek-ai/dsh-tool-jobs: host type reference; @deepseek-ai/dsh-tool-fs: pnpm workspace link; @deepseek-ai/dsh-tool-fs: host type reference; @deepseek-ai/dsh-tool-fs-search: pnpm workspace link; @deepseek-ai/dsh-tool-fs-search: host type reference; @deepseek-ai/dsh-agent-instructions: pnpm workspace link; @deepseek-ai/dsh-agent-instructions: host type reference; @deepseek-ai/dsh-tool-skill: pnpm workspace link; @deepseek-ai/dsh-tool-skill: host type reference; @deepseek-ai/dsh-plan-mode: pnpm workspace link; @deepseek-ai/dsh-plan-mode: host type reference; @deepseek-ai/dsh-subagent: pnpm workspace link; @deepseek-ai/dsh-subagent: host type reference; @deepseek-ai/dsh-tool-agent-team: pnpm workspace link; @deepseek-ai/dsh-tool-agent-team: host type reference; @deepseek-ai/dsh-tool-subagent-control: pnpm workspace link; @deepseek-ai/dsh-tool-subagent-control: host type reference; @deepseek-ai/dsh-tool-subagent: pnpm workspace link; @deepseek-ai/dsh-tool-subagent: host type reference; @deepseek-ai/dsh-workflow-ptc: pnpm workspace link; @deepseek-ai/dsh-workflow-ptc: host type reference; @deepseek-ai/dsh-tool-workflow: pnpm workspace link; @deepseek-ai/dsh-tool-workflow: host type reference; @deepseek-ai/dsh-tool-call-timeout-policy: pnpm workspace link; @deepseek-ai/dsh-tool-call-timeout-policy: host type reference; @deepseek-ai/dsh-spill-policy: pnpm workspace link; @deepseek-ai/dsh-spill-policy: host type reference; @deepseek-ai/dsh-session-checkpoint-policy: pnpm workspace link; @deepseek-ai/dsh-session-checkpoint-policy: host type reference; @deepseek-ai/dsh-tool-todo: pnpm workspace link; @deepseek-ai/dsh-tool-todo: host type reference; @deepseek-ai/dsh-tool-goal: pnpm workspace link; @deepseek-ai/dsh-tool-goal: host type reference; @deepseek-ai/dsh-repeat-tool-reminder: pnpm workspace link; @deepseek-ai/dsh-repeat-tool-reminder: host type reference; @deepseek-ai/dsh-tool-web: pnpm workspace link; @deepseek-ai/dsh-tool-web: host type reference; @deepseek-ai/dsh-mcp-resources: pnpm workspace link; @deepseek-ai/dsh-mcp-resources: host type reference; @deepseek-ai/dsh-tool-executor-native: pnpm workspace link; @deepseek-ai/dsh-tool-executor-native: host type reference; @deepseek-ai/dsh-tool-executor-ptc: pnpm workspace link; @deepseek-ai/dsh-tool-executor-ptc: host type reference; @deepseek-ai/dsh-agent-loop: pnpm workspace link; @deepseek-ai/dsh-agent-loop: host type reference; @deepseek-ai/dsh-file-reference-local: pnpm workspace link; @deepseek-ai/dsh-file-reference-local: host type reference; @deepseek-ai/dsh-tool-session-control: pnpm workspace link; @deepseek-ai/dsh-tool-session-control: host type reference; @deepseek-ai/dsh-schedule: pnpm workspace link; @deepseek-ai/dsh-schedule: host type reference; @deepseek-ai/dsh-mcp-manager: pnpm workspace link; @deepseek-ai/dsh-mcp-manager: host type reference; @deepseek-ai/dsh-cordis-host-runner: pnpm workspace link; @deepseek-ai/dsh-cordis-host-runner: host type reference; @deepseek-ai/dsh-tool-cordis: pnpm workspace link; @deepseek-ai/dsh-tool-cordis: host type reference; @deepseek-ai/dsh-tool-workspace-dependencies: pnpm workspace link; @deepseek-ai/dsh-tool-workspace-dependencies: host type reference; @deepseek-ai/dsh-workspace-changes: pnpm workspace link; @deepseek-ai/dsh-workspace-changes: host type reference; @deepseek-ai/dsh-creation-recommendations: pnpm workspace link; @deepseek-ai/dsh-creation-recommendations: host type reference; @deepseek-ai/dsh-agent-preset-registry: pnpm workspace link; @deepseek-ai/dsh-agent-preset-registry: host type reference; @deepseek-ai/dsh-tool-schedule: pnpm workspace link; @deepseek-ai/dsh-tool-schedule: host type reference; @deepseek-ai/dsh-tool-ask-user: pnpm workspace link; @deepseek-ai/dsh-tool-ask-user: host type reference; @deepseek-ai/dsh-tool-present: pnpm workspace link; @deepseek-ai/dsh-tool-present: host type reference; @deepseek-ai/dsh-tool-office: pnpm workspace link; @deepseek-ai/dsh-tool-office: host type reference; @deepseek-ai/dsh-plugin-market: pnpm workspace link; @deepseek-ai/dsh-plugin-market: host type reference; @deepseek-ai/dsh-tool-bash-persistent: pnpm workspace link; @deepseek-ai/dsh-tool-bash-persistent: host type reference; @deepseek-ai/dsh-tool-pwsh-persistent: pnpm workspace link; @deepseek-ai/dsh-tool-pwsh-persistent: host type reference; @deepseek-ai/dsh-hooks-claude-code: pnpm workspace link; @deepseek-ai/dsh-hooks-claude-code: host type reference; @deepseek-ai/dsh-mcp-client: pnpm workspace link; @deepseek-ai/dsh-mcp-client: host type reference; @deepseek-ai/dsh-base: pnpm workspace link; @deepseek-ai/dsh-agent-tool-presentation: pnpm workspace link; @deepseek-ai/dsh-agent-tool-presentation: host type reference; @deepseek-ai/dsh-tool-testkit: pnpm workspace link; @deepseek-ai/dsh-tool-testkit: host type reference"
+    },
+    {
+      "path": "packages/credentials/authorization",
+      "reason": "host YAML composition; @deepseek-ai/dsh-deepseek-account: pnpm workspace link; @deepseek-ai/dsh-deepseek-account: host type reference; @deepseek-ai/dsh-mcp-client: pnpm workspace link; @deepseek-ai/dsh-mcp-client: host type reference; @deepseek-ai/dsh-llm-pi-ai: pnpm workspace link; @deepseek-ai/dsh-llm-pi-ai: host type reference; @deepseek-ai/dsh-base: pnpm workspace link"
+    },
+    {
+      "path": "packages/credentials/credentials",
+      "reason": "@deepseek-ai/dsh-authorization: pnpm workspace link; @deepseek-ai/dsh-authorization: host type reference; @deepseek-ai/dsh-deepseek-account: pnpm workspace link; @deepseek-ai/dsh-deepseek-account: host type reference; @deepseek-ai/dsh-deepseek-auth: pnpm workspace link; @deepseek-ai/dsh-deepseek-auth: host type reference; @deepseek-ai/dsh-credentials-local: pnpm workspace link; @deepseek-ai/dsh-credentials-local: host type reference; @deepseek-ai/dsh-web-search-deepseek: pnpm workspace link; @deepseek-ai/dsh-web-search-deepseek: host type reference; @deepseek-ai/dsh-web-deepseek-api: pnpm workspace link; @deepseek-ai/dsh-web-deepseek-api: host type reference; @deepseek-ai/dsh-llm-deepseek-api-key: pnpm workspace link; @deepseek-ai/dsh-llm-deepseek-api-key: host type reference; @deepseek-ai/dsh-client-product-analytics: host type reference; @deepseek-ai/dsh-api-session-controller: pnpm workspace link; @deepseek-ai/dsh-api-settings-controller: pnpm workspace link; @deepseek-ai/dsh-api-settings-controller: host type reference; @deepseek-ai/dsh-mcp-manager: pnpm workspace link; @deepseek-ai/dsh-mcp-manager: host type reference; @deepseek-ai/dsh-client-connection: host type reference; @deepseek-ai/dsh-host-authentication-token: pnpm workspace link; @deepseek-ai/dsh-host-authentication-token: host type reference; @deepseek-ai/dsh-api-remotes: host type reference; @deepseek-ai/dsh-client-remote-connection: pnpm workspace link; @deepseek-ai/dsh-client-remote-connection: host type reference; @deepseek-ai/dsh-mcp-client: pnpm workspace link; @deepseek-ai/dsh-mcp-client: host type reference; @deepseek-ai/dsh-llm-pi-ai: pnpm workspace link; @deepseek-ai/dsh-llm-pi-ai: host type reference"
+    },
+    {
+      "path": "packages/credentials/credentials-local",
+      "reason": "host YAML composition; @deepseek-ai/dsh-base: pnpm workspace link"
+    },
+    {
+      "path": "packages/deliverables/deliverable-file-references",
+      "reason": "host YAML composition; @deepseek-ai/dsh-web-app: pnpm workspace link"
+    },
+    {
+      "path": "packages/deliverables/tool-present",
+      "reason": "host YAML composition; @deepseek-ai/dsh-web-app: pnpm workspace link; @deepseek-ai/dsh-base: pnpm workspace link"
+    },
+    {
+      "path": "packages/deliverables/workspace-changes",
+      "reason": "host YAML composition; @deepseek-ai/dsh-web-app: pnpm workspace link"
+    },
+    {
+      "path": "packages/document/office-kit",
+      "reason": "host YAML composition; @deepseek-ai/dsh-web-app: pnpm workspace link; @deepseek-ai/dsh-tool-office: pnpm workspace link; @deepseek-ai/dsh-tool-office: host type reference"
+    },
+    {
+      "path": "packages/document/tool-office",
+      "reason": "host YAML composition; @deepseek-ai/dsh-web-app: pnpm workspace link"
+    },
+    {
+      "path": "packages/experimental/hook-protocol",
+      "reason": "@deepseek-ai/dsh-hooks-claude-code: pnpm workspace link; @deepseek-ai/dsh-hooks-claude-code: host type reference"
+    },
+    {
+      "path": "packages/experimental/hooks-claude-code",
+      "reason": "GrigDesk server-owned overlay"
+    },
+    {
+      "path": "packages/extensions/cordis-host-runner",
+      "reason": "host YAML composition; @deepseek-ai/dsh-tool-cordis: pnpm workspace link; @deepseek-ai/dsh-tool-cordis: host type reference; @deepseek-ai/dsh-web-app: pnpm workspace link; @deepseek-ai/dsh-api-remotes: host type reference"
+    },
+    {
+      "path": "packages/extensions/creation-recommendations",
+      "reason": "host YAML composition; @deepseek-ai/dsh-web-app: pnpm workspace link"
+    },
+    {
+      "path": "packages/extensions/plugin-recommendations",
+      "reason": "host YAML composition; @deepseek-ai/dsh-web-app: pnpm workspace link"
+    },
+    {
+      "path": "packages/extensions/tool-cordis",
+      "reason": "host YAML composition; @deepseek-ai/dsh-web-app: pnpm workspace link"
+    },
+    {
+      "path": "packages/feedback/command-feedback",
+      "reason": "host YAML composition; @deepseek-ai/dsh-session-telemetry-otel: pnpm workspace link; @deepseek-ai/dsh-session-telemetry-otel: host type reference; @deepseek-ai/dsh-message-feedback: pnpm workspace link; @deepseek-ai/dsh-message-feedback: host type reference; @deepseek-ai/dsh-base: pnpm workspace link"
+    },
+    {
+      "path": "packages/feedback/message-feedback",
+      "reason": "host YAML composition; @deepseek-ai/dsh-session-telemetry-otel: pnpm workspace link; @deepseek-ai/dsh-session-telemetry-otel: host type reference; @deepseek-ai/dsh-web-app: pnpm workspace link"
+    },
+    {
+      "path": "packages/fs/fs",
+      "reason": "@deepseek-ai/dsh-working-directory: pnpm workspace link; @deepseek-ai/dsh-working-directory: host type reference; @deepseek-ai/dsh-fs-observation-policy: pnpm workspace link; @deepseek-ai/dsh-fs-observation-policy: host type reference; @deepseek-ai/dsh-tool-fs: pnpm workspace link; @deepseek-ai/dsh-tool-fs: host type reference; @deepseek-ai/dsh-agent-instructions: pnpm workspace link; @deepseek-ai/dsh-agent-instructions: host type reference; @deepseek-ai/dsh-skill-filesystem: pnpm workspace link; @deepseek-ai/dsh-skill-filesystem: host type reference; @deepseek-ai/dsh-ptc-runtime-node: pnpm workspace link; @deepseek-ai/dsh-ptc-runtime-node: host type reference; @deepseek-ai/dsh-spill-policy: pnpm workspace link; @deepseek-ai/dsh-spill-policy: host type reference; @deepseek-ai/dsh-fs-sandbox: pnpm workspace link; @deepseek-ai/dsh-fs-sandbox: host type reference; @deepseek-ai/dsh-api-session-controller: pnpm workspace link; @deepseek-ai/dsh-api-session-controller: host type reference; @deepseek-ai/dsh-api-terminal-controller: host type reference; @deepseek-ai/dsh-api-workspace-files: host type reference; @deepseek-ai/dsh-office-kit: host type reference; @deepseek-ai/dsh-workspace-changes: pnpm workspace link; @deepseek-ai/dsh-workspace-changes: host type reference; @deepseek-ai/dsh-tool-present: pnpm workspace link; @deepseek-ai/dsh-tool-present: host type reference; @deepseek-ai/dsh-tool-office: pnpm workspace link; @deepseek-ai/dsh-tool-office: host type reference; @deepseek-ai/dsh-acp: host type reference; @deepseek-ai/dsh-llm-pi-ai: pnpm workspace link; @deepseek-ai/dsh-llm-pi-ai: host type reference; @deepseek-ai/dsh-fs-local: pnpm workspace link; @deepseek-ai/dsh-fs-local: host type reference; @deepseek-ai/dsh-llm-deepseek: pnpm workspace link; @deepseek-ai/dsh-llm-deepseek: host type reference"
+    },
+    {
+      "path": "packages/fs/fs-local",
+      "reason": "@deepseek-ai/dsh-fs-sandbox: pnpm workspace link; @deepseek-ai/dsh-fs-sandbox: host type reference; @deepseek-ai/dsh-base: pnpm workspace link"
+    },
+    {
+      "path": "packages/fs/fs-observation-policy",
+      "reason": "host YAML composition; @deepseek-ai/dsh-tool-fs: host type reference; @deepseek-ai/dsh-base: pnpm workspace link"
+    },
+    {
+      "path": "packages/fs/fs-patch",
+      "reason": "@deepseek-ai/dsh-tool-fs: pnpm workspace link; @deepseek-ai/dsh-tool-fs: host type reference; @deepseek-ai/dsh-fs: pnpm workspace link; @deepseek-ai/dsh-fs: host type reference; @deepseek-ai/dsh-fs-local: pnpm workspace link; @deepseek-ai/dsh-fs-local: host type reference"
+    },
+    {
+      "path": "packages/fs/fs-sandbox",
+      "reason": "host YAML composition; @deepseek-ai/dsh-base: pnpm workspace link"
+    },
+    {
+      "path": "packages/fs/tool-fs",
+      "reason": "host YAML composition; @deepseek-ai/dsh-web-app: pnpm workspace link; @deepseek-ai/dsh-base: pnpm workspace link"
+    },
+    {
+      "path": "packages/fs/tool-fs-search",
+      "reason": "host YAML composition; @deepseek-ai/dsh-web-app: pnpm workspace link; @deepseek-ai/dsh-base: pnpm workspace link"
+    },
+    {
+      "path": "packages/goal/command-goal",
+      "reason": "host YAML composition; @deepseek-ai/dsh-web-app: pnpm workspace link; @deepseek-ai/dsh-base: pnpm workspace link"
+    },
+    {
+      "path": "packages/goal/goal",
+      "reason": "host YAML composition; @deepseek-ai/dsh-goal-round-driver: pnpm workspace link; @deepseek-ai/dsh-goal-round-driver: host type reference; @deepseek-ai/dsh-command-goal: pnpm workspace link; @deepseek-ai/dsh-command-goal: host type reference; @deepseek-ai/dsh-tool-goal: pnpm workspace link; @deepseek-ai/dsh-tool-goal: host type reference; @deepseek-ai/dsh-api-remotes: host type reference; @deepseek-ai/dsh-base: pnpm workspace link"
+    },
+    {
+      "path": "packages/goal/goal-round-driver",
+      "reason": "host YAML composition; @deepseek-ai/dsh-base: pnpm workspace link"
+    },
+    {
+      "path": "packages/goal/tool-goal",
+      "reason": "host YAML composition; @deepseek-ai/dsh-web-app: pnpm workspace link; @deepseek-ai/dsh-base: pnpm workspace link"
+    },
+    {
+      "path": "packages/guard/repeat-tool-reminder",
+      "reason": "host YAML composition; @deepseek-ai/dsh-base: pnpm workspace link"
+    },
+    {
+      "path": "packages/guard/timeout-policy",
+      "reason": "host YAML composition; @deepseek-ai/dsh-tool-web: host type reference; @deepseek-ai/dsh-base: pnpm workspace link"
+    },
+    {
+      "path": "packages/host/authentication-token",
+      "reason": "host YAML composition; @deepseek-ai/dsh-web-app: pnpm workspace link"
+    },
+    {
+      "path": "packages/host/directory-picker",
+      "reason": "@deepseek-ai/dsh-host-directory-picker-browse: pnpm workspace link; @deepseek-ai/dsh-host-directory-picker-browse: host type reference; @deepseek-ai/dsh-api-workspace-controller: pnpm workspace link; @deepseek-ai/dsh-api-workspace-controller: host type reference"
+    },
+    {
+      "path": "packages/host/directory-picker-browse",
+      "reason": "host YAML composition; @deepseek-ai/dsh-web-app: pnpm workspace link"
+    },
+    {
+      "path": "packages/host/frontend-static",
+      "reason": "@deepseek-ai/dsh-web-app: pnpm workspace link; @deepseek-ai/dsh-web-app: host type reference"
+    },
+    {
+      "path": "packages/host/open-in-app",
+      "reason": "host YAML composition; @deepseek-ai/dsh-web-app: pnpm workspace link"
+    },
+    {
+      "path": "packages/host/plugin-inventory",
+      "reason": "host YAML composition; @deepseek-ai/dsh-plugin-manager: pnpm workspace link; @deepseek-ai/dsh-plugin-manager: host type reference; @deepseek-ai/dsh-web-app: pnpm workspace link; @deepseek-ai/dsh-api-remotes: host type reference"
+    },
+    {
+      "path": "packages/host/product-telemetry-otel",
+      "reason": "host YAML composition; @deepseek-ai/dsh-client-product-analytics: host type reference; @deepseek-ai/dsh-web-app: pnpm workspace link"
+    },
+    {
+      "path": "packages/host/webserver",
+      "reason": "host YAML composition; @deepseek-ai/dsh-api-gateway: host type reference; @deepseek-ai/dsh-api-remote-access: host type reference; @deepseek-ai/dsh-deepseek-account: pnpm workspace link; @deepseek-ai/dsh-deepseek-account: host type reference; @deepseek-ai/dsh-client-product-analytics: host type reference; @deepseek-ai/dsh-host-open-in-app: host type reference; @deepseek-ai/dsh-web-app: pnpm workspace link; @deepseek-ai/dsh-web-app: host type reference; @deepseek-ai/dsh-client-connection: host type reference; @deepseek-ai/dsh-host-authentication-token: pnpm workspace link; @deepseek-ai/dsh-host-authentication-token: host type reference; @deepseek-ai/dsh-client-remote-connection: pnpm workspace link; @deepseek-ai/dsh-client-remote-connection: host type reference; @deepseek-ai/dsh-mcp-client: pnpm workspace link; @deepseek-ai/dsh-mcp-client: host type reference; @deepseek-ai/dsh-host-frontend-static: pnpm workspace link; @deepseek-ai/dsh-host-frontend-static: host type reference"
+    },
+    {
+      "path": "packages/identity/anonymous-user-id",
+      "reason": "@deepseek-ai/dsh-session-telemetry-otel: pnpm workspace link; @deepseek-ai/dsh-session-telemetry-otel: host type reference; @deepseek-ai/dsh-command-feedback: pnpm workspace link; @deepseek-ai/dsh-command-feedback: host type reference; @deepseek-ai/dsh-llm-deepseek: pnpm workspace link; @deepseek-ai/dsh-llm-deepseek: host type reference"
+    },
+    {
+      "path": "packages/interaction/action-cards",
+      "reason": "host YAML composition; @deepseek-ai/dsh-web-app: pnpm workspace link; @deepseek-ai/dsh-creation-recommendations: pnpm workspace link; @deepseek-ai/dsh-creation-recommendations: host type reference; @deepseek-ai/dsh-plugin-recommendations: pnpm workspace link; @deepseek-ai/dsh-plugin-recommendations: host type reference"
+    },
+    {
+      "path": "packages/interaction/commands",
+      "reason": "host YAML composition; @deepseek-ai/dsh-permission-presets: pnpm workspace link; @deepseek-ai/dsh-permission-presets: host type reference; @deepseek-ai/dsh-command-feedback: pnpm workspace link; @deepseek-ai/dsh-command-feedback: host type reference; @deepseek-ai/dsh-command-goal: pnpm workspace link; @deepseek-ai/dsh-command-goal: host type reference; @deepseek-ai/dsh-plan-mode: pnpm workspace link; @deepseek-ai/dsh-plan-mode: host type reference; @deepseek-ai/dsh-compaction-basic: pnpm workspace link; @deepseek-ai/dsh-compaction-basic: host type reference; @deepseek-ai/dsh-command-compact: pnpm workspace link; @deepseek-ai/dsh-command-compact: host type reference; @deepseek-ai/dsh-session-log-export: host type reference; @deepseek-ai/dsh-api-session-controller: pnpm workspace link; @deepseek-ai/dsh-client-file-upload: host type reference; @deepseek-ai/dsh-api-remotes: host type reference; @deepseek-ai/dsh-base: pnpm workspace link; @deepseek-ai/dsh-compaction: pnpm workspace link; @deepseek-ai/dsh-compaction: host type reference"
+    },
+    {
+      "path": "packages/interaction/permission-presets",
+      "reason": "host YAML composition; @deepseek-ai/dsh-subagent: pnpm workspace link; @deepseek-ai/dsh-subagent: host type reference; @deepseek-ai/dsh-api-session-controller: host type reference; @deepseek-ai/dsh-api-remotes: host type reference; @deepseek-ai/dsh-base: pnpm workspace link"
+    },
+    {
+      "path": "packages/interaction/tool-ask-user",
+      "reason": "host YAML composition; @deepseek-ai/dsh-web-app: pnpm workspace link"
+    },
+    {
+      "path": "packages/interaction/user-approval",
+      "reason": "host YAML composition; @deepseek-ai/dsh-plugin-manager: pnpm workspace link; @deepseek-ai/dsh-plugin-manager: host type reference; @deepseek-ai/dsh-permission-presets: pnpm workspace link; @deepseek-ai/dsh-permission-presets: host type reference; @deepseek-ai/dsh-tool-bash: pnpm workspace link; @deepseek-ai/dsh-tool-bash: host type reference; @deepseek-ai/dsh-tool-pwsh: pnpm workspace link; @deepseek-ai/dsh-tool-pwsh: host type reference; @deepseek-ai/dsh-tool-fs: pnpm workspace link; @deepseek-ai/dsh-tool-fs: host type reference; @deepseek-ai/dsh-subagent: pnpm workspace link; @deepseek-ai/dsh-subagent: host type reference; @deepseek-ai/dsh-tools: pnpm workspace link; @deepseek-ai/dsh-tools: host type reference; @deepseek-ai/dsh-tool-executor-ptc: pnpm workspace link; @deepseek-ai/dsh-tool-executor-ptc: host type reference; @deepseek-ai/dsh-api-remotes: host type reference; @deepseek-ai/dsh-agent-preset-registry: host type reference; @deepseek-ai/dsh-acp: pnpm workspace link; @deepseek-ai/dsh-acp: host type reference; @deepseek-ai/dsh-base: pnpm workspace link"
+    },
+    {
+      "path": "packages/interaction/user-questions",
+      "reason": "host YAML composition; @deepseek-ai/dsh-plan-mode: pnpm workspace link; @deepseek-ai/dsh-plan-mode: host type reference; @deepseek-ai/dsh-api-remotes: host type reference; @deepseek-ai/dsh-tool-ask-user: pnpm workspace link; @deepseek-ai/dsh-tool-ask-user: host type reference; @deepseek-ai/dsh-base: pnpm workspace link"
+    },
+    {
+      "path": "packages/jobs/jobs",
+      "reason": "@deepseek-ai/dsh-jobs-local: pnpm workspace link; @deepseek-ai/dsh-jobs-local: host type reference; @deepseek-ai/dsh-tool-bash: pnpm workspace link; @deepseek-ai/dsh-tool-bash: host type reference; @deepseek-ai/dsh-tool-pwsh: pnpm workspace link; @deepseek-ai/dsh-tool-pwsh: host type reference; @deepseek-ai/dsh-tool-jobs: pnpm workspace link; @deepseek-ai/dsh-tool-jobs: host type reference; @deepseek-ai/dsh-tool-workflow: pnpm workspace link; @deepseek-ai/dsh-tool-workflow: host type reference; @deepseek-ai/dsh-api-session-controller: host type reference; @deepseek-ai/dsh-api-job-controller: host type reference"
+    },
+    {
+      "path": "packages/jobs/jobs-local",
+      "reason": "host YAML composition; @deepseek-ai/dsh-base: pnpm workspace link"
+    },
+    {
+      "path": "packages/jobs/tool-jobs",
+      "reason": "host YAML composition; @deepseek-ai/dsh-web-app: pnpm workspace link; @deepseek-ai/dsh-base: pnpm workspace link"
+    },
+    {
+      "path": "packages/llm/deepseek-llm-api-extensions",
+      "reason": "host YAML composition; @deepseek-ai/dsh-session-log-deepseek: pnpm workspace link; @deepseek-ai/dsh-session-log-deepseek: host type reference; @deepseek-ai/dsh-plugin-package-inventory-deepseek: pnpm workspace link; @deepseek-ai/dsh-plugin-package-inventory-deepseek: host type reference; @deepseek-ai/dsh-base: pnpm workspace link; @deepseek-ai/dsh-llm-deepseek: pnpm workspace link; @deepseek-ai/dsh-llm-deepseek: host type reference"
+    },
+    {
+      "path": "packages/llm/llm",
+      "reason": "host YAML composition; @deepseek-ai/dsh-plugin-manager: host type reference; @deepseek-ai/dsh-session: pnpm workspace link; @deepseek-ai/dsh-session: host type reference; @deepseek-ai/dsh-session-title: pnpm workspace link; @deepseek-ai/dsh-session-title: host type reference; @deepseek-ai/dsh-session-title-first-prompt-llm: pnpm workspace link; @deepseek-ai/dsh-session-title-first-prompt-llm: host type reference; @deepseek-ai/dsh-user-questions: pnpm workspace link; @deepseek-ai/dsh-user-questions: host type reference; @deepseek-ai/dsh-agent: pnpm workspace link; @deepseek-ai/dsh-agent: host type reference; @deepseek-ai/dsh-agent-default-model: pnpm workspace link; @deepseek-ai/dsh-agent-default-model: host type reference; @deepseek-ai/dsh-llm-retry: pnpm workspace link; @deepseek-ai/dsh-llm-retry: host type reference; @deepseek-ai/dsh-session-persistence-jsonl: pnpm workspace link; @deepseek-ai/dsh-session-persistence-jsonl: host type reference; @deepseek-ai/dsh-working-directory: pnpm workspace link; @deepseek-ai/dsh-working-directory: host type reference; @deepseek-ai/dsh-session-telemetry-otel: pnpm workspace link; @deepseek-ai/dsh-session-telemetry-otel: host type reference; @deepseek-ai/dsh-sandbox-local: pnpm workspace link; @deepseek-ai/dsh-sandbox-local: host type reference; @deepseek-ai/dsh-bash-sandbox: host type reference; @deepseek-ai/dsh-pwsh-sandbox: host type reference; @deepseek-ai/dsh-user-approval: pnpm workspace link; @deepseek-ai/dsh-user-approval: host type reference; @deepseek-ai/dsh-tool-bash: pnpm workspace link; @deepseek-ai/dsh-tool-bash: host type reference; @deepseek-ai/dsh-tool-pwsh: pnpm workspace link; @deepseek-ai/dsh-tool-pwsh: host type reference; @deepseek-ai/dsh-tool-jobs: pnpm workspace link; @deepseek-ai/dsh-fs-observation-policy: host type reference; @deepseek-ai/dsh-tool-fs: pnpm workspace link; @deepseek-ai/dsh-tool-fs: host type reference; @deepseek-ai/dsh-tool-fs-search: pnpm workspace link; @deepseek-ai/dsh-tool-fs-search: host type reference; @deepseek-ai/dsh-agent-instructions: pnpm workspace link; @deepseek-ai/dsh-agent-instructions: host type reference; @deepseek-ai/dsh-skill: pnpm workspace link; @deepseek-ai/dsh-skill: host type reference; @deepseek-ai/dsh-tool-skill: pnpm workspace link; @deepseek-ai/dsh-tool-skill: host type reference; @deepseek-ai/dsh-commands: pnpm workspace link; @deepseek-ai/dsh-commands: host type reference; @deepseek-ai/dsh-goal: pnpm workspace link; @deepseek-ai/dsh-goal: host type reference; @deepseek-ai/dsh-goal-round-driver: pnpm workspace link; @deepseek-ai/dsh-goal-round-driver: host type reference; @deepseek-ai/dsh-command-goal: pnpm workspace link; @deepseek-ai/dsh-command-goal: host type reference; @deepseek-ai/dsh-plan-mode: pnpm workspace link; @deepseek-ai/dsh-token-meter: pnpm workspace link; @deepseek-ai/dsh-token-meter: host type reference; @deepseek-ai/dsh-compaction-basic: pnpm workspace link; @deepseek-ai/dsh-compaction-basic: host type reference; @deepseek-ai/dsh-subagent: pnpm workspace link; @deepseek-ai/dsh-subagent: host type reference; @deepseek-ai/dsh-agent-team: pnpm workspace link; @deepseek-ai/dsh-agent-team: host type reference; @deepseek-ai/dsh-tool-subagent-control: pnpm workspace link; @deepseek-ai/dsh-tool-subagent-control: host type reference; @deepseek-ai/dsh-tool-subagent: pnpm workspace link; @deepseek-ai/dsh-tool-subagent: host type reference; @deepseek-ai/dsh-workflow-ptc: pnpm workspace link; @deepseek-ai/dsh-workflow-ptc: host type reference; @deepseek-ai/dsh-tool-workflow: pnpm workspace link; @deepseek-ai/dsh-tool-workflow: host type reference; @deepseek-ai/dsh-tool-call-timeout-policy: pnpm workspace link; @deepseek-ai/dsh-tool-call-timeout-policy: host type reference; @deepseek-ai/dsh-spill-policy: pnpm workspace link; @deepseek-ai/dsh-spill-policy: host type reference; @deepseek-ai/dsh-session-checkpoint-policy: pnpm workspace link; @deepseek-ai/dsh-session-checkpoint-policy: host type reference; @deepseek-ai/dsh-compaction-tool-result-pruner: pnpm workspace link; @deepseek-ai/dsh-compaction-tool-result-pruner: host type reference; @deepseek-ai/dsh-compaction-image-offload: pnpm workspace link; @deepseek-ai/dsh-compaction-image-offload: host type reference; @deepseek-ai/dsh-tool-goal: pnpm workspace link; @deepseek-ai/dsh-tool-goal: host type reference; @deepseek-ai/dsh-repeat-tool-reminder: host type reference; @deepseek-ai/dsh-web-deepseek-api: pnpm workspace link; @deepseek-ai/dsh-web-deepseek-api: host type reference; @deepseek-ai/dsh-tool-web: pnpm workspace link; @deepseek-ai/dsh-tool-web: host type reference; @deepseek-ai/dsh-mcp-resources: pnpm workspace link; @deepseek-ai/dsh-mcp-resources: host type reference; @deepseek-ai/dsh-tools: pnpm workspace link; @deepseek-ai/dsh-tools: host type reference; @deepseek-ai/dsh-tool-executor-ptc: pnpm workspace link; @deepseek-ai/dsh-tool-executor-ptc: host type reference; @deepseek-ai/dsh-system-prompt: pnpm workspace link; @deepseek-ai/dsh-system-prompt: host type reference; @deepseek-ai/dsh-agent-loop: pnpm workspace link; @deepseek-ai/dsh-agent-loop: host type reference; @deepseek-ai/dsh-llm-deepseek-api-key: pnpm workspace link; @deepseek-ai/dsh-llm-deepseek-api-key: host type reference; @deepseek-ai/dsh-llm-deepseek-account: pnpm workspace link; @deepseek-ai/dsh-llm-deepseek-account: host type reference; @deepseek-ai/dsh-client-product-analytics: host type reference; @deepseek-ai/dsh-message-feedback: pnpm workspace link; @deepseek-ai/dsh-message-feedback: host type reference; @deepseek-ai/dsh-session-reference: pnpm workspace link; @deepseek-ai/dsh-session-reference: host type reference; @deepseek-ai/dsh-session-stats: pnpm workspace link; @deepseek-ai/dsh-session-stats: host type reference; @deepseek-ai/dsh-session-turn-outline: pnpm workspace link; @deepseek-ai/dsh-session-turn-outline: host type reference; @deepseek-ai/dsh-api-session-controller: pnpm workspace link; @deepseek-ai/dsh-api-session-controller: host type reference; @deepseek-ai/dsh-tool-session-control: pnpm workspace link; @deepseek-ai/dsh-tool-session-control: host type reference; @deepseek-ai/dsh-schedule: pnpm workspace link; @deepseek-ai/dsh-schedule: host type reference; @deepseek-ai/dsh-cordis-host-runner: pnpm workspace link; @deepseek-ai/dsh-cordis-host-runner: host type reference; @deepseek-ai/dsh-api-remotes: host type reference; @deepseek-ai/dsh-action-cards: pnpm workspace link; @deepseek-ai/dsh-action-cards: host type reference; @deepseek-ai/dsh-creation-recommendations: pnpm workspace link; @deepseek-ai/dsh-creation-recommendations: host type reference; @deepseek-ai/dsh-plugin-recommendations: pnpm workspace link; @deepseek-ai/dsh-plugin-recommendations: host type reference; @deepseek-ai/dsh-time-context: pnpm workspace link; @deepseek-ai/dsh-time-context: host type reference; @deepseek-ai/dsh-tool-schedule: pnpm workspace link; @deepseek-ai/dsh-tool-schedule: host type reference; @deepseek-ai/dsh-tool-ask-user: host type reference; @deepseek-ai/dsh-tool-present: pnpm workspace link; @deepseek-ai/dsh-tool-present: host type reference; @deepseek-ai/dsh-tool-office: pnpm workspace link; @deepseek-ai/dsh-tool-office: host type reference; @deepseek-ai/dsh-acp: pnpm workspace link; @deepseek-ai/dsh-acp: host type reference; @deepseek-ai/dsh-hooks-claude-code: pnpm workspace link; @deepseek-ai/dsh-hooks-claude-code: host type reference; @deepseek-ai/dsh-mcp-client: pnpm workspace link; @deepseek-ai/dsh-mcp-client: host type reference; @deepseek-ai/dsh-llm-pi-ai: pnpm workspace link; @deepseek-ai/dsh-llm-pi-ai: host type reference; @deepseek-ai/dsh-base: pnpm workspace link; @deepseek-ai/dsh-sandbox: pnpm workspace link; @deepseek-ai/dsh-sandbox: host type reference; @deepseek-ai/dsh-session-title-llm: pnpm workspace link; @deepseek-ai/dsh-session-title-llm: host type reference; @deepseek-ai/dsh-session-query: pnpm workspace link; @deepseek-ai/dsh-session-query: host type reference; @deepseek-ai/dsh-fs: pnpm workspace link; @deepseek-ai/dsh-fs: host type reference; @deepseek-ai/dsh-spill: pnpm workspace link; @deepseek-ai/dsh-spill: host type reference; @deepseek-ai/dsh-compaction: pnpm workspace link; @deepseek-ai/dsh-compaction: host type reference; @deepseek-ai/dsh-workflow: pnpm workspace link; @deepseek-ai/dsh-workflow: host type reference; @deepseek-ai/dsh-fs-local: host type reference; @deepseek-ai/dsh-llm-deepseek: pnpm workspace link; @deepseek-ai/dsh-llm-deepseek: host type reference; @deepseek-ai/dsh-tool-testkit: pnpm workspace link; @deepseek-ai/dsh-tool-testkit: host type reference; @deepseek-ai/dsh-loader-smoke: pnpm workspace link; @deepseek-ai/dsh-loader-smoke: host type reference; @deepseek-ai/dsh-session-format-v1-to-v2: pnpm workspace link; @deepseek-ai/dsh-session-format-v1-to-v2: host type reference"
+    },
+    {
+      "path": "packages/llm/llm-deepseek",
+      "reason": "@deepseek-ai/dsh-llm-deepseek-api-key: pnpm workspace link; @deepseek-ai/dsh-llm-deepseek-api-key: host type reference; @deepseek-ai/dsh-llm-deepseek-account: pnpm workspace link; @deepseek-ai/dsh-llm-deepseek-account: host type reference"
+    },
+    {
+      "path": "packages/llm/llm-deepseek-account",
+      "reason": "host YAML composition; @deepseek-ai/dsh-base: pnpm workspace link"
+    },
+    {
+      "path": "packages/llm/llm-deepseek-api-key",
+      "reason": "host YAML composition; @deepseek-ai/dsh-base: pnpm workspace link"
+    },
+    {
+      "path": "packages/llm/llm-pi-ai",
+      "reason": "GrigDesk server-owned overlay"
+    },
+    {
+      "path": "packages/llm/llm-retry",
+      "reason": "host YAML composition; @deepseek-ai/dsh-token-meter: pnpm workspace link; @deepseek-ai/dsh-token-meter: host type reference; @deepseek-ai/dsh-base: pnpm workspace link"
+    },
+    {
+      "path": "packages/llm/plugin-package-inventory-deepseek",
+      "reason": "host YAML composition; @deepseek-ai/dsh-base: pnpm workspace link"
+    },
+    {
+      "path": "packages/llm/token-meter",
+      "reason": "host YAML composition; @deepseek-ai/dsh-compaction-basic: pnpm workspace link; @deepseek-ai/dsh-compaction-basic: host type reference; @deepseek-ai/dsh-spill-policy: pnpm workspace link; @deepseek-ai/dsh-spill-policy: host type reference; @deepseek-ai/dsh-compaction-tool-result-pruner: pnpm workspace link; @deepseek-ai/dsh-compaction-tool-result-pruner: host type reference; @deepseek-ai/dsh-acp: pnpm workspace link; @deepseek-ai/dsh-acp: host type reference; @deepseek-ai/dsh-base: pnpm workspace link"
+    },
+    {
+      "path": "packages/mcp/mcp-account",
+      "reason": "host YAML composition; @deepseek-ai/dsh-web-app: pnpm workspace link"
+    },
+    {
+      "path": "packages/mcp/mcp-client",
+      "reason": "GrigDesk server-owned overlay; @deepseek-ai/dsh-mcp-manager: pnpm workspace link; @deepseek-ai/dsh-mcp-manager: host type reference; @deepseek-ai/dsh-mcp-account: host type reference; @deepseek-ai/dsh-acp: pnpm workspace link; @deepseek-ai/dsh-acp: host type reference"
+    },
+    {
+      "path": "packages/mcp/mcp-manager",
+      "reason": "host YAML composition; @deepseek-ai/dsh-mcp-account: host type reference; @deepseek-ai/dsh-web-app: pnpm workspace link; @deepseek-ai/dsh-api-remotes: host type reference"
+    },
+    {
+      "path": "packages/mcp/mcp-resources",
+      "reason": "host YAML composition; @deepseek-ai/dsh-mcp-client: pnpm workspace link; @deepseek-ai/dsh-mcp-client: host type reference; @deepseek-ai/dsh-base: pnpm workspace link"
+    },
+    {
+      "path": "packages/plan/plan-mode",
+      "reason": "host YAML composition; @deepseek-ai/dsh-web-app: pnpm workspace link; @deepseek-ai/dsh-base: pnpm workspace link"
+    },
+    {
+      "path": "packages/preset/agent-preset",
+      "reason": "host YAML composition; @deepseek-ai/dsh-web-app: pnpm workspace link"
+    },
+    {
+      "path": "packages/preset/agent-preset-registry",
+      "reason": "host YAML composition; @deepseek-ai/dsh-plugin-package-inventory-deepseek: pnpm workspace link; @deepseek-ai/dsh-plugin-package-inventory-deepseek: host type reference; @deepseek-ai/dsh-subagent: pnpm workspace link; @deepseek-ai/dsh-subagent: host type reference; @deepseek-ai/dsh-tool-subagent: pnpm workspace link; @deepseek-ai/dsh-tool-subagent: host type reference; @deepseek-ai/dsh-host-plugin-inventory: pnpm workspace link; @deepseek-ai/dsh-host-plugin-inventory: host type reference; @deepseek-ai/dsh-api-session-controller: pnpm workspace link; @deepseek-ai/dsh-api-session-controller: host type reference; @deepseek-ai/dsh-api-settings-controller: pnpm workspace link; @deepseek-ai/dsh-api-settings-controller: host type reference; @deepseek-ai/dsh-web-app: pnpm workspace link; @deepseek-ai/dsh-api-remotes: host type reference; @deepseek-ai/dsh-agent-preset: pnpm workspace link; @deepseek-ai/dsh-agent-preset: host type reference; @deepseek-ai/dsh-tool-schedule: host type reference"
+    },
+    {
+      "path": "packages/preset/persona",
+      "reason": "host YAML composition; @deepseek-ai/dsh-web-app: pnpm workspace link"
+    },
+    {
+      "path": "packages/ptc-runtime/ptc-runtime",
+      "reason": "@deepseek-ai/dsh-ptc-runtime-node: pnpm workspace link; @deepseek-ai/dsh-ptc-runtime-node: host type reference; @deepseek-ai/dsh-workflow-ptc: pnpm workspace link; @deepseek-ai/dsh-workflow-ptc: host type reference; @deepseek-ai/dsh-tool-executor-ptc: pnpm workspace link; @deepseek-ai/dsh-tool-executor-ptc: host type reference"
+    },
+    {
+      "path": "packages/ptc-runtime/ptc-runtime-node",
+      "reason": "host YAML composition; @deepseek-ai/dsh-base: pnpm workspace link"
+    },
+    {
+      "path": "packages/sandbox/sandbox",
+      "reason": "@deepseek-ai/dsh-plugin-manager: pnpm workspace link; @deepseek-ai/dsh-plugin-manager: host type reference; @deepseek-ai/dsh-sandbox-local: pnpm workspace link; @deepseek-ai/dsh-sandbox-local: host type reference; @deepseek-ai/dsh-sandbox-policy: pnpm workspace link; @deepseek-ai/dsh-sandbox-policy: host type reference; @deepseek-ai/dsh-bash-sandbox: pnpm workspace link; @deepseek-ai/dsh-bash-sandbox: host type reference; @deepseek-ai/dsh-pwsh-sandbox: pnpm workspace link; @deepseek-ai/dsh-pwsh-sandbox: host type reference; @deepseek-ai/dsh-permission-presets: pnpm workspace link; @deepseek-ai/dsh-permission-presets: host type reference; @deepseek-ai/dsh-tool-bash: pnpm workspace link; @deepseek-ai/dsh-tool-bash: host type reference; @deepseek-ai/dsh-tool-pwsh: pnpm workspace link; @deepseek-ai/dsh-tool-pwsh: host type reference; @deepseek-ai/dsh-tool-fs: pnpm workspace link; @deepseek-ai/dsh-tool-fs: host type reference; @deepseek-ai/dsh-subagent: pnpm workspace link; @deepseek-ai/dsh-subagent: host type reference; @deepseek-ai/dsh-ptc-runtime-node: pnpm workspace link; @deepseek-ai/dsh-ptc-runtime-node: host type reference; @deepseek-ai/dsh-workflow-ptc: pnpm workspace link; @deepseek-ai/dsh-workflow-ptc: host type reference; @deepseek-ai/dsh-tool-executor-ptc: pnpm workspace link; @deepseek-ai/dsh-tool-executor-ptc: host type reference; @deepseek-ai/dsh-fs-sandbox: pnpm workspace link; @deepseek-ai/dsh-fs-sandbox: host type reference; @deepseek-ai/dsh-api-terminal-controller: host type reference; @deepseek-ai/dsh-agent-preset-registry: host type reference; @deepseek-ai/dsh-terminal-bash: pnpm workspace link; @deepseek-ai/dsh-terminal-bash: host type reference; @deepseek-ai/dsh-fs: pnpm workspace link; @deepseek-ai/dsh-fs: host type reference; @deepseek-ai/dsh-shell: pnpm workspace link; @deepseek-ai/dsh-shell: host type reference; @deepseek-ai/dsh-ptc-runtime: pnpm workspace link; @deepseek-ai/dsh-ptc-runtime: host type reference"
+    },
+    {
+      "path": "packages/sandbox/sandbox-local",
+      "reason": "host YAML composition; @deepseek-ai/dsh-base: pnpm workspace link"
+    },
+    {
+      "path": "packages/sandbox/sandbox-policy",
+      "reason": "host YAML composition; @deepseek-ai/dsh-plugin-manager: pnpm workspace link; @deepseek-ai/dsh-plugin-manager: host type reference; @deepseek-ai/dsh-bash-sandbox: pnpm workspace link; @deepseek-ai/dsh-bash-sandbox: host type reference; @deepseek-ai/dsh-pwsh-sandbox: pnpm workspace link; @deepseek-ai/dsh-pwsh-sandbox: host type reference; @deepseek-ai/dsh-permission-presets: pnpm workspace link; @deepseek-ai/dsh-permission-presets: host type reference; @deepseek-ai/dsh-tool-bash: pnpm workspace link; @deepseek-ai/dsh-tool-bash: host type reference; @deepseek-ai/dsh-tool-pwsh: pnpm workspace link; @deepseek-ai/dsh-tool-pwsh: host type reference; @deepseek-ai/dsh-tool-fs: pnpm workspace link; @deepseek-ai/dsh-tool-fs: host type reference; @deepseek-ai/dsh-subagent: pnpm workspace link; @deepseek-ai/dsh-subagent: host type reference; @deepseek-ai/dsh-ptc-runtime-node: pnpm workspace link; @deepseek-ai/dsh-ptc-runtime-node: host type reference; @deepseek-ai/dsh-workflow-ptc: pnpm workspace link; @deepseek-ai/dsh-workflow-ptc: host type reference; @deepseek-ai/dsh-tool-executor-ptc: pnpm workspace link; @deepseek-ai/dsh-tool-executor-ptc: host type reference; @deepseek-ai/dsh-fs-sandbox: pnpm workspace link; @deepseek-ai/dsh-fs-sandbox: host type reference; @deepseek-ai/dsh-api-terminal-controller: host type reference; @deepseek-ai/dsh-api-workspace-files: host type reference; @deepseek-ai/dsh-action-cards: host type reference; @deepseek-ai/dsh-creation-recommendations: host type reference; @deepseek-ai/dsh-agent-preset-registry: host type reference; @deepseek-ai/dsh-terminal-bash: pnpm workspace link; @deepseek-ai/dsh-terminal-bash: host type reference; @deepseek-ai/dsh-base: pnpm workspace link"
+    },
+    {
+      "path": "packages/sandbox/sandbox-windows-acl",
+      "reason": "@deepseek-ai/dsh-sandbox-local: pnpm workspace link; @deepseek-ai/dsh-sandbox-local: host type reference"
+    },
+    {
+      "path": "packages/schedule/schedule",
+      "reason": "host YAML composition; @deepseek-ai/dsh-web-app: pnpm workspace link; @deepseek-ai/dsh-api-remotes: host type reference; @deepseek-ai/dsh-tool-schedule: pnpm workspace link; @deepseek-ai/dsh-tool-schedule: host type reference"
+    },
+    {
+      "path": "packages/schedule/tool-schedule",
+      "reason": "host YAML composition; @deepseek-ai/dsh-web-app: pnpm workspace link"
+    },
+    {
+      "path": "packages/session-query/session-log-export",
+      "reason": "host YAML composition; @deepseek-ai/dsh-web-app: pnpm workspace link"
+    },
+    {
+      "path": "packages/session-query/session-query",
+      "reason": "@deepseek-ai/dsh-session-query-sqlite: pnpm workspace link; @deepseek-ai/dsh-session-query-sqlite: host type reference; @deepseek-ai/dsh-subagent: pnpm workspace link; @deepseek-ai/dsh-subagent: host type reference; @deepseek-ai/dsh-session-log-export: host type reference; @deepseek-ai/dsh-session-reference: pnpm workspace link; @deepseek-ai/dsh-session-reference: host type reference; @deepseek-ai/dsh-api-session-controller: pnpm workspace link; @deepseek-ai/dsh-api-session-controller: host type reference"
+    },
+    {
+      "path": "packages/session-query/session-query-sqlite",
+      "reason": "host YAML composition; @deepseek-ai/dsh-base: pnpm workspace link"
+    },
+    {
+      "path": "packages/session/session-checkpoint-policy",
+      "reason": "host YAML composition; @deepseek-ai/dsh-base: pnpm workspace link"
+    },
+    {
+      "path": "packages/session/session-format",
+      "reason": "@deepseek-ai/dsh-session-persistence-jsonl: pnpm workspace link; @deepseek-ai/dsh-session-persistence-jsonl: host type reference; @deepseek-ai/dsh-session-log-export: pnpm workspace link; @deepseek-ai/dsh-session-log-export: host type reference; @deepseek-ai/dsh-session-format-catalog: pnpm workspace link; @deepseek-ai/dsh-session-format-catalog: host type reference; @deepseek-ai/dsh-session-format-v3-to-v4: pnpm workspace link; @deepseek-ai/dsh-session-format-v3-to-v4: host type reference; @deepseek-ai/dsh-session-format-v0-to-v1: pnpm workspace link; @deepseek-ai/dsh-session-format-v0-to-v1: host type reference; @deepseek-ai/dsh-session-format-v1-to-v2: pnpm workspace link; @deepseek-ai/dsh-session-format-v1-to-v2: host type reference; @deepseek-ai/dsh-session-format-v2-to-v3: pnpm workspace link; @deepseek-ai/dsh-session-format-v2-to-v3: host type reference"
+    },
+    {
+      "path": "packages/session/session-format-catalog",
+      "reason": "@deepseek-ai/dsh-session-persistence-jsonl: pnpm workspace link; @deepseek-ai/dsh-session-persistence-jsonl: host type reference; @deepseek-ai/dsh-session-query: pnpm workspace link; @deepseek-ai/dsh-session-query: host type reference"
+    },
+    {
+      "path": "packages/session/session-format-v0-to-v1",
+      "reason": "@deepseek-ai/dsh-session-format-catalog: pnpm workspace link; @deepseek-ai/dsh-session-format-catalog: host type reference; @deepseek-ai/dsh-session-format-v1-to-v2: pnpm workspace link; @deepseek-ai/dsh-session-format-v1-to-v2: host type reference; @deepseek-ai/dsh-session-format-v2-to-v3: pnpm workspace link; @deepseek-ai/dsh-session-format-v2-to-v3: host type reference"
+    },
+    {
+      "path": "packages/session/session-format-v1-to-v2",
+      "reason": "@deepseek-ai/dsh-session-format-catalog: pnpm workspace link; @deepseek-ai/dsh-session-format-catalog: host type reference; @deepseek-ai/dsh-session-format-v2-to-v3: pnpm workspace link; @deepseek-ai/dsh-session-format-v2-to-v3: host type reference"
+    },
+    {
+      "path": "packages/session/session-format-v2-to-v3",
+      "reason": "@deepseek-ai/dsh-session-format-catalog: pnpm workspace link; @deepseek-ai/dsh-session-format-catalog: host type reference; @deepseek-ai/dsh-session-format-v3-to-v4: pnpm workspace link; @deepseek-ai/dsh-session-format-v3-to-v4: host type reference"
+    },
+    {
+      "path": "packages/session/session-format-v3-to-v4",
+      "reason": "@deepseek-ai/dsh-session-persistence-jsonl: pnpm workspace link; @deepseek-ai/dsh-session-persistence-jsonl: host type reference; @deepseek-ai/dsh-session-format-catalog: pnpm workspace link; @deepseek-ai/dsh-session-format-catalog: host type reference"
+    },
+    {
+      "path": "packages/session/session-log-deepseek",
+      "reason": "host YAML composition; @deepseek-ai/dsh-base: pnpm workspace link"
+    },
+    {
+      "path": "packages/session/session-persistence",
+      "reason": "@deepseek-ai/dsh-session-persistence-jsonl: pnpm workspace link; @deepseek-ai/dsh-session-persistence-jsonl: host type reference; @deepseek-ai/dsh-session-query-sqlite: pnpm workspace link; @deepseek-ai/dsh-session-query-sqlite: host type reference; @deepseek-ai/dsh-subagent: pnpm workspace link; @deepseek-ai/dsh-subagent: host type reference; @deepseek-ai/dsh-agent-team: pnpm workspace link; @deepseek-ai/dsh-agent-team: host type reference; @deepseek-ai/dsh-session-checkpoint-policy: pnpm workspace link; @deepseek-ai/dsh-session-checkpoint-policy: host type reference; @deepseek-ai/dsh-agent-loop: pnpm workspace link; @deepseek-ai/dsh-agent-loop: host type reference; @deepseek-ai/dsh-message-feedback: pnpm workspace link; @deepseek-ai/dsh-message-feedback: host type reference; @deepseek-ai/dsh-session-log-export: pnpm workspace link; @deepseek-ai/dsh-session-log-export: host type reference; @deepseek-ai/dsh-workspace: pnpm workspace link; @deepseek-ai/dsh-workspace: host type reference; @deepseek-ai/dsh-api-session-controller: pnpm workspace link; @deepseek-ai/dsh-api-session-controller: host type reference; @deepseek-ai/dsh-api-workspace-files: host type reference; @deepseek-ai/dsh-schedule: pnpm workspace link; @deepseek-ai/dsh-schedule: host type reference; @deepseek-ai/dsh-acp: pnpm workspace link; @deepseek-ai/dsh-acp: host type reference; @deepseek-ai/dsh-session-query: pnpm workspace link; @deepseek-ai/dsh-session-query: host type reference"
+    },
+    {
+      "path": "packages/session/session-persistence-jsonl",
+      "reason": "host YAML composition; @deepseek-ai/dsh-schedule: host type reference; @deepseek-ai/dsh-base: pnpm workspace link"
+    },
+    {
+      "path": "packages/session/session-projection",
+      "reason": "host YAML composition; @deepseek-ai/dsh-session-title: pnpm workspace link; @deepseek-ai/dsh-session-title: host type reference; @deepseek-ai/dsh-user-questions: pnpm workspace link; @deepseek-ai/dsh-user-questions: host type reference; @deepseek-ai/dsh-agent: pnpm workspace link; @deepseek-ai/dsh-agent: host type reference; @deepseek-ai/dsh-llm-retry: pnpm workspace link; @deepseek-ai/dsh-working-directory: pnpm workspace link; @deepseek-ai/dsh-working-directory: host type reference; @deepseek-ai/dsh-session-projection-cache: pnpm workspace link; @deepseek-ai/dsh-session-projection-cache: host type reference; @deepseek-ai/dsh-sandbox-policy: pnpm workspace link; @deepseek-ai/dsh-sandbox-policy: host type reference; @deepseek-ai/dsh-user-approval: pnpm workspace link; @deepseek-ai/dsh-user-approval: host type reference; @deepseek-ai/dsh-permission-presets: pnpm workspace link; @deepseek-ai/dsh-permission-presets: host type reference; @deepseek-ai/dsh-goal: pnpm workspace link; @deepseek-ai/dsh-goal: host type reference; @deepseek-ai/dsh-plan-mode: pnpm workspace link; @deepseek-ai/dsh-plan-mode: host type reference; @deepseek-ai/dsh-token-meter: pnpm workspace link; @deepseek-ai/dsh-token-meter: host type reference; @deepseek-ai/dsh-compaction-basic: pnpm workspace link; @deepseek-ai/dsh-compaction-basic: host type reference; @deepseek-ai/dsh-subagent: pnpm workspace link; @deepseek-ai/dsh-subagent: host type reference; @deepseek-ai/dsh-agent-team: pnpm workspace link; @deepseek-ai/dsh-agent-team: host type reference; @deepseek-ai/dsh-tool-todo: pnpm workspace link; @deepseek-ai/dsh-tool-todo: host type reference; @deepseek-ai/dsh-system-prompt: pnpm workspace link; @deepseek-ai/dsh-system-prompt: host type reference; @deepseek-ai/dsh-agent-loop: pnpm workspace link; @deepseek-ai/dsh-agent-loop: host type reference; @deepseek-ai/dsh-session-reference: pnpm workspace link; @deepseek-ai/dsh-session-reference: host type reference; @deepseek-ai/dsh-session-stats: pnpm workspace link; @deepseek-ai/dsh-session-stats: host type reference; @deepseek-ai/dsh-session-turn-outline: pnpm workspace link; @deepseek-ai/dsh-session-turn-outline: host type reference; @deepseek-ai/dsh-api-session-controller: pnpm workspace link; @deepseek-ai/dsh-api-session-controller: host type reference; @deepseek-ai/dsh-api-terminal-controller: host type reference; @deepseek-ai/dsh-schedule: pnpm workspace link; @deepseek-ai/dsh-harness-dev-context: pnpm workspace link; @deepseek-ai/dsh-harness-dev-context: host type reference; @deepseek-ai/dsh-action-cards: host type reference; @deepseek-ai/dsh-creation-recommendations: host type reference; @deepseek-ai/dsh-agent-preset-registry: pnpm workspace link; @deepseek-ai/dsh-agent-preset-registry: host type reference; @deepseek-ai/dsh-time-context: pnpm workspace link; @deepseek-ai/dsh-time-context: host type reference; @deepseek-ai/dsh-base: pnpm workspace link; @deepseek-ai/dsh-session-query: pnpm workspace link; @deepseek-ai/dsh-session-query: host type reference"
+    },
+    {
+      "path": "packages/session/session-projection-cache",
+      "reason": "host YAML composition; @deepseek-ai/dsh-session-reference: pnpm workspace link; @deepseek-ai/dsh-session-reference: host type reference; @deepseek-ai/dsh-api-session-controller: pnpm workspace link; @deepseek-ai/dsh-api-session-controller: host type reference; @deepseek-ai/dsh-api-workspace-files: host type reference; @deepseek-ai/dsh-base: pnpm workspace link; @deepseek-ai/dsh-session-query: pnpm workspace link; @deepseek-ai/dsh-session-query: host type reference"
+    },
+    {
+      "path": "packages/session/session-stats",
+      "reason": "host YAML composition; @deepseek-ai/dsh-web-app: pnpm workspace link"
+    },
+    {
+      "path": "packages/session/session-telemetry",
+      "reason": "@deepseek-ai/dsh-session-telemetry-otel: pnpm workspace link; @deepseek-ai/dsh-session-telemetry-otel: host type reference"
+    },
+    {
+      "path": "packages/session/session-telemetry-otel",
+      "reason": "host YAML composition; @deepseek-ai/dsh-base: pnpm workspace link"
+    },
+    {
+      "path": "packages/session/session-title",
+      "reason": "host YAML composition; @deepseek-ai/dsh-session-title-first-prompt-llm: pnpm workspace link; @deepseek-ai/dsh-session-title-first-prompt-llm: host type reference; @deepseek-ai/dsh-session-log-export: host type reference; @deepseek-ai/dsh-session-reference: pnpm workspace link; @deepseek-ai/dsh-session-reference: host type reference; @deepseek-ai/dsh-api-session-controller: pnpm workspace link; @deepseek-ai/dsh-api-session-controller: host type reference; @deepseek-ai/dsh-schedule: host type reference; @deepseek-ai/dsh-base: pnpm workspace link; @deepseek-ai/dsh-session-title-llm: pnpm workspace link; @deepseek-ai/dsh-session-title-llm: host type reference; @deepseek-ai/dsh-session-query: pnpm workspace link; @deepseek-ai/dsh-session-query: host type reference"
+    },
+    {
+      "path": "packages/session/session-title-first-prompt-llm",
+      "reason": "host YAML composition; @deepseek-ai/dsh-base: pnpm workspace link"
+    },
+    {
+      "path": "packages/session/session-title-llm",
+      "reason": "@deepseek-ai/dsh-session-title-first-prompt-llm: pnpm workspace link; @deepseek-ai/dsh-session-title-first-prompt-llm: host type reference"
+    },
+    {
+      "path": "packages/session/session-turn-outline",
+      "reason": "host YAML composition; @deepseek-ai/dsh-web-app: pnpm workspace link"
+    },
+    {
+      "path": "packages/session/tool-session-control",
+      "reason": "host YAML composition; @deepseek-ai/dsh-web-app: pnpm workspace link"
+    },
+    {
+      "path": "packages/session/working-directory",
+      "reason": "host YAML composition; @deepseek-ai/dsh-sandbox-policy: host type reference; @deepseek-ai/dsh-tool-bash: pnpm workspace link; @deepseek-ai/dsh-tool-bash: host type reference; @deepseek-ai/dsh-tool-pwsh: pnpm workspace link; @deepseek-ai/dsh-tool-pwsh: host type reference; @deepseek-ai/dsh-tool-fs: pnpm workspace link; @deepseek-ai/dsh-tool-fs: host type reference; @deepseek-ai/dsh-tool-fs-search: pnpm workspace link; @deepseek-ai/dsh-tool-fs-search: host type reference; @deepseek-ai/dsh-agent-instructions: pnpm workspace link; @deepseek-ai/dsh-agent-instructions: host type reference; @deepseek-ai/dsh-tool-skill: pnpm workspace link; @deepseek-ai/dsh-tool-skill: host type reference; @deepseek-ai/dsh-subagent: pnpm workspace link; @deepseek-ai/dsh-subagent: host type reference; @deepseek-ai/dsh-workflow-ptc: pnpm workspace link; @deepseek-ai/dsh-workflow-ptc: host type reference; @deepseek-ai/dsh-tool-executor-ptc: pnpm workspace link; @deepseek-ai/dsh-tool-executor-ptc: host type reference; @deepseek-ai/dsh-file-reference-local: pnpm workspace link; @deepseek-ai/dsh-file-reference-local: host type reference; @deepseek-ai/dsh-api-session-controller: pnpm workspace link; @deepseek-ai/dsh-api-session-controller: host type reference; @deepseek-ai/dsh-api-terminal-controller: host type reference; @deepseek-ai/dsh-api-workspace-files: host type reference; @deepseek-ai/dsh-workspace-changes: pnpm workspace link; @deepseek-ai/dsh-workspace-changes: host type reference; @deepseek-ai/dsh-tool-present: pnpm workspace link; @deepseek-ai/dsh-tool-present: host type reference; @deepseek-ai/dsh-tool-office: pnpm workspace link; @deepseek-ai/dsh-tool-office: host type reference; @deepseek-ai/dsh-terminal-bash: pnpm workspace link; @deepseek-ai/dsh-terminal-bash: host type reference; @deepseek-ai/dsh-tool-bash-persistent: pnpm workspace link; @deepseek-ai/dsh-tool-bash-persistent: host type reference; @deepseek-ai/dsh-tool-pwsh-persistent: pnpm workspace link; @deepseek-ai/dsh-tool-pwsh-persistent: host type reference; @deepseek-ai/dsh-hooks-claude-code: pnpm workspace link; @deepseek-ai/dsh-hooks-claude-code: host type reference; @deepseek-ai/dsh-base: pnpm workspace link"
+    },
+    {
+      "path": "packages/settings/settings",
+      "reason": "host YAML composition; @deepseek-ai/dsh-agent-default-model: host type reference; @deepseek-ai/dsh-permission-presets: host type reference; @deepseek-ai/dsh-client-product-analytics: host type reference; @deepseek-ai/dsh-api-session-controller: pnpm workspace link; @deepseek-ai/dsh-api-settings-controller: pnpm workspace link; @deepseek-ai/dsh-api-settings-controller: host type reference; @deepseek-ai/dsh-mcp-manager: host type reference; @deepseek-ai/dsh-api-remotes: host type reference; @deepseek-ai/dsh-agent-preset-registry: pnpm workspace link; @deepseek-ai/dsh-agent-preset-registry: host type reference; @deepseek-ai/dsh-plugin-market: pnpm workspace link; @deepseek-ai/dsh-plugin-market: host type reference; @deepseek-ai/dsh-llm-pi-ai: host type reference; @deepseek-ai/dsh-base: pnpm workspace link; @deepseek-ai/dsh-base: host type reference; @deepseek-ai/dsh-llm-deepseek: host type reference"
+    },
+    {
+      "path": "packages/shell/bash-local",
+      "reason": "@deepseek-ai/dsh-bash-sandbox: pnpm workspace link; @deepseek-ai/dsh-bash-sandbox: host type reference"
+    },
+    {
+      "path": "packages/shell/bash-sandbox",
+      "reason": "host YAML composition; @deepseek-ai/dsh-base: pnpm workspace link"
+    },
+    {
+      "path": "packages/shell/pwsh-local",
+      "reason": "@deepseek-ai/dsh-pwsh-sandbox: pnpm workspace link; @deepseek-ai/dsh-pwsh-sandbox: host type reference; @deepseek-ai/dsh-terminal-bash: pnpm workspace link; @deepseek-ai/dsh-terminal-bash: host type reference"
+    },
+    {
+      "path": "packages/shell/pwsh-sandbox",
+      "reason": "host YAML composition; @deepseek-ai/dsh-base: pnpm workspace link"
+    },
+    {
+      "path": "packages/shell/shell",
+      "reason": "@deepseek-ai/dsh-bash-sandbox: pnpm workspace link; @deepseek-ai/dsh-bash-sandbox: host type reference; @deepseek-ai/dsh-pwsh-sandbox: pnpm workspace link; @deepseek-ai/dsh-pwsh-sandbox: host type reference; @deepseek-ai/dsh-permission-presets: pnpm workspace link; @deepseek-ai/dsh-permission-presets: host type reference; @deepseek-ai/dsh-shell-env: pnpm workspace link; @deepseek-ai/dsh-shell-env: host type reference; @deepseek-ai/dsh-tool-bash: pnpm workspace link; @deepseek-ai/dsh-tool-bash: host type reference; @deepseek-ai/dsh-tool-pwsh: pnpm workspace link; @deepseek-ai/dsh-tool-pwsh: host type reference; @deepseek-ai/dsh-tool-fs-search: host type reference; @deepseek-ai/dsh-hooks-claude-code: host type reference; @deepseek-ai/dsh-bash-local: pnpm workspace link; @deepseek-ai/dsh-bash-local: host type reference; @deepseek-ai/dsh-pwsh-local: pnpm workspace link; @deepseek-ai/dsh-pwsh-local: host type reference; @deepseek-ai/dsh-hook-protocol: pnpm workspace link; @deepseek-ai/dsh-hook-protocol: host type reference"
+    },
+    {
+      "path": "packages/shell/shell-env",
+      "reason": "host YAML composition; @deepseek-ai/dsh-tool-bash: pnpm workspace link; @deepseek-ai/dsh-tool-bash: host type reference; @deepseek-ai/dsh-tool-pwsh: pnpm workspace link; @deepseek-ai/dsh-tool-pwsh: host type reference; @deepseek-ai/dsh-web-app: pnpm workspace link; @deepseek-ai/dsh-web-app: host type reference; @deepseek-ai/dsh-base: pnpm workspace link"
+    },
+    {
+      "path": "packages/shell/tool-bash",
+      "reason": "host YAML composition; @deepseek-ai/dsh-web-app: pnpm workspace link; @deepseek-ai/dsh-base: pnpm workspace link"
+    },
+    {
+      "path": "packages/shell/tool-bash-persistent",
+      "reason": "host YAML composition; @deepseek-ai/dsh-web-app: pnpm workspace link"
+    },
+    {
+      "path": "packages/shell/tool-pwsh",
+      "reason": "host YAML composition; @deepseek-ai/dsh-web-app: pnpm workspace link; @deepseek-ai/dsh-base: pnpm workspace link"
+    },
+    {
+      "path": "packages/shell/tool-pwsh-persistent",
+      "reason": "host YAML composition; @deepseek-ai/dsh-web-app: pnpm workspace link"
+    },
+    {
+      "path": "packages/skill/skill",
+      "reason": "host YAML composition; @deepseek-ai/dsh-skill-filesystem: pnpm workspace link; @deepseek-ai/dsh-skill-filesystem: host type reference; @deepseek-ai/dsh-tool-skill: pnpm workspace link; @deepseek-ai/dsh-tool-skill: host type reference; @deepseek-ai/dsh-upstream-skills: pnpm workspace link; @deepseek-ai/dsh-upstream-skills: host type reference; @deepseek-ai/dsh-api-session-controller: pnpm workspace link; @deepseek-ai/dsh-api-session-controller: host type reference; @deepseek-ai/dsh-skill-office: pnpm workspace link; @deepseek-ai/dsh-skill-office: host type reference; @deepseek-ai/dsh-action-cards: host type reference; @deepseek-ai/dsh-creation-recommendations: pnpm workspace link; @deepseek-ai/dsh-creation-recommendations: host type reference; @deepseek-ai/dsh-plugin-recommendations: pnpm workspace link; @deepseek-ai/dsh-plugin-recommendations: host type reference; @deepseek-ai/dsh-tool-office: pnpm workspace link; @deepseek-ai/dsh-tool-office: host type reference; @deepseek-ai/dsh-base: pnpm workspace link; @deepseek-ai/dsh-sandbox-windows-acl: pnpm workspace link; @deepseek-ai/dsh-sandbox-windows-acl: host type reference"
+    },
+    {
+      "path": "packages/skill/skill-filesystem",
+      "reason": "host YAML composition; @deepseek-ai/dsh-web-app: pnpm workspace link; @deepseek-ai/dsh-base: pnpm workspace link"
+    },
+    {
+      "path": "packages/skill/skill-office",
+      "reason": "host YAML composition; @deepseek-ai/dsh-web-app: pnpm workspace link"
+    },
+    {
+      "path": "packages/skill/tool-skill",
+      "reason": "host YAML composition; @deepseek-ai/dsh-web-app: pnpm workspace link; @deepseek-ai/dsh-base: pnpm workspace link"
+    },
+    {
+      "path": "packages/skill/tool-workspace-dependencies",
+      "reason": "host YAML composition; @deepseek-ai/dsh-web-app: pnpm workspace link"
+    },
+    {
+      "path": "packages/spill/spill",
+      "reason": "@deepseek-ai/dsh-tool-fs-search: pnpm workspace link; @deepseek-ai/dsh-tool-fs-search: host type reference; @deepseek-ai/dsh-spill-local: pnpm workspace link; @deepseek-ai/dsh-spill-local: host type reference; @deepseek-ai/dsh-spill-policy: pnpm workspace link; @deepseek-ai/dsh-spill-policy: host type reference; @deepseek-ai/dsh-session-reference: pnpm workspace link; @deepseek-ai/dsh-session-reference: host type reference"
+    },
+    {
+      "path": "packages/spill/spill-local",
+      "reason": "host YAML composition; @deepseek-ai/dsh-base: pnpm workspace link"
+    },
+    {
+      "path": "packages/spill/spill-policy",
+      "reason": "host YAML composition; @deepseek-ai/dsh-base: pnpm workspace link"
+    },
+    {
+      "path": "packages/storage/storage",
+      "reason": "host YAML composition; @deepseek-ai/dsh-storage-json: pnpm workspace link; @deepseek-ai/dsh-storage-json: host type reference; @deepseek-ai/dsh-storage-domain: pnpm workspace link; @deepseek-ai/dsh-storage-domain: host type reference; @deepseek-ai/dsh-session-projection-cache: host type reference; @deepseek-ai/dsh-workspace: pnpm workspace link; @deepseek-ai/dsh-workspace: host type reference; @deepseek-ai/dsh-base: pnpm workspace link"
+    },
+    {
+      "path": "packages/storage/storage-domain",
+      "reason": "host YAML composition; @deepseek-ai/dsh-session-projection-cache: pnpm workspace link; @deepseek-ai/dsh-session-projection-cache: host type reference; @deepseek-ai/dsh-workspace: pnpm workspace link; @deepseek-ai/dsh-workspace: host type reference; @deepseek-ai/dsh-schedule: pnpm workspace link; @deepseek-ai/dsh-schedule: host type reference; @deepseek-ai/dsh-api-workspace-controller: pnpm workspace link; @deepseek-ai/dsh-api-workspace-controller: host type reference; @deepseek-ai/dsh-base: pnpm workspace link"
+    },
+    {
+      "path": "packages/storage/storage-json",
+      "reason": "host YAML composition; @deepseek-ai/dsh-session-projection-cache: host type reference; @deepseek-ai/dsh-base: pnpm workspace link"
+    },
+    {
+      "path": "packages/subagent/subagent",
+      "reason": "host YAML composition; @deepseek-ai/dsh-goal-round-driver: pnpm workspace link; @deepseek-ai/dsh-goal-round-driver: host type reference; @deepseek-ai/dsh-agent-team: pnpm workspace link; @deepseek-ai/dsh-agent-team: host type reference; @deepseek-ai/dsh-tool-agent-team: pnpm workspace link; @deepseek-ai/dsh-tool-agent-team: host type reference; @deepseek-ai/dsh-subagent-spawn-in-process: pnpm workspace link; @deepseek-ai/dsh-subagent-spawn-in-process: host type reference; @deepseek-ai/dsh-subagent-fork-in-process: pnpm workspace link; @deepseek-ai/dsh-subagent-fork-in-process: host type reference; @deepseek-ai/dsh-tool-subagent-control: pnpm workspace link; @deepseek-ai/dsh-tool-subagent-control: host type reference; @deepseek-ai/dsh-tool-subagent: pnpm workspace link; @deepseek-ai/dsh-tool-subagent: host type reference; @deepseek-ai/dsh-workflow-ptc: pnpm workspace link; @deepseek-ai/dsh-workflow-ptc: host type reference; @deepseek-ai/dsh-session-reference: pnpm workspace link; @deepseek-ai/dsh-session-reference: host type reference; @deepseek-ai/dsh-api-session-controller: pnpm workspace link; @deepseek-ai/dsh-api-session-controller: host type reference; @deepseek-ai/dsh-tool-session-control: pnpm workspace link; @deepseek-ai/dsh-tool-session-control: host type reference; @deepseek-ai/dsh-schedule: pnpm workspace link; @deepseek-ai/dsh-creation-recommendations: host type reference; @deepseek-ai/dsh-tool-schedule: pnpm workspace link; @deepseek-ai/dsh-tool-office: pnpm workspace link; @deepseek-ai/dsh-tool-office: host type reference; @deepseek-ai/dsh-hooks-claude-code: pnpm workspace link; @deepseek-ai/dsh-hooks-claude-code: host type reference; @deepseek-ai/dsh-base: pnpm workspace link"
+    },
+    {
+      "path": "packages/subagent/subagent-fork-in-process",
+      "reason": "host YAML composition; @deepseek-ai/dsh-base: pnpm workspace link"
+    },
+    {
+      "path": "packages/subagent/subagent-spawn-in-process",
+      "reason": "host YAML composition; @deepseek-ai/dsh-base: pnpm workspace link"
+    },
+    {
+      "path": "packages/subagent/tool-subagent",
+      "reason": "host YAML composition; @deepseek-ai/dsh-web-app: pnpm workspace link; @deepseek-ai/dsh-base: pnpm workspace link"
+    },
+    {
+      "path": "packages/subagent/tool-subagent-control",
+      "reason": "host YAML composition; @deepseek-ai/dsh-web-app: pnpm workspace link; @deepseek-ai/dsh-base: pnpm workspace link"
+    },
+    {
+      "path": "packages/subprocess/subprocess",
+      "reason": "@deepseek-ai/dsh-plugin-manager: pnpm workspace link; @deepseek-ai/dsh-plugin-manager: host type reference; @deepseek-ai/dsh-subprocess-local: pnpm workspace link; @deepseek-ai/dsh-subprocess-local: host type reference; @deepseek-ai/dsh-cli-account: pnpm workspace link; @deepseek-ai/dsh-cli-account: host type reference; @deepseek-ai/dsh-tool-bash: pnpm workspace link; @deepseek-ai/dsh-tool-bash: host type reference; @deepseek-ai/dsh-tool-pwsh: pnpm workspace link; @deepseek-ai/dsh-tool-pwsh: host type reference; @deepseek-ai/dsh-tool-fs-search: pnpm workspace link; @deepseek-ai/dsh-ptc-runtime-node: pnpm workspace link; @deepseek-ai/dsh-ptc-runtime-node: host type reference; @deepseek-ai/dsh-host-open-in-app: pnpm workspace link; @deepseek-ai/dsh-host-open-in-app: host type reference; @deepseek-ai/dsh-api-terminal-controller: pnpm workspace link; @deepseek-ai/dsh-api-terminal-controller: host type reference; @deepseek-ai/dsh-api-workspace-files: host type reference; @deepseek-ai/dsh-web-app: pnpm workspace link; @deepseek-ai/dsh-web-app: host type reference; @deepseek-ai/dsh-workspace-changes: pnpm workspace link; @deepseek-ai/dsh-workspace-changes: host type reference; @deepseek-ai/dsh-plugin-market: pnpm workspace link; @deepseek-ai/dsh-plugin-market: host type reference; @deepseek-ai/dsh-terminal-bash: pnpm workspace link; @deepseek-ai/dsh-terminal-bash: host type reference; @deepseek-ai/dsh-mcp-client: pnpm workspace link; @deepseek-ai/dsh-mcp-client: host type reference; @deepseek-ai/dsh-sandbox-windows-acl: pnpm workspace link; @deepseek-ai/dsh-sandbox-windows-acl: host type reference; @deepseek-ai/dsh-shell: pnpm workspace link; @deepseek-ai/dsh-shell: host type reference; @deepseek-ai/dsh-bash-local: pnpm workspace link; @deepseek-ai/dsh-bash-local: host type reference; @deepseek-ai/dsh-pwsh-local: pnpm workspace link; @deepseek-ai/dsh-pwsh-local: host type reference; @deepseek-ai/dsh-util-ripgrep: pnpm workspace link; @deepseek-ai/dsh-util-ripgrep: host type reference"
+    },
+    {
+      "path": "packages/subprocess/subprocess-local",
+      "reason": "host YAML composition; @deepseek-ai/dsh-base: pnpm workspace link"
+    },
+    {
+      "path": "packages/subprocess/win32-process",
+      "reason": "@deepseek-ai/dsh-subprocess-local: pnpm workspace link; @deepseek-ai/dsh-subprocess-local: host type reference; @deepseek-ai/dsh-sandbox-windows-acl: pnpm workspace link; @deepseek-ai/dsh-sandbox-windows-acl: host type reference"
+    },
+    {
+      "path": "packages/team/agent-team",
+      "reason": "host YAML composition; @deepseek-ai/dsh-tool-agent-team: pnpm workspace link; @deepseek-ai/dsh-tool-agent-team: host type reference; @deepseek-ai/dsh-tool-subagent-control: pnpm workspace link; @deepseek-ai/dsh-tool-subagent-control: host type reference; @deepseek-ai/dsh-base: pnpm workspace link"
+    },
+    {
+      "path": "packages/team/tool-agent-team",
+      "reason": "host YAML composition; @deepseek-ai/dsh-base: pnpm workspace link"
+    },
+    {
+      "path": "packages/telemetry/otel",
+      "reason": "host YAML composition; @deepseek-ai/dsh-session-telemetry-otel: pnpm workspace link; @deepseek-ai/dsh-session-telemetry-otel: host type reference; @deepseek-ai/dsh-host-product-telemetry-otel: pnpm workspace link; @deepseek-ai/dsh-host-product-telemetry-otel: host type reference; @deepseek-ai/dsh-base: pnpm workspace link"
+    },
+    {
+      "path": "packages/terminal/terminal",
+      "reason": "host YAML composition; @deepseek-ai/dsh-web-app: pnpm workspace link; @deepseek-ai/dsh-terminal-bash: pnpm workspace link; @deepseek-ai/dsh-terminal-bash: host type reference; @deepseek-ai/dsh-tool-bash-persistent: pnpm workspace link; @deepseek-ai/dsh-tool-bash-persistent: host type reference; @deepseek-ai/dsh-tool-pwsh-persistent: pnpm workspace link; @deepseek-ai/dsh-tool-pwsh-persistent: host type reference"
+    },
+    {
+      "path": "packages/terminal/terminal-bash",
+      "reason": "host YAML composition; @deepseek-ai/dsh-web-app: pnpm workspace link"
+    },
+    {
+      "path": "packages/test-support/loader-smoke",
+      "reason": "@deepseek-ai/dsh-time-context: host type reference"
+    },
+    {
+      "path": "packages/test-support/tool-testkit",
+      "reason": "@deepseek-ai/dsh-creation-recommendations: host type reference"
+    },
+    {
+      "path": "packages/todo/tool-todo",
+      "reason": "host YAML composition; @deepseek-ai/dsh-web-app: pnpm workspace link; @deepseek-ai/dsh-base: pnpm workspace link; @deepseek-ai/dsh-session-query: pnpm workspace link; @deepseek-ai/dsh-session-query: host type reference"
+    },
+    {
+      "path": "packages/typert/generator",
+      "reason": "launcher / metadata compiler"
+    },
+    {
+      "path": "packages/typert/loader",
+      "reason": "host YAML composition; @deepseek-ai/dsh-base: pnpm workspace link"
+    },
+    {
+      "path": "packages/typert/protocol",
+      "reason": "@deepseek-ai/dsh-plugin-manager: pnpm workspace link; @deepseek-ai/dsh-plugin-manager: host type reference; @deepseek-ai/dsh-llm: pnpm workspace link; @deepseek-ai/dsh-llm: host type reference; @deepseek-ai/dsh-session: host type reference; @deepseek-ai/dsh-typert-registry: host type reference; @deepseek-ai/dsh-api-gateway: pnpm workspace link; @deepseek-ai/dsh-api-gateway: host type reference; @deepseek-ai/dsh-api-remote-access: pnpm workspace link; @deepseek-ai/dsh-api-remote-access: host type reference; @deepseek-ai/dsh-user-questions: pnpm workspace link; @deepseek-ai/dsh-user-questions: host type reference; @deepseek-ai/dsh-agent: pnpm workspace link; @deepseek-ai/dsh-agent: host type reference; @deepseek-ai/dsh-deepseek-account: pnpm workspace link; @deepseek-ai/dsh-deepseek-account: host type reference; @deepseek-ai/dsh-permission-presets: pnpm workspace link; @deepseek-ai/dsh-permission-presets: host type reference; @deepseek-ai/dsh-commands: pnpm workspace link; @deepseek-ai/dsh-commands: host type reference; @deepseek-ai/dsh-command-feedback: pnpm workspace link; @deepseek-ai/dsh-command-feedback: host type reference; @deepseek-ai/dsh-goal: pnpm workspace link; @deepseek-ai/dsh-goal: host type reference; @deepseek-ai/dsh-subagent: pnpm workspace link; @deepseek-ai/dsh-subagent: host type reference; @deepseek-ai/dsh-agent-team: pnpm workspace link; @deepseek-ai/dsh-agent-team: host type reference; @deepseek-ai/dsh-web: pnpm workspace link; @deepseek-ai/dsh-web: host type reference; @deepseek-ai/dsh-client-product-analytics: pnpm workspace link; @deepseek-ai/dsh-client-product-analytics: host type reference; @deepseek-ai/dsh-message-feedback: pnpm workspace link; @deepseek-ai/dsh-message-feedback: host type reference; @deepseek-ai/dsh-workspace: pnpm workspace link; @deepseek-ai/dsh-workspace: host type reference; @deepseek-ai/dsh-session-reference: pnpm workspace link; @deepseek-ai/dsh-host-plugin-inventory: pnpm workspace link; @deepseek-ai/dsh-host-plugin-inventory: host type reference; @deepseek-ai/dsh-api-session-controller: pnpm workspace link; @deepseek-ai/dsh-api-session-controller: host type reference; @deepseek-ai/dsh-api-job-controller: pnpm workspace link; @deepseek-ai/dsh-api-job-controller: host type reference; @deepseek-ai/dsh-api-terminal-controller: pnpm workspace link; @deepseek-ai/dsh-api-terminal-controller: host type reference; @deepseek-ai/dsh-api-workspace-files: pnpm workspace link; @deepseek-ai/dsh-api-workspace-files: host type reference; @deepseek-ai/dsh-schedule: pnpm workspace link; @deepseek-ai/dsh-schedule: host type reference; @deepseek-ai/dsh-api-settings-controller: pnpm workspace link; @deepseek-ai/dsh-api-settings-controller: host type reference; @deepseek-ai/dsh-mcp-manager: pnpm workspace link; @deepseek-ai/dsh-mcp-manager: host type reference; @deepseek-ai/dsh-api-workspace-controller: pnpm workspace link; @deepseek-ai/dsh-api-workspace-controller: host type reference; @deepseek-ai/dsh-cordis-host-runner: pnpm workspace link; @deepseek-ai/dsh-cordis-host-runner: host type reference; @deepseek-ai/dsh-host-webserver: host type reference; @deepseek-ai/dsh-client-connection: host type reference; @deepseek-ai/dsh-host-authentication-token: host type reference; @deepseek-ai/dsh-client-file-upload: pnpm workspace link; @deepseek-ai/dsh-client-file-upload: host type reference; @deepseek-ai/dsh-api-remotes: host type reference; @deepseek-ai/dsh-office-kit: pnpm workspace link; @deepseek-ai/dsh-office-kit: host type reference; @deepseek-ai/dsh-client-remote-connection: pnpm workspace link; @deepseek-ai/dsh-client-remote-connection: host type reference; @deepseek-ai/dsh-action-cards: pnpm workspace link; @deepseek-ai/dsh-action-cards: host type reference; @deepseek-ai/dsh-plugin-recommendations: pnpm workspace link; @deepseek-ai/dsh-plugin-recommendations: host type reference; @deepseek-ai/dsh-agent-preset-registry: pnpm workspace link; @deepseek-ai/dsh-agent-preset-registry: host type reference; @deepseek-ai/dsh-plugin-market: pnpm workspace link; @deepseek-ai/dsh-plugin-market: host type reference; @deepseek-ai/dsh-client-ui-connector-account: pnpm workspace link; @deepseek-ai/dsh-client-ui-connector-account: host type reference"
+    },
+    {
+      "path": "packages/typert/registry",
+      "reason": "host YAML composition; @deepseek-ai/dsh-typert-loader: pnpm workspace link; @deepseek-ai/dsh-typert-loader: host type reference; @deepseek-ai/dsh-api-session-controller: pnpm workspace link; @deepseek-ai/dsh-api-session-controller: host type reference; @deepseek-ai/dsh-base: pnpm workspace link"
+    },
+    {
+      "path": "packages/util/atomic-write",
+      "reason": "@deepseek-ai/dsh-plugin-manager: pnpm workspace link; @deepseek-ai/dsh-plugin-manager: host type reference; @deepseek-ai/dsh-config-editor: pnpm workspace link; @deepseek-ai/dsh-config-editor: host type reference; @deepseek-ai/dsh-credentials-local: pnpm workspace link; @deepseek-ai/dsh-credentials-local: host type reference; @deepseek-ai/dsh-agent-preset-registry: host type reference; @deepseek-ai/dsh-plugin-market: pnpm workspace link; @deepseek-ai/dsh-plugin-market: host type reference; @deepseek-ai/dsh-app-boot: pnpm workspace link; @deepseek-ai/dsh-app-boot: host type reference; @deepseek-ai/dsh-llm-deepseek: pnpm workspace link; @deepseek-ai/dsh-llm-deepseek: host type reference"
+    },
+    {
+      "path": "packages/util/brand",
+      "reason": "@deepseek-ai/dsh-plugin-manager: host type reference; @deepseek-ai/dsh-llm: pnpm workspace link; @deepseek-ai/dsh-llm: host type reference; @deepseek-ai/dsh-session: pnpm workspace link; @deepseek-ai/dsh-session: host type reference; @deepseek-ai/dsh-session-log-deepseek: pnpm workspace link; @deepseek-ai/dsh-session-title: host type reference; @deepseek-ai/dsh-session-title-first-prompt-llm: pnpm workspace link; @deepseek-ai/dsh-session-title-first-prompt-llm: host type reference; @deepseek-ai/dsh-user-questions: pnpm workspace link; @deepseek-ai/dsh-user-questions: host type reference; @deepseek-ai/dsh-agent: pnpm workspace link; @deepseek-ai/dsh-agent: host type reference; @deepseek-ai/dsh-plugin-package-inventory-deepseek: pnpm workspace link; @deepseek-ai/dsh-agent-default-model: pnpm workspace link; @deepseek-ai/dsh-agent-default-model: host type reference; @deepseek-ai/dsh-jobs-local: pnpm workspace link; @deepseek-ai/dsh-jobs-local: host type reference; @deepseek-ai/dsh-llm-retry: pnpm workspace link; @deepseek-ai/dsh-llm-retry: host type reference; @deepseek-ai/dsh-settings: pnpm workspace link; @deepseek-ai/dsh-settings: host type reference; @deepseek-ai/dsh-deepseek-account: pnpm workspace link; @deepseek-ai/dsh-deepseek-account: host type reference; @deepseek-ai/dsh-session-persistence-jsonl: pnpm workspace link; @deepseek-ai/dsh-session-persistence-jsonl: host type reference; @deepseek-ai/dsh-attachment-local: pnpm workspace link; @deepseek-ai/dsh-attachment-local: host type reference; @deepseek-ai/dsh-session-query-sqlite: pnpm workspace link; @deepseek-ai/dsh-session-query-sqlite: host type reference; @deepseek-ai/dsh-cli-account: pnpm workspace link; @deepseek-ai/dsh-cli-account: host type reference; @deepseek-ai/dsh-bash-sandbox: host type reference; @deepseek-ai/dsh-pwsh-sandbox: host type reference; @deepseek-ai/dsh-user-approval: pnpm workspace link; @deepseek-ai/dsh-user-approval: host type reference; @deepseek-ai/dsh-permission-presets: pnpm workspace link; @deepseek-ai/dsh-permission-presets: host type reference; @deepseek-ai/dsh-tool-jobs: pnpm workspace link; @deepseek-ai/dsh-tool-jobs: host type reference; @deepseek-ai/dsh-tool-fs: pnpm workspace link; @deepseek-ai/dsh-tool-fs: host type reference; @deepseek-ai/dsh-commands: pnpm workspace link; @deepseek-ai/dsh-commands: host type reference; @deepseek-ai/dsh-command-feedback: pnpm workspace link; @deepseek-ai/dsh-command-feedback: host type reference; @deepseek-ai/dsh-goal: pnpm workspace link; @deepseek-ai/dsh-goal: host type reference; @deepseek-ai/dsh-command-goal: pnpm workspace link; @deepseek-ai/dsh-command-goal: host type reference; @deepseek-ai/dsh-plan-mode: pnpm workspace link; @deepseek-ai/dsh-compaction-basic: pnpm workspace link; @deepseek-ai/dsh-compaction-basic: host type reference; @deepseek-ai/dsh-command-compact: pnpm workspace link; @deepseek-ai/dsh-command-compact: host type reference; @deepseek-ai/dsh-subagent: pnpm workspace link; @deepseek-ai/dsh-agent-team: pnpm workspace link; @deepseek-ai/dsh-agent-team: host type reference; @deepseek-ai/dsh-tool-agent-team: pnpm workspace link; @deepseek-ai/dsh-tool-agent-team: host type reference; @deepseek-ai/dsh-tool-subagent: pnpm workspace link; @deepseek-ai/dsh-tool-subagent: host type reference; @deepseek-ai/dsh-workflow-ptc: pnpm workspace link; @deepseek-ai/dsh-workflow-ptc: host type reference; @deepseek-ai/dsh-spill-local: pnpm workspace link; @deepseek-ai/dsh-spill-local: host type reference; @deepseek-ai/dsh-tool-goal: pnpm workspace link; @deepseek-ai/dsh-tool-goal: host type reference; @deepseek-ai/dsh-tool-executor-ptc: pnpm workspace link; @deepseek-ai/dsh-tool-executor-ptc: host type reference; @deepseek-ai/dsh-agent-loop: pnpm workspace link; @deepseek-ai/dsh-agent-loop: host type reference; @deepseek-ai/dsh-message-feedback: host type reference; @deepseek-ai/dsh-session-log-export: pnpm workspace link; @deepseek-ai/dsh-session-log-export: host type reference; @deepseek-ai/dsh-workspace: pnpm workspace link; @deepseek-ai/dsh-workspace: host type reference; @deepseek-ai/dsh-session-reference: pnpm workspace link; @deepseek-ai/dsh-host-plugin-inventory: pnpm workspace link; @deepseek-ai/dsh-host-plugin-inventory: host type reference; @deepseek-ai/dsh-api-session-controller: pnpm workspace link; @deepseek-ai/dsh-api-session-controller: host type reference; @deepseek-ai/dsh-tool-session-control: pnpm workspace link; @deepseek-ai/dsh-tool-session-control: host type reference; @deepseek-ai/dsh-api-terminal-controller: host type reference; @deepseek-ai/dsh-schedule: pnpm workspace link; @deepseek-ai/dsh-schedule: host type reference; @deepseek-ai/dsh-mcp-account: pnpm workspace link; @deepseek-ai/dsh-mcp-account: host type reference; @deepseek-ai/dsh-api-workspace-controller: pnpm workspace link; @deepseek-ai/dsh-api-workspace-controller: host type reference; @deepseek-ai/dsh-cordis-host-runner: pnpm workspace link; @deepseek-ai/dsh-cordis-host-runner: host type reference; @deepseek-ai/dsh-client-connection: pnpm workspace link; @deepseek-ai/dsh-client-connection: host type reference; @deepseek-ai/dsh-client-file-upload: pnpm workspace link; @deepseek-ai/dsh-client-file-upload: host type reference; @deepseek-ai/dsh-client-shortcuts: host type reference; @deepseek-ai/dsh-office-kit: pnpm workspace link; @deepseek-ai/dsh-office-kit: host type reference; @deepseek-ai/dsh-client-remote-connection: pnpm workspace link; @deepseek-ai/dsh-client-remote-connection: host type reference; @deepseek-ai/dsh-action-cards: pnpm workspace link; @deepseek-ai/dsh-action-cards: host type reference; @deepseek-ai/dsh-creation-recommendations: pnpm workspace link; @deepseek-ai/dsh-creation-recommendations: host type reference; @deepseek-ai/dsh-tool-schedule: pnpm workspace link; @deepseek-ai/dsh-tool-schedule: host type reference; @deepseek-ai/dsh-tool-office: pnpm workspace link; @deepseek-ai/dsh-tool-office: host type reference; @deepseek-ai/dsh-plugin-market: pnpm workspace link; @deepseek-ai/dsh-plugin-market: host type reference; @deepseek-ai/dsh-terminal: pnpm workspace link; @deepseek-ai/dsh-terminal: host type reference; @deepseek-ai/dsh-acp: pnpm workspace link; @deepseek-ai/dsh-acp: host type reference; @deepseek-ai/dsh-mcp-client: pnpm workspace link; @deepseek-ai/dsh-mcp-client: host type reference; @deepseek-ai/dsh-llm-pi-ai: pnpm workspace link; @deepseek-ai/dsh-llm-pi-ai: host type reference; @deepseek-ai/dsh-typert-protocol: pnpm workspace link; @deepseek-ai/dsh-typert-protocol: host type reference; @deepseek-ai/dsh-attachment: host type reference; @deepseek-ai/dsh-jobs: host type reference; @deepseek-ai/dsh-credentials: pnpm workspace link; @deepseek-ai/dsh-credentials: host type reference; @deepseek-ai/dsh-session-format-catalog: pnpm workspace link; @deepseek-ai/dsh-session-format-catalog: host type reference; @deepseek-ai/dsh-session-persistence: host type reference; @deepseek-ai/dsh-session-query: host type reference; @deepseek-ai/dsh-fs: host type reference; @deepseek-ai/dsh-anonymous-user-id: pnpm workspace link; @deepseek-ai/dsh-anonymous-user-id: host type reference; @deepseek-ai/dsh-client-ui-connector-account: host type reference; @deepseek-ai/dsh-bash-local: host type reference; @deepseek-ai/dsh-pwsh-local: host type reference; @deepseek-ai/dsh-spill: host type reference; @deepseek-ai/dsh-compaction: host type reference; @deepseek-ai/dsh-workflow: host type reference; @deepseek-ai/dsh-fs-local: pnpm workspace link; @deepseek-ai/dsh-fs-local: host type reference; @deepseek-ai/dsh-llm-deepseek: pnpm workspace link; @deepseek-ai/dsh-llm-deepseek: host type reference"
+    },
+    {
+      "path": "packages/util/chunked-list",
+      "reason": "@deepseek-ai/dsh-subagent: pnpm workspace link; @deepseek-ai/dsh-subagent: host type reference"
+    },
+    {
+      "path": "packages/util/code-language",
+      "reason": "@deepseek-ai/dsh-tool-fs: pnpm workspace link; @deepseek-ai/dsh-tool-fs: host type reference"
+    },
+    {
+      "path": "packages/util/crypto",
+      "reason": "@deepseek-ai/dsh-llm: pnpm workspace link; @deepseek-ai/dsh-llm: host type reference; @deepseek-ai/dsh-commands: pnpm workspace link; @deepseek-ai/dsh-commands: host type reference; @deepseek-ai/dsh-client-shortcuts: pnpm workspace link; @deepseek-ai/dsh-client-shortcuts: host type reference"
+    },
+    {
+      "path": "packages/util/deque",
+      "reason": "@deepseek-ai/dsh-api-gateway: pnpm workspace link; @deepseek-ai/dsh-api-gateway: host type reference; @deepseek-ai/dsh-api-session-controller: pnpm workspace link; @deepseek-ai/dsh-api-session-controller: host type reference; @deepseek-ai/dsh-api-terminal-controller: pnpm workspace link; @deepseek-ai/dsh-api-terminal-controller: host type reference; @deepseek-ai/dsh-api-workspace-files: pnpm workspace link; @deepseek-ai/dsh-api-workspace-files: host type reference; @deepseek-ai/dsh-api-workspace-controller: pnpm workspace link; @deepseek-ai/dsh-api-workspace-controller: host type reference; @deepseek-ai/dsh-api-remotes: pnpm workspace link; @deepseek-ai/dsh-api-remotes: host type reference"
+    },
+    {
+      "path": "packages/util/error",
+      "reason": "@deepseek-ai/dsh-plugin-manager: pnpm workspace link; @deepseek-ai/dsh-plugin-manager: host type reference; @deepseek-ai/dsh-llm: pnpm workspace link; @deepseek-ai/dsh-llm: host type reference; @deepseek-ai/dsh-authorization: pnpm workspace link; @deepseek-ai/dsh-authorization: host type reference; @deepseek-ai/dsh-deepseek-auth: pnpm workspace link; @deepseek-ai/dsh-deepseek-auth: host type reference; @deepseek-ai/dsh-working-directory: pnpm workspace link; @deepseek-ai/dsh-working-directory: host type reference; @deepseek-ai/dsh-shell-env: pnpm workspace link; @deepseek-ai/dsh-shell-env: host type reference; @deepseek-ai/dsh-tool-fs: pnpm workspace link; @deepseek-ai/dsh-tool-fs: host type reference; @deepseek-ai/dsh-skill: pnpm workspace link; @deepseek-ai/dsh-skill: host type reference; @deepseek-ai/dsh-plan-mode: pnpm workspace link; @deepseek-ai/dsh-plan-mode: host type reference; @deepseek-ai/dsh-web: pnpm workspace link; @deepseek-ai/dsh-web: host type reference; @deepseek-ai/dsh-tool-session-control: pnpm workspace link; @deepseek-ai/dsh-tool-session-control: host type reference; @deepseek-ai/dsh-cordis-host-runner: pnpm workspace link; @deepseek-ai/dsh-cordis-host-runner: host type reference; @deepseek-ai/dsh-tool-workspace-dependencies: pnpm workspace link; @deepseek-ai/dsh-tool-workspace-dependencies: host type reference; @deepseek-ai/dsh-client-remote-connection: pnpm workspace link; @deepseek-ai/dsh-client-remote-connection: host type reference; @deepseek-ai/dsh-tool-office: pnpm workspace link; @deepseek-ai/dsh-tool-office: host type reference; @deepseek-ai/dsh-plugin-market: pnpm workspace link; @deepseek-ai/dsh-plugin-market: host type reference; @deepseek-ai/dsh-terminal: pnpm workspace link; @deepseek-ai/dsh-terminal: host type reference; @deepseek-ai/dsh-mcp-client: pnpm workspace link; @deepseek-ai/dsh-mcp-client: host type reference; @deepseek-ai/dsh-atomic-write: pnpm workspace link; @deepseek-ai/dsh-atomic-write: host type reference; @deepseek-ai/dsh-subprocess: pnpm workspace link; @deepseek-ai/dsh-subprocess: host type reference; @deepseek-ai/dsh-typert-protocol: pnpm workspace link; @deepseek-ai/dsh-typert-protocol: host type reference; @deepseek-ai/dsh-sandbox: pnpm workspace link; @deepseek-ai/dsh-sandbox: host type reference; @deepseek-ai/dsh-attachment: pnpm workspace link; @deepseek-ai/dsh-attachment: host type reference; @deepseek-ai/dsh-jobs: pnpm workspace link; @deepseek-ai/dsh-jobs: host type reference; @deepseek-ai/dsh-win32-process: pnpm workspace link; @deepseek-ai/dsh-win32-process: host type reference; @deepseek-ai/dsh-ptc-runtime: pnpm workspace link; @deepseek-ai/dsh-ptc-runtime: host type reference"
+    },
+    {
+      "path": "packages/util/home-paths",
+      "reason": "@deepseek-ai/dsh-credentials-local: pnpm workspace link; @deepseek-ai/dsh-credentials-local: host type reference; @deepseek-ai/dsh-attachment-local: pnpm workspace link; @deepseek-ai/dsh-attachment-local: host type reference; @deepseek-ai/dsh-shell-env: pnpm workspace link; @deepseek-ai/dsh-shell-env: host type reference; @deepseek-ai/dsh-agent-instructions: pnpm workspace link; @deepseek-ai/dsh-agent-instructions: host type reference; @deepseek-ai/dsh-skill-filesystem: pnpm workspace link; @deepseek-ai/dsh-skill-filesystem: host type reference; @deepseek-ai/dsh-upstream-skills: pnpm workspace link; @deepseek-ai/dsh-upstream-skills: host type reference; @deepseek-ai/dsh-office-kit: pnpm workspace link; @deepseek-ai/dsh-office-kit: host type reference; @deepseek-ai/dsh-workspace-changes: host type reference; @deepseek-ai/dsh-app-boot: pnpm workspace link; @deepseek-ai/dsh-app-boot: host type reference; @deepseek-ai/dsh-anonymous-user-id: pnpm workspace link; @deepseek-ai/dsh-anonymous-user-id: host type reference; @deepseek-ai/dsh-llm-deepseek: pnpm workspace link; @deepseek-ai/dsh-llm-deepseek: host type reference"
+    },
+    {
+      "path": "packages/util/http-proxy",
+      "reason": "launcher / metadata compiler; @deepseek-ai/dsh-workflow-ptc: host type reference; @deepseek-ai/dsh-web-search-deepseek: host type reference; @deepseek-ai/dsh-web-deepseek-api: host type reference; @deepseek-ai/dsh-mcp-client: host type reference; @deepseek-ai/dsh-llm-pi-ai: host type reference; @deepseek-ai/dsh-subprocess: pnpm workspace link; @deepseek-ai/dsh-subprocess: host type reference; @deepseek-ai/dsh-llm-deepseek: host type reference; @deepseek-ai/dsh-loader-smoke: pnpm workspace link; @deepseek-ai/dsh-loader-smoke: host type reference"
+    },
+    {
+      "path": "packages/util/launch-environment",
+      "reason": "launcher / metadata compiler; @deepseek-ai/dsh-deepseek-auth: pnpm workspace link; @deepseek-ai/dsh-deepseek-auth: host type reference; @deepseek-ai/dsh-credentials-local: pnpm workspace link; @deepseek-ai/dsh-credentials-local: host type reference; @deepseek-ai/dsh-web-search-deepseek: pnpm workspace link; @deepseek-ai/dsh-web-search-deepseek: host type reference; @deepseek-ai/dsh-llm-deepseek-api-key: pnpm workspace link; @deepseek-ai/dsh-llm-deepseek-api-key: host type reference; @deepseek-ai/dsh-llm-deepseek-account: pnpm workspace link; @deepseek-ai/dsh-llm-deepseek-account: host type reference; @deepseek-ai/dsh-host-open-in-app: pnpm workspace link; @deepseek-ai/dsh-host-open-in-app: host type reference; @deepseek-ai/dsh-web-app: pnpm workspace link; @deepseek-ai/dsh-web-app: host type reference; @deepseek-ai/dsh-llm-pi-ai: pnpm workspace link; @deepseek-ai/dsh-llm-pi-ai: host type reference; @deepseek-ai/dsh-app-boot: pnpm workspace link; @deepseek-ai/dsh-app-boot: host type reference; @deepseek-ai/dsh-subprocess: host type reference; @deepseek-ai/dsh-credentials: pnpm workspace link; @deepseek-ai/dsh-credentials: host type reference; @deepseek-ai/dsh-llm-deepseek: pnpm workspace link; @deepseek-ai/dsh-llm-deepseek: host type reference"
+    },
+    {
+      "path": "packages/util/lazy-require",
+      "reason": "@deepseek-ai/dsh-attachment-local: pnpm workspace link; @deepseek-ai/dsh-attachment-local: host type reference; @deepseek-ai/dsh-subprocess-local: pnpm workspace link; @deepseek-ai/dsh-subprocess-local: host type reference; @deepseek-ai/dsh-api-terminal-controller: pnpm workspace link; @deepseek-ai/dsh-api-terminal-controller: host type reference; @deepseek-ai/dsh-terminal-bash: pnpm workspace link; @deepseek-ai/dsh-terminal-bash: host type reference; @deepseek-ai/dsh-win32-process: pnpm workspace link; @deepseek-ai/dsh-win32-process: host type reference; @deepseek-ai/dsh-sandbox-windows-acl: pnpm workspace link; @deepseek-ai/dsh-sandbox-windows-acl: host type reference"
+    },
+    {
+      "path": "packages/util/native-command",
+      "reason": "@deepseek-ai/dsh-host-open-in-app: pnpm workspace link; @deepseek-ai/dsh-host-open-in-app: host type reference; @deepseek-ai/dsh-api-session-controller: pnpm workspace link; @deepseek-ai/dsh-api-session-controller: host type reference; @deepseek-ai/dsh-api-settings-controller: pnpm workspace link; @deepseek-ai/dsh-api-settings-controller: host type reference; @deepseek-ai/dsh-api-workspace-controller: pnpm workspace link; @deepseek-ai/dsh-api-workspace-controller: host type reference; @deepseek-ai/dsh-app-boot: pnpm workspace link; @deepseek-ai/dsh-app-boot: host type reference"
+    },
+    {
+      "path": "packages/util/official-bundles",
+      "reason": "@deepseek-ai/dsh-plugin-manager: pnpm workspace link; @deepseek-ai/dsh-plugin-manager: host type reference; @deepseek-ai/dsh-app-boot: pnpm workspace link; @deepseek-ai/dsh-app-boot: host type reference"
+    },
+    {
+      "path": "packages/util/output-retention",
+      "reason": "@deepseek-ai/dsh-tool-jobs: pnpm workspace link; @deepseek-ai/dsh-tool-jobs: host type reference; @deepseek-ai/dsh-tool-fs-search: pnpm workspace link; @deepseek-ai/dsh-tool-fs-search: host type reference; @deepseek-ai/dsh-spill-policy: pnpm workspace link; @deepseek-ai/dsh-spill-policy: host type reference; @deepseek-ai/dsh-tool-web: pnpm workspace link; @deepseek-ai/dsh-tool-web: host type reference; @deepseek-ai/dsh-session-reference: pnpm workspace link; @deepseek-ai/dsh-session-reference: host type reference; @deepseek-ai/dsh-tool-bash-persistent: pnpm workspace link; @deepseek-ai/dsh-tool-bash-persistent: host type reference; @deepseek-ai/dsh-tool-pwsh-persistent: pnpm workspace link; @deepseek-ai/dsh-tool-pwsh-persistent: host type reference; @deepseek-ai/dsh-mcp-client: pnpm workspace link; @deepseek-ai/dsh-mcp-client: host type reference"
+    },
+    {
+      "path": "packages/util/package-manifest",
+      "reason": "@deepseek-ai/dsh-plugin-manager: host type reference; @deepseek-ai/dsh-llm: host type reference; @deepseek-ai/dsh-cli-account: host type reference; @deepseek-ai/dsh-web: pnpm workspace link; @deepseek-ai/dsh-web: host type reference; @deepseek-ai/dsh-host-plugin-inventory: host type reference; @deepseek-ai/dsh-mcp-account: host type reference; @deepseek-ai/dsh-plugin-recommendations: host type reference; @deepseek-ai/dsh-plugin-market: pnpm workspace link; @deepseek-ai/dsh-plugin-market: host type reference; @deepseek-ai/dsh-app-boot: pnpm workspace link; @deepseek-ai/dsh-app-boot: host type reference; @deepseek-ai/dsh-official-bundles: pnpm workspace link; @deepseek-ai/dsh-official-bundles: host type reference; @deepseek-ai/dsh-client-ui-connector-account: host type reference; @deepseek-ai/dsh-util-text-search: pnpm workspace link; @deepseek-ai/dsh-util-text-search: host type reference; @deepseek-ai/dsh-plugin-market-index: pnpm workspace link; @deepseek-ai/dsh-plugin-market-index: host type reference"
+    },
+    {
+      "path": "packages/util/plugin-detail",
+      "reason": "@deepseek-ai/dsh-plugin-manager: pnpm workspace link; @deepseek-ai/dsh-plugin-manager: host type reference; @deepseek-ai/dsh-plugin-market: pnpm workspace link; @deepseek-ai/dsh-plugin-market: host type reference"
+    },
+    {
+      "path": "packages/util/plugin-market-index",
+      "reason": "@deepseek-ai/dsh-plugin-market: pnpm workspace link; @deepseek-ai/dsh-plugin-market: host type reference"
+    },
+    {
+      "path": "packages/util/ripgrep",
+      "reason": "@deepseek-ai/dsh-tool-fs-search: pnpm workspace link; @deepseek-ai/dsh-tool-fs-search: host type reference; @deepseek-ai/dsh-api-workspace-files: pnpm workspace link; @deepseek-ai/dsh-api-workspace-files: host type reference"
+    },
+    {
+      "path": "packages/util/text-search",
+      "reason": "@deepseek-ai/dsh-session-reference: pnpm workspace link; @deepseek-ai/dsh-session-reference: host type reference"
+    },
+    {
+      "path": "packages/util/time",
+      "reason": "@deepseek-ai/dsh-subagent: pnpm workspace link; @deepseek-ai/dsh-subagent: host type reference; @deepseek-ai/dsh-api-session-controller: pnpm workspace link; @deepseek-ai/dsh-api-session-controller: host type reference; @deepseek-ai/dsh-schedule: pnpm workspace link; @deepseek-ai/dsh-schedule: host type reference; @deepseek-ai/dsh-time-context: pnpm workspace link; @deepseek-ai/dsh-time-context: host type reference; @deepseek-ai/dsh-session-format-v0-to-v1: pnpm workspace link; @deepseek-ai/dsh-session-format-v0-to-v1: host type reference"
+    },
+    {
+      "path": "packages/util/timeout",
+      "reason": "@deepseek-ai/dsh-plugin-manager: pnpm workspace link; @deepseek-ai/dsh-plugin-manager: host type reference; @deepseek-ai/dsh-llm: pnpm workspace link; @deepseek-ai/dsh-llm: host type reference; @deepseek-ai/dsh-api-gateway: pnpm workspace link; @deepseek-ai/dsh-api-gateway: host type reference; @deepseek-ai/dsh-jobs-local: pnpm workspace link; @deepseek-ai/dsh-jobs-local: host type reference; @deepseek-ai/dsh-llm-retry: pnpm workspace link; @deepseek-ai/dsh-llm-retry: host type reference; @deepseek-ai/dsh-subprocess-local: pnpm workspace link; @deepseek-ai/dsh-subprocess-local: host type reference; @deepseek-ai/dsh-cli-account: pnpm workspace link; @deepseek-ai/dsh-cli-account: host type reference; @deepseek-ai/dsh-tool-fs-search: pnpm workspace link; @deepseek-ai/dsh-tool-fs-search: host type reference; @deepseek-ai/dsh-upstream-skills: pnpm workspace link; @deepseek-ai/dsh-upstream-skills: host type reference; @deepseek-ai/dsh-ptc-runtime-node: pnpm workspace link; @deepseek-ai/dsh-ptc-runtime-node: host type reference; @deepseek-ai/dsh-tool-call-timeout-policy: pnpm workspace link; @deepseek-ai/dsh-tool-call-timeout-policy: host type reference; @deepseek-ai/dsh-web-fetch-http: pnpm workspace link; @deepseek-ai/dsh-web-fetch-http: host type reference; @deepseek-ai/dsh-api-session-controller: pnpm workspace link; @deepseek-ai/dsh-api-session-controller: host type reference; @deepseek-ai/dsh-mcp-manager: pnpm workspace link; @deepseek-ai/dsh-mcp-manager: host type reference; @deepseek-ai/dsh-plugin-market: pnpm workspace link; @deepseek-ai/dsh-plugin-market: host type reference; @deepseek-ai/dsh-tool-bash-persistent: pnpm workspace link; @deepseek-ai/dsh-tool-bash-persistent: host type reference; @deepseek-ai/dsh-tool-pwsh-persistent: pnpm workspace link; @deepseek-ai/dsh-tool-pwsh-persistent: host type reference; @deepseek-ai/dsh-mcp-client: pnpm workspace link; @deepseek-ai/dsh-mcp-client: host type reference; @deepseek-ai/dsh-llm-pi-ai: pnpm workspace link; @deepseek-ai/dsh-llm-pi-ai: host type reference; @deepseek-ai/dsh-session-title-llm: pnpm workspace link; @deepseek-ai/dsh-session-title-llm: host type reference; @deepseek-ai/dsh-session-persistence: pnpm workspace link; @deepseek-ai/dsh-bash-local: pnpm workspace link; @deepseek-ai/dsh-bash-local: host type reference; @deepseek-ai/dsh-pwsh-local: pnpm workspace link; @deepseek-ai/dsh-pwsh-local: host type reference; @deepseek-ai/dsh-llm-deepseek: pnpm workspace link; @deepseek-ai/dsh-llm-deepseek: host type reference"
+    },
+    {
+      "path": "packages/util/values",
+      "reason": "@deepseek-ai/dsh-plugin-manager: pnpm workspace link; @deepseek-ai/dsh-plugin-manager: host type reference; @deepseek-ai/dsh-llm: pnpm workspace link; @deepseek-ai/dsh-llm: host type reference; @deepseek-ai/dsh-session: pnpm workspace link; @deepseek-ai/dsh-session: host type reference; @deepseek-ai/dsh-session-log-deepseek: pnpm workspace link; @deepseek-ai/dsh-session-title: pnpm workspace link; @deepseek-ai/dsh-session-title-first-prompt-llm: pnpm workspace link; @deepseek-ai/dsh-session-title-first-prompt-llm: host type reference; @deepseek-ai/dsh-agent: pnpm workspace link; @deepseek-ai/dsh-settings: pnpm workspace link; @deepseek-ai/dsh-settings: host type reference; @deepseek-ai/dsh-deepseek-account: pnpm workspace link; @deepseek-ai/dsh-deepseek-account: host type reference; @deepseek-ai/dsh-session-projection-cache: pnpm workspace link; @deepseek-ai/dsh-sandbox-local: pnpm workspace link; @deepseek-ai/dsh-tool-fs: pnpm workspace link; @deepseek-ai/dsh-tool-fs: host type reference; @deepseek-ai/dsh-agent-instructions: pnpm workspace link; @deepseek-ai/dsh-skill: pnpm workspace link; @deepseek-ai/dsh-skill: host type reference; @deepseek-ai/dsh-token-meter: pnpm workspace link; @deepseek-ai/dsh-compaction-basic: pnpm workspace link; @deepseek-ai/dsh-subagent: pnpm workspace link; @deepseek-ai/dsh-tool-subagent-control: pnpm workspace link; @deepseek-ai/dsh-ptc-runtime-node: pnpm workspace link; @deepseek-ai/dsh-workflow-ptc: pnpm workspace link; @deepseek-ai/dsh-compaction-tool-result-pruner: pnpm workspace link; @deepseek-ai/dsh-compaction-image-offload: pnpm workspace link; @deepseek-ai/dsh-compaction-image-offload: host type reference; @deepseek-ai/dsh-tool-web: pnpm workspace link; @deepseek-ai/dsh-mcp-resources: pnpm workspace link; @deepseek-ai/dsh-mcp-resources: host type reference; @deepseek-ai/dsh-tools: pnpm workspace link; @deepseek-ai/dsh-tool-executor-ptc: pnpm workspace link; @deepseek-ai/dsh-tool-executor-ptc: host type reference; @deepseek-ai/dsh-agent-loop: pnpm workspace link; @deepseek-ai/dsh-session-reference: pnpm workspace link; @deepseek-ai/dsh-api-session-controller: pnpm workspace link; @deepseek-ai/dsh-api-session-controller: host type reference; @deepseek-ai/dsh-api-terminal-controller: pnpm workspace link; @deepseek-ai/dsh-api-terminal-controller: host type reference; @deepseek-ai/dsh-mcp-manager: pnpm workspace link; @deepseek-ai/dsh-mcp-manager: host type reference; @deepseek-ai/dsh-mcp-account: pnpm workspace link; @deepseek-ai/dsh-mcp-account: host type reference; @deepseek-ai/dsh-cordis-host-runner: pnpm workspace link; @deepseek-ai/dsh-tool-cordis: host type reference; @deepseek-ai/dsh-api-remotes: pnpm workspace link; @deepseek-ai/dsh-api-remotes: host type reference; @deepseek-ai/dsh-client-shortcuts: pnpm workspace link; @deepseek-ai/dsh-client-shortcuts: host type reference; @deepseek-ai/dsh-action-cards: host type reference; @deepseek-ai/dsh-time-context: pnpm workspace link; @deepseek-ai/dsh-plugin-market: pnpm workspace link; @deepseek-ai/dsh-plugin-market: host type reference; @deepseek-ai/dsh-mcp-client: pnpm workspace link; @deepseek-ai/dsh-mcp-client: host type reference; @deepseek-ai/dsh-llm-pi-ai: pnpm workspace link; @deepseek-ai/dsh-sandbox: pnpm workspace link; @deepseek-ai/dsh-session-title-llm: pnpm workspace link; @deepseek-ai/dsh-session-format: pnpm workspace link; @deepseek-ai/dsh-session-format: host type reference; @deepseek-ai/dsh-session-persistence: pnpm workspace link; @deepseek-ai/dsh-llm-deepseek: pnpm workspace link; @deepseek-ai/dsh-session-format-v0-to-v1: pnpm workspace link; @deepseek-ai/dsh-session-format-v0-to-v1: host type reference; @deepseek-ai/dsh-session-format-v1-to-v2: pnpm workspace link; @deepseek-ai/dsh-session-format-v1-to-v2: host type reference"
+    },
+    {
+      "path": "packages/util/workspace-path",
+      "reason": "@deepseek-ai/dsh-api-session-controller: pnpm workspace link"
+    },
+    {
+      "path": "packages/web/tool-web",
+      "reason": "host YAML composition; @deepseek-ai/dsh-web-app: pnpm workspace link; @deepseek-ai/dsh-base: pnpm workspace link"
+    },
+    {
+      "path": "packages/web/web",
+      "reason": "host YAML composition; @deepseek-ai/dsh-web-search-deepseek: pnpm workspace link; @deepseek-ai/dsh-web-search-deepseek: host type reference; @deepseek-ai/dsh-web-deepseek-api: pnpm workspace link; @deepseek-ai/dsh-web-deepseek-api: host type reference; @deepseek-ai/dsh-web-fetch-http: pnpm workspace link; @deepseek-ai/dsh-web-fetch-http: host type reference; @deepseek-ai/dsh-tool-web: pnpm workspace link; @deepseek-ai/dsh-tool-web: host type reference; @deepseek-ai/dsh-api-remotes: host type reference; @deepseek-ai/dsh-base: pnpm workspace link"
+    },
+    {
+      "path": "packages/web/web-deepseek-api",
+      "reason": "host YAML composition; @deepseek-ai/dsh-base: pnpm workspace link"
+    },
+    {
+      "path": "packages/web/web-fetch-http",
+      "reason": "host YAML composition; @deepseek-ai/dsh-base: pnpm workspace link"
+    },
+    {
+      "path": "packages/web/web-search-deepseek",
+      "reason": "host YAML composition; @deepseek-ai/dsh-base: pnpm workspace link"
+    },
+    {
+      "path": "packages/workflow/tool-workflow",
+      "reason": "host YAML composition; @deepseek-ai/dsh-web-app: pnpm workspace link; @deepseek-ai/dsh-base: pnpm workspace link"
+    },
+    {
+      "path": "packages/workflow/workflow",
+      "reason": "@deepseek-ai/dsh-workflow-ptc: pnpm workspace link; @deepseek-ai/dsh-workflow-ptc: host type reference; @deepseek-ai/dsh-tool-workflow: pnpm workspace link; @deepseek-ai/dsh-tool-workflow: host type reference"
+    },
+    {
+      "path": "packages/workflow/workflow-ptc",
+      "reason": "host YAML composition; @deepseek-ai/dsh-web-app: pnpm workspace link; @deepseek-ai/dsh-base: pnpm workspace link"
+    },
+    {
+      "path": "packages/workspace/workspace",
+      "reason": "host YAML composition; @deepseek-ai/dsh-agent: pnpm workspace link; @deepseek-ai/dsh-agent: host type reference; @deepseek-ai/dsh-subagent: pnpm workspace link; @deepseek-ai/dsh-subagent: host type reference; @deepseek-ai/dsh-api-session-controller: pnpm workspace link; @deepseek-ai/dsh-api-session-controller: host type reference; @deepseek-ai/dsh-tool-session-control: pnpm workspace link; @deepseek-ai/dsh-tool-session-control: host type reference; @deepseek-ai/dsh-schedule: pnpm workspace link; @deepseek-ai/dsh-schedule: host type reference; @deepseek-ai/dsh-api-workspace-controller: pnpm workspace link; @deepseek-ai/dsh-api-workspace-controller: host type reference; @deepseek-ai/dsh-web-app: pnpm workspace link; @deepseek-ai/dsh-jobs: pnpm workspace link; @deepseek-ai/dsh-jobs: host type reference"
+    },
+    {
+      "path": "patches/@botiverse__oar@0.67.0.patch",
+      "reason": "Патч внешней зависимости из pnpm-workspace.yaml"
+    },
+    {
+      "path": "patches/@earendil-works__pi-ai@1.3.0.patch",
+      "reason": "Патч внешней зависимости из pnpm-workspace.yaml"
+    },
+    {
+      "path": "patches/@electron__osx-sign@1.3.3.patch",
+      "reason": "Патч внешней зависимости из pnpm-workspace.yaml"
+    },
+    {
+      "path": "patches/@fortune-sheet__core@1.0.4.patch",
+      "reason": "Патч внешней зависимости из pnpm-workspace.yaml"
+    },
+    {
+      "path": "patches/@fortune-sheet__react@1.0.4.patch",
+      "reason": "Патч внешней зависимости из pnpm-workspace.yaml"
+    },
+    {
+      "path": "patches/@yao-pkg__pkg@6.21.0.patch",
+      "reason": "Патч внешней зависимости из pnpm-workspace.yaml"
+    },
+    {
+      "path": "patches/app-builder-lib@26.17.0.patch",
+      "reason": "Патч внешней зависимости из pnpm-workspace.yaml"
+    },
+    {
+      "path": "patches/exceljs@4.4.0.patch",
+      "reason": "Патч внешней зависимости из pnpm-workspace.yaml"
+    },
+    {
+      "path": "patches/lexical@0.49.0.patch",
+      "reason": "Патч внешней зависимости из pnpm-workspace.yaml"
+    },
+    {
+      "path": "patches/mdast-util-gfm-autolink-literal@2.0.1.patch",
+      "reason": "Патч внешней зависимости из pnpm-workspace.yaml"
+    },
+    {
+      "path": "patches/micromark-extension-gfm-autolink-literal@2.1.0.patch",
+      "reason": "Патч внешней зависимости из pnpm-workspace.yaml"
+    },
+    {
+      "path": "patches/node-pty@1.2.0-beta.15.patch",
+      "reason": "Патч внешней зависимости из pnpm-workspace.yaml"
+    },
+    {
+      "path": "pnpm-workspace.yaml",
+      "reason": "Опись workspace и патчей внешних пакетов"
+    },
+    {
+      "path": "tsconfig.base.json",
+      "reason": "Конфигурация TypeScript для host runtime"
+    },
+    {
+      "path": "vendor/cordis",
+      "reason": "@deepseek-ai/dsh-plugin-manager: pnpm workspace link; @deepseek-ai/dsh-plugin-manager: host type reference; @deepseek-ai/cordis-plugin-timer: pnpm workspace link; @deepseek-ai/cordis-plugin-timer: host type reference; @deepseek-ai/dsh-hmr: pnpm workspace link; @deepseek-ai/dsh-hmr: host type reference; @deepseek-ai/dsh-llm: pnpm workspace link; @deepseek-ai/dsh-llm: host type reference; @deepseek-ai/dsh-deepseek-llm-api-extensions: pnpm workspace link; @deepseek-ai/dsh-deepseek-llm-api-extensions: host type reference; @deepseek-ai/dsh-session: pnpm workspace link; @deepseek-ai/dsh-session: host type reference; @deepseek-ai/dsh-session-log-deepseek: pnpm workspace link; @deepseek-ai/dsh-session-log-deepseek: host type reference; @deepseek-ai/dsh-typert-registry: pnpm workspace link; @deepseek-ai/dsh-typert-registry: host type reference; @deepseek-ai/dsh-typert-loader: pnpm workspace link; @deepseek-ai/dsh-typert-loader: host type reference; @deepseek-ai/dsh-api-gateway: pnpm workspace link; @deepseek-ai/dsh-api-gateway: host type reference; @deepseek-ai/dsh-api-remote-access: pnpm workspace link; @deepseek-ai/dsh-api-remote-access: host type reference; @deepseek-ai/dsh-session-title: pnpm workspace link; @deepseek-ai/dsh-session-title: host type reference; @deepseek-ai/dsh-session-title-first-prompt-llm: pnpm workspace link; @deepseek-ai/dsh-session-title-first-prompt-llm: host type reference; @deepseek-ai/dsh-user-questions: pnpm workspace link; @deepseek-ai/dsh-user-questions: host type reference; @deepseek-ai/dsh-agent: pnpm workspace link; @deepseek-ai/dsh-agent: host type reference; @deepseek-ai/dsh-plugin-package-inventory-deepseek: pnpm workspace link; @deepseek-ai/dsh-plugin-package-inventory-deepseek: host type reference; @deepseek-ai/dsh-agent-default-model: pnpm workspace link; @deepseek-ai/dsh-agent-default-model: host type reference; @deepseek-ai/dsh-jobs-local: pnpm workspace link; @deepseek-ai/dsh-jobs-local: host type reference; @deepseek-ai/dsh-llm-retry: pnpm workspace link; @deepseek-ai/dsh-llm-retry: host type reference; @deepseek-ai/dsh-config-editor: pnpm workspace link; @deepseek-ai/dsh-config-editor: host type reference; @deepseek-ai/dsh-settings: pnpm workspace link; @deepseek-ai/dsh-settings: host type reference; @deepseek-ai/dsh-authorization: pnpm workspace link; @deepseek-ai/dsh-authorization: host type reference; @deepseek-ai/dsh-deepseek-account: pnpm workspace link; @deepseek-ai/dsh-deepseek-account: host type reference; @deepseek-ai/dsh-deepseek-auth: pnpm workspace link; @deepseek-ai/dsh-deepseek-auth: host type reference; @deepseek-ai/dsh-credentials-local: pnpm workspace link; @deepseek-ai/dsh-credentials-local: host type reference; @deepseek-ai/dsh-session-persistence-jsonl: pnpm workspace link; @deepseek-ai/dsh-session-persistence-jsonl: host type reference; @deepseek-ai/dsh-attachment-local: pnpm workspace link; @deepseek-ai/dsh-attachment-local: host type reference; @deepseek-ai/dsh-session-query-sqlite: pnpm workspace link; @deepseek-ai/dsh-session-query-sqlite: host type reference; @deepseek-ai/dsh-working-directory: pnpm workspace link; @deepseek-ai/dsh-working-directory: host type reference; @deepseek-ai/dsh-session-projection: pnpm workspace link; @deepseek-ai/dsh-session-projection: host type reference; @deepseek-ai/dsh-storage: pnpm workspace link; @deepseek-ai/dsh-storage: host type reference; @deepseek-ai/dsh-storage-json: pnpm workspace link; @deepseek-ai/dsh-storage-json: host type reference; @deepseek-ai/dsh-storage-domain: pnpm workspace link; @deepseek-ai/dsh-storage-domain: host type reference; @deepseek-ai/dsh-session-projection-cache: pnpm workspace link; @deepseek-ai/dsh-session-projection-cache: host type reference; @deepseek-ai/dsh-otel: pnpm workspace link; @deepseek-ai/dsh-otel: host type reference; @deepseek-ai/dsh-session-telemetry-otel: pnpm workspace link; @deepseek-ai/dsh-session-telemetry-otel: host type reference; @deepseek-ai/dsh-subprocess-local: pnpm workspace link; @deepseek-ai/dsh-subprocess-local: host type reference; @deepseek-ai/dsh-cli-account: pnpm workspace link; @deepseek-ai/dsh-cli-account: host type reference; @deepseek-ai/dsh-sandbox-local: pnpm workspace link; @deepseek-ai/dsh-sandbox-local: host type reference; @deepseek-ai/dsh-sandbox-policy: pnpm workspace link; @deepseek-ai/dsh-sandbox-policy: host type reference; @deepseek-ai/dsh-bash-sandbox: pnpm workspace link; @deepseek-ai/dsh-bash-sandbox: host type reference; @deepseek-ai/dsh-pwsh-sandbox: pnpm workspace link; @deepseek-ai/dsh-pwsh-sandbox: host type reference; @deepseek-ai/dsh-user-approval: pnpm workspace link; @deepseek-ai/dsh-user-approval: host type reference; @deepseek-ai/dsh-permission-presets: pnpm workspace link; @deepseek-ai/dsh-permission-presets: host type reference; @deepseek-ai/dsh-shell-env: pnpm workspace link; @deepseek-ai/dsh-shell-env: host type reference; @deepseek-ai/dsh-tool-bash: pnpm workspace link; @deepseek-ai/dsh-tool-bash: host type reference; @deepseek-ai/dsh-tool-pwsh: pnpm workspace link; @deepseek-ai/dsh-tool-pwsh: host type reference; @deepseek-ai/dsh-tool-jobs: pnpm workspace link; @deepseek-ai/dsh-tool-jobs: host type reference; @deepseek-ai/dsh-fs-observation-policy: pnpm workspace link; @deepseek-ai/dsh-fs-observation-policy: host type reference; @deepseek-ai/dsh-tool-fs: pnpm workspace link; @deepseek-ai/dsh-tool-fs: host type reference; @deepseek-ai/dsh-tool-fs-search: pnpm workspace link; @deepseek-ai/dsh-tool-fs-search: host type reference; @deepseek-ai/dsh-agent-instructions: pnpm workspace link; @deepseek-ai/dsh-agent-instructions: host type reference; @deepseek-ai/dsh-skill: pnpm workspace link; @deepseek-ai/dsh-skill: host type reference; @deepseek-ai/dsh-skill-filesystem: pnpm workspace link; @deepseek-ai/dsh-skill-filesystem: host type reference; @deepseek-ai/dsh-tool-skill: pnpm workspace link; @deepseek-ai/dsh-tool-skill: host type reference; @deepseek-ai/dsh-upstream-skills: pnpm workspace link; @deepseek-ai/dsh-upstream-skills: host type reference; @deepseek-ai/dsh-commands: pnpm workspace link; @deepseek-ai/dsh-commands: host type reference; @deepseek-ai/dsh-command-feedback: pnpm workspace link; @deepseek-ai/dsh-command-feedback: host type reference; @deepseek-ai/dsh-goal: pnpm workspace link; @deepseek-ai/dsh-goal: host type reference; @deepseek-ai/dsh-goal-round-driver: pnpm workspace link; @deepseek-ai/dsh-goal-round-driver: host type reference; @deepseek-ai/dsh-command-goal: pnpm workspace link; @deepseek-ai/dsh-command-goal: host type reference; @deepseek-ai/dsh-plan-mode: pnpm workspace link; @deepseek-ai/dsh-plan-mode: host type reference; @deepseek-ai/dsh-token-meter: pnpm workspace link; @deepseek-ai/dsh-token-meter: host type reference; @deepseek-ai/dsh-compaction-basic: pnpm workspace link; @deepseek-ai/dsh-compaction-basic: host type reference; @deepseek-ai/dsh-command-compact: pnpm workspace link; @deepseek-ai/dsh-command-compact: host type reference; @deepseek-ai/dsh-subagent: pnpm workspace link; @deepseek-ai/dsh-subagent: host type reference; @deepseek-ai/dsh-agent-team: pnpm workspace link; @deepseek-ai/dsh-agent-team: host type reference; @deepseek-ai/dsh-tool-agent-team: pnpm workspace link; @deepseek-ai/dsh-tool-agent-team: host type reference; @deepseek-ai/dsh-subagent-spawn-in-process: pnpm workspace link; @deepseek-ai/dsh-subagent-spawn-in-process: host type reference; @deepseek-ai/dsh-subagent-fork-in-process: pnpm workspace link; @deepseek-ai/dsh-subagent-fork-in-process: host type reference; @deepseek-ai/dsh-tool-subagent-control: pnpm workspace link; @deepseek-ai/dsh-tool-subagent-control: host type reference; @deepseek-ai/dsh-tool-subagent: pnpm workspace link; @deepseek-ai/dsh-tool-subagent: host type reference; @deepseek-ai/dsh-ptc-runtime-node: pnpm workspace link; @deepseek-ai/dsh-ptc-runtime-node: host type reference; @deepseek-ai/dsh-workflow-ptc: pnpm workspace link; @deepseek-ai/dsh-workflow-ptc: host type reference; @deepseek-ai/dsh-tool-workflow: pnpm workspace link; @deepseek-ai/dsh-tool-workflow: host type reference; @deepseek-ai/dsh-tool-call-timeout-policy: pnpm workspace link; @deepseek-ai/dsh-tool-call-timeout-policy: host type reference; @deepseek-ai/dsh-spill-local: pnpm workspace link; @deepseek-ai/dsh-spill-local: host type reference; @deepseek-ai/dsh-spill-policy: pnpm workspace link; @deepseek-ai/dsh-spill-policy: host type reference; @deepseek-ai/dsh-session-checkpoint-policy: pnpm workspace link; @deepseek-ai/dsh-session-checkpoint-policy: host type reference; @deepseek-ai/dsh-compaction-tool-result-pruner: pnpm workspace link; @deepseek-ai/dsh-compaction-tool-result-pruner: host type reference; @deepseek-ai/dsh-compaction-image-offload: pnpm workspace link; @deepseek-ai/dsh-compaction-image-offload: host type reference; @deepseek-ai/dsh-tool-todo: pnpm workspace link; @deepseek-ai/dsh-tool-todo: host type reference; @deepseek-ai/dsh-tool-goal: pnpm workspace link; @deepseek-ai/dsh-tool-goal: host type reference; @deepseek-ai/dsh-repeat-tool-reminder: pnpm workspace link; @deepseek-ai/dsh-repeat-tool-reminder: host type reference; @deepseek-ai/dsh-web: pnpm workspace link; @deepseek-ai/dsh-web: host type reference; @deepseek-ai/dsh-web-search-deepseek: pnpm workspace link; @deepseek-ai/dsh-web-search-deepseek: host type reference; @deepseek-ai/dsh-web-deepseek-api: pnpm workspace link; @deepseek-ai/dsh-web-deepseek-api: host type reference; @deepseek-ai/dsh-web-fetch-http: pnpm workspace link; @deepseek-ai/dsh-web-fetch-http: host type reference; @deepseek-ai/dsh-tool-web: pnpm workspace link; @deepseek-ai/dsh-tool-web: host type reference; @deepseek-ai/dsh-mcp-resources: pnpm workspace link; @deepseek-ai/dsh-mcp-resources: host type reference; @deepseek-ai/dsh-tools: pnpm workspace link; @deepseek-ai/dsh-tools: host type reference; @deepseek-ai/dsh-tool-executor-native: pnpm workspace link; @deepseek-ai/dsh-tool-executor-native: host type reference; @deepseek-ai/dsh-tool-executor-ptc: pnpm workspace link; @deepseek-ai/dsh-tool-executor-ptc: host type reference; @deepseek-ai/dsh-system-prompt: pnpm workspace link; @deepseek-ai/dsh-system-prompt: host type reference; @deepseek-ai/dsh-agent-loop: pnpm workspace link; @deepseek-ai/dsh-agent-loop: host type reference; @deepseek-ai/dsh-fs-sandbox: pnpm workspace link; @deepseek-ai/dsh-fs-sandbox: host type reference; @deepseek-ai/dsh-llm-deepseek-api-key: pnpm workspace link; @deepseek-ai/dsh-llm-deepseek-api-key: host type reference; @deepseek-ai/dsh-llm-deepseek-account: pnpm workspace link; @deepseek-ai/dsh-llm-deepseek-account: host type reference; @deepseek-ai/dsh-host-product-telemetry-otel: pnpm workspace link; @deepseek-ai/dsh-host-product-telemetry-otel: host type reference; @deepseek-ai/dsh-client-product-analytics: pnpm workspace link; @deepseek-ai/dsh-client-product-analytics: host type reference; @deepseek-ai/dsh-message-feedback: pnpm workspace link; @deepseek-ai/dsh-message-feedback: host type reference; @deepseek-ai/dsh-session-log-export: pnpm workspace link; @deepseek-ai/dsh-session-log-export: host type reference; @deepseek-ai/dsh-host-open-in-app: pnpm workspace link; @deepseek-ai/dsh-host-open-in-app: host type reference; @deepseek-ai/dsh-workspace: pnpm workspace link; @deepseek-ai/dsh-workspace: host type reference; @deepseek-ai/dsh-session-reference: pnpm workspace link; @deepseek-ai/dsh-session-reference: host type reference; @deepseek-ai/dsh-file-reference-local: pnpm workspace link; @deepseek-ai/dsh-file-reference-local: host type reference; @deepseek-ai/dsh-session-stats: pnpm workspace link; @deepseek-ai/dsh-session-stats: host type reference; @deepseek-ai/dsh-session-turn-outline: pnpm workspace link; @deepseek-ai/dsh-session-turn-outline: host type reference; @deepseek-ai/dsh-host-directory-picker-browse: pnpm workspace link; @deepseek-ai/dsh-host-directory-picker-browse: host type reference; @deepseek-ai/dsh-host-plugin-inventory: pnpm workspace link; @deepseek-ai/dsh-host-plugin-inventory: host type reference; @deepseek-ai/dsh-api-session-controller: pnpm workspace link; @deepseek-ai/dsh-api-session-controller: host type reference; @deepseek-ai/dsh-tool-session-control: pnpm workspace link; @deepseek-ai/dsh-tool-session-control: host type reference; @deepseek-ai/dsh-api-job-controller: pnpm workspace link; @deepseek-ai/dsh-api-job-controller: host type reference; @deepseek-ai/dsh-api-terminal-controller: pnpm workspace link; @deepseek-ai/dsh-api-terminal-controller: host type reference; @deepseek-ai/dsh-api-workspace-files: pnpm workspace link; @deepseek-ai/dsh-api-workspace-files: host type reference; @deepseek-ai/dsh-schedule: pnpm workspace link; @deepseek-ai/dsh-schedule: host type reference; @deepseek-ai/dsh-api-settings-controller: pnpm workspace link; @deepseek-ai/dsh-api-settings-controller: host type reference; @deepseek-ai/dsh-mcp-manager: pnpm workspace link; @deepseek-ai/dsh-mcp-manager: host type reference; @deepseek-ai/dsh-mcp-account: pnpm workspace link; @deepseek-ai/dsh-mcp-account: host type reference; @deepseek-ai/dsh-api-workspace-controller: pnpm workspace link; @deepseek-ai/dsh-api-workspace-controller: host type reference; @deepseek-ai/dsh-cordis-host-runner: pnpm workspace link; @deepseek-ai/dsh-cordis-host-runner: host type reference; @deepseek-ai/dsh-tool-cordis: pnpm workspace link; @deepseek-ai/dsh-tool-cordis: host type reference; @deepseek-ai/dsh-web-app: pnpm workspace link; @deepseek-ai/dsh-web-app: host type reference; @deepseek-ai/dsh-host-webserver: pnpm workspace link; @deepseek-ai/dsh-host-webserver: host type reference; @deepseek-ai/dsh-harness-dev-context: pnpm workspace link; @deepseek-ai/dsh-harness-dev-context: host type reference; @deepseek-ai/dsh-client-connection: pnpm workspace link; @deepseek-ai/dsh-client-connection: host type reference; @deepseek-ai/dsh-host-authentication-token: pnpm workspace link; @deepseek-ai/dsh-host-authentication-token: host type reference; @deepseek-ai/dsh-client-file-upload: pnpm workspace link; @deepseek-ai/dsh-client-file-upload: host type reference; @deepseek-ai/dsh-api-remotes: pnpm workspace link; @deepseek-ai/dsh-api-remotes: host type reference; @deepseek-ai/dsh-client-shortcuts: pnpm workspace link; @deepseek-ai/dsh-client-shortcuts: host type reference; @deepseek-ai/dsh-office-kit: pnpm workspace link; @deepseek-ai/dsh-office-kit: host type reference; @deepseek-ai/dsh-tool-workspace-dependencies: pnpm workspace link; @deepseek-ai/dsh-tool-workspace-dependencies: host type reference; @deepseek-ai/dsh-skill-office: pnpm workspace link; @deepseek-ai/dsh-skill-office: host type reference; @deepseek-ai/dsh-client-remote-connection: pnpm workspace link; @deepseek-ai/dsh-client-remote-connection: host type reference; @deepseek-ai/dsh-deliverable-file-references: pnpm workspace link; @deepseek-ai/dsh-deliverable-file-references: host type reference; @deepseek-ai/dsh-workspace-changes: pnpm workspace link; @deepseek-ai/dsh-workspace-changes: host type reference; @deepseek-ai/dsh-action-cards: pnpm workspace link; @deepseek-ai/dsh-action-cards: host type reference; @deepseek-ai/dsh-creation-recommendations: pnpm workspace link; @deepseek-ai/dsh-creation-recommendations: host type reference; @deepseek-ai/dsh-plugin-recommendations: pnpm workspace link; @deepseek-ai/dsh-plugin-recommendations: host type reference; @deepseek-ai/dsh-agent-preset-registry: pnpm workspace link; @deepseek-ai/dsh-agent-preset-registry: host type reference; @deepseek-ai/dsh-agent-preset: pnpm workspace link; @deepseek-ai/dsh-agent-preset: host type reference; @deepseek-ai/dsh-persona: pnpm workspace link; @deepseek-ai/dsh-persona: host type reference; @deepseek-ai/dsh-time-context: pnpm workspace link; @deepseek-ai/dsh-time-context: host type reference; @deepseek-ai/dsh-tool-schedule: pnpm workspace link; @deepseek-ai/dsh-tool-schedule: host type reference; @deepseek-ai/dsh-tool-ask-user: pnpm workspace link; @deepseek-ai/dsh-tool-ask-user: host type reference; @deepseek-ai/dsh-tool-present: pnpm workspace link; @deepseek-ai/dsh-tool-present: host type reference; @deepseek-ai/dsh-tool-office: pnpm workspace link; @deepseek-ai/dsh-tool-office: host type reference; @deepseek-ai/dsh-plugin-market: pnpm workspace link; @deepseek-ai/dsh-plugin-market: host type reference; @deepseek-ai/dsh-terminal: pnpm workspace link; @deepseek-ai/dsh-terminal: host type reference; @deepseek-ai/dsh-terminal-bash: pnpm workspace link; @deepseek-ai/dsh-terminal-bash: host type reference; @deepseek-ai/dsh-tool-bash-persistent: pnpm workspace link; @deepseek-ai/dsh-tool-bash-persistent: host type reference; @deepseek-ai/dsh-tool-pwsh-persistent: pnpm workspace link; @deepseek-ai/dsh-tool-pwsh-persistent: host type reference; @deepseek-ai/dsh-acp-app: pnpm workspace link; @deepseek-ai/dsh-acp-app: host type reference; @deepseek-ai/dsh-acp: pnpm workspace link; @deepseek-ai/dsh-acp: host type reference; @deepseek-ai/dsh-hooks-claude-code: pnpm workspace link; @deepseek-ai/dsh-hooks-claude-code: host type reference; @deepseek-ai/dsh-mcp-client: pnpm workspace link; @deepseek-ai/dsh-mcp-client: host type reference; @deepseek-ai/dsh-llm-pi-ai: pnpm workspace link; @deepseek-ai/dsh-llm-pi-ai: host type reference; @deepseek-ai/dsh-base: pnpm workspace link; @deepseek-ai/dsh-base: host type reference; @deepseek-ai/dsh-app-boot: pnpm workspace link; @deepseek-ai/dsh-app-boot: host type reference; @deepseek-ai/dsh-cmdline: pnpm workspace link; @deepseek-ai/dsh-cmdline: host type reference; @deepseek-ai/dsh-launch-environment: pnpm workspace link; @deepseek-ai/dsh-launch-environment: host type reference; @deepseek-ai/dsh-http-proxy: pnpm workspace link; @deepseek-ai/dsh-typert-generator: pnpm workspace link; @deepseek-ai/dsh-typert-generator: host type reference; @deepseek-ai/dsh-atomic-write: pnpm workspace link; @deepseek-ai/dsh-official-bundles: pnpm workspace link; @deepseek-ai/dsh-util-values: pnpm workspace link; @deepseek-ai/dsh-plugin-detail: pnpm workspace link; @deepseek-ai/dsh-timeout: pnpm workspace link; @deepseek-ai/cordis-plugin-loader: pnpm workspace link; @deepseek-ai/cordis-plugin-loader: host type reference; @deepseek-ai/dsh-subprocess: pnpm workspace link; @deepseek-ai/dsh-subprocess: host type reference; @deepseek-ai/dsh-typert-protocol: pnpm workspace link; @deepseek-ai/dsh-typert-protocol: host type reference; @deepseek-ai/dsh-error: pnpm workspace link; @deepseek-ai/dsh-sandbox: pnpm workspace link; @deepseek-ai/dsh-sandbox: host type reference; @deepseek-ai/dsh-package-manifest: pnpm workspace link; @deepseek-ai/dsh-brand: pnpm workspace link; @deepseek-ai/cordis-plugin-include: pnpm workspace link; @deepseek-ai/cordis-plugin-include: host type reference; @deepseek-ai/dsh-util-crypto: pnpm workspace link; @deepseek-ai/dsh-attachment: pnpm workspace link; @deepseek-ai/dsh-attachment: host type reference; @deepseek-ai/dsh-scope: pnpm workspace link; @deepseek-ai/dsh-scope: host type reference; @deepseek-ai/dsh-deque: pnpm workspace link; @deepseek-ai/dsh-session-title-llm: pnpm workspace link; @deepseek-ai/dsh-session-title-llm: host type reference; @deepseek-ai/dsh-jobs: pnpm workspace link; @deepseek-ai/dsh-jobs: host type reference; @deepseek-ai/dsh-credentials: pnpm workspace link; @deepseek-ai/dsh-credentials: host type reference; @deepseek-ai/dsh-home-paths: pnpm workspace link; @deepseek-ai/dsh-session-format: pnpm workspace link; @deepseek-ai/dsh-session-format: host type reference; @deepseek-ai/dsh-session-format-catalog: pnpm workspace link; @deepseek-ai/dsh-session-format-catalog: host type reference; @deepseek-ai/dsh-session-format-v3-to-v4: pnpm workspace link; @deepseek-ai/dsh-session-format-v3-to-v4: host type reference; @deepseek-ai/dsh-session-persistence: pnpm workspace link; @deepseek-ai/dsh-session-persistence: host type reference; @deepseek-ai/dsh-lazy-require: pnpm workspace link; @deepseek-ai/dsh-session-query: pnpm workspace link; @deepseek-ai/dsh-session-query: host type reference; @deepseek-ai/dsh-fs: pnpm workspace link; @deepseek-ai/dsh-fs: host type reference; @deepseek-ai/dsh-session-telemetry: pnpm workspace link; @deepseek-ai/dsh-session-telemetry: host type reference; @deepseek-ai/dsh-anonymous-user-id: pnpm workspace link; @deepseek-ai/dsh-win32-process: pnpm workspace link; @deepseek-ai/dsh-win32-process: host type reference; @deepseek-ai/dsh-client-ui-connector-account: pnpm workspace link; @deepseek-ai/dsh-client-ui-connector-account: host type reference; @deepseek-ai/dsh-sandbox-windows-acl: pnpm workspace link; @deepseek-ai/dsh-sandbox-windows-acl: host type reference; @deepseek-ai/dsh-shell: pnpm workspace link; @deepseek-ai/dsh-shell: host type reference; @deepseek-ai/dsh-bash-local: pnpm workspace link; @deepseek-ai/dsh-bash-local: host type reference; @deepseek-ai/dsh-pwsh-local: pnpm workspace link; @deepseek-ai/dsh-pwsh-local: host type reference; @deepseek-ai/dsh-output-retention: pnpm workspace link; @deepseek-ai/dsh-util-code-language: pnpm workspace link; @deepseek-ai/dsh-fs-patch: pnpm workspace link; @deepseek-ai/dsh-util-ripgrep: pnpm workspace link; @deepseek-ai/dsh-util-ripgrep: host type reference; @deepseek-ai/dsh-spill: pnpm workspace link; @deepseek-ai/dsh-spill: host type reference; @deepseek-ai/dsh-compaction: pnpm workspace link; @deepseek-ai/dsh-compaction: host type reference; @deepseek-ai/dsh-chunked-list: pnpm workspace link; @deepseek-ai/dsh-util-time: pnpm workspace link; @deepseek-ai/dsh-ptc-runtime: pnpm workspace link; @deepseek-ai/dsh-ptc-runtime: host type reference; @deepseek-ai/dsh-workflow: pnpm workspace link; @deepseek-ai/dsh-workflow: host type reference; @deepseek-ai/dsh-fs-local: pnpm workspace link; @deepseek-ai/dsh-fs-local: host type reference; @deepseek-ai/dsh-llm-deepseek: pnpm workspace link; @deepseek-ai/dsh-llm-deepseek: host type reference; @deepseek-ai/dsh-native-command: pnpm workspace link; @deepseek-ai/dsh-util-text-search: pnpm workspace link; @deepseek-ai/dsh-file-reference: pnpm workspace link; @deepseek-ai/dsh-file-reference: host type reference; @deepseek-ai/dsh-host-directory-picker: pnpm workspace link; @deepseek-ai/dsh-host-directory-picker: host type reference; @deepseek-ai/dsh-util-workspace-path: pnpm workspace link; @deepseek-ai/cordis-plugin-group: pnpm workspace link; @deepseek-ai/cordis-plugin-group: host type reference; @deepseek-ai/dsh-agent-tool-presentation: pnpm workspace link; @deepseek-ai/dsh-agent-tool-presentation: host type reference; @deepseek-ai/dsh-host-frontend-static: pnpm workspace link; @deepseek-ai/dsh-host-frontend-static: host type reference; @deepseek-ai/dsh-tool-testkit: pnpm workspace link; @deepseek-ai/dsh-tool-testkit: host type reference; @deepseek-ai/dsh-loader-smoke: pnpm workspace link; @deepseek-ai/dsh-loader-smoke: host type reference; @deepseek-ai/dsh-plugin-market-index: pnpm workspace link; @deepseek-ai/dsh-hook-protocol: pnpm workspace link; @deepseek-ai/dsh-hook-protocol: host type reference; @deepseek-ai/dsh-session-format-v0-to-v1: pnpm workspace link; @deepseek-ai/dsh-session-format-v0-to-v1: host type reference; @deepseek-ai/dsh-session-format-v1-to-v2: pnpm workspace link; @deepseek-ai/dsh-session-format-v1-to-v2: host type reference; @deepseek-ai/dsh-session-format-v2-to-v3: pnpm workspace link; @deepseek-ai/dsh-session-format-v2-to-v3: host type reference"
+    },
+    {
+      "path": "vendor/cosmokit",
+      "reason": "@deepseek-ai/cordis-plugin-timer: pnpm workspace link; @deepseek-ai/cordis-plugin-timer: host type reference; @deepseek-ai/dsh-llm: host type reference; @deepseek-ai/dsh-deepseek-llm-api-extensions: host type reference; @deepseek-ai/dsh-session: host type reference; @deepseek-ai/dsh-session-log-deepseek: host type reference; @deepseek-ai/dsh-typert-registry: host type reference; @deepseek-ai/dsh-typert-loader: host type reference; @deepseek-ai/dsh-api-gateway: host type reference; @deepseek-ai/dsh-session-title: host type reference; @deepseek-ai/dsh-session-title-first-prompt-llm: host type reference; @deepseek-ai/dsh-user-questions: host type reference; @deepseek-ai/dsh-agent: host type reference; @deepseek-ai/dsh-plugin-package-inventory-deepseek: host type reference; @deepseek-ai/dsh-jobs-local: host type reference; @deepseek-ai/dsh-llm-retry: host type reference; @deepseek-ai/dsh-settings: pnpm workspace link; @deepseek-ai/dsh-settings: host type reference; @deepseek-ai/dsh-authorization: host type reference; @deepseek-ai/dsh-deepseek-account: host type reference; @deepseek-ai/dsh-deepseek-auth: host type reference; @deepseek-ai/dsh-credentials-local: host type reference; @deepseek-ai/dsh-session-persistence-jsonl: host type reference; @deepseek-ai/dsh-attachment-local: host type reference; @deepseek-ai/dsh-session-query-sqlite: host type reference; @deepseek-ai/dsh-session-projection: host type reference; @deepseek-ai/dsh-storage: host type reference; @deepseek-ai/dsh-storage-json: host type reference; @deepseek-ai/dsh-storage-domain: host type reference; @deepseek-ai/dsh-session-projection-cache: host type reference; @deepseek-ai/dsh-otel: host type reference; @deepseek-ai/dsh-session-telemetry-otel: host type reference; @deepseek-ai/dsh-subprocess-local: host type reference; @deepseek-ai/dsh-sandbox-local: host type reference; @deepseek-ai/dsh-sandbox-policy: host type reference; @deepseek-ai/dsh-bash-sandbox: host type reference; @deepseek-ai/dsh-pwsh-sandbox: host type reference; @deepseek-ai/dsh-user-approval: host type reference; @deepseek-ai/dsh-permission-presets: host type reference; @deepseek-ai/dsh-shell-env: host type reference; @deepseek-ai/dsh-tool-bash: host type reference; @deepseek-ai/dsh-tool-pwsh: host type reference; @deepseek-ai/dsh-tool-jobs: host type reference; @deepseek-ai/dsh-fs-observation-policy: host type reference; @deepseek-ai/dsh-tool-fs: host type reference; @deepseek-ai/dsh-tool-fs-search: host type reference; @deepseek-ai/dsh-skill: host type reference; @deepseek-ai/dsh-skill-filesystem: host type reference; @deepseek-ai/dsh-tool-skill: host type reference; @deepseek-ai/dsh-commands: host type reference; @deepseek-ai/dsh-command-feedback: host type reference; @deepseek-ai/dsh-goal: host type reference; @deepseek-ai/dsh-goal-round-driver: host type reference; @deepseek-ai/dsh-command-goal: host type reference; @deepseek-ai/dsh-plan-mode: host type reference; @deepseek-ai/dsh-token-meter: host type reference; @deepseek-ai/dsh-compaction-basic: host type reference; @deepseek-ai/dsh-command-compact: host type reference; @deepseek-ai/dsh-subagent: host type reference; @deepseek-ai/dsh-agent-team: host type reference; @deepseek-ai/dsh-tool-agent-team: host type reference; @deepseek-ai/dsh-subagent-spawn-in-process: host type reference; @deepseek-ai/dsh-subagent-fork-in-process: host type reference; @deepseek-ai/dsh-tool-subagent-control: host type reference; @deepseek-ai/dsh-tool-subagent: host type reference; @deepseek-ai/dsh-ptc-runtime-node: host type reference; @deepseek-ai/dsh-workflow-ptc: host type reference; @deepseek-ai/dsh-tool-workflow: host type reference; @deepseek-ai/dsh-tool-call-timeout-policy: host type reference; @deepseek-ai/dsh-spill-local: host type reference; @deepseek-ai/dsh-spill-policy: host type reference; @deepseek-ai/dsh-session-checkpoint-policy: host type reference; @deepseek-ai/dsh-compaction-tool-result-pruner: host type reference; @deepseek-ai/dsh-compaction-image-offload: host type reference; @deepseek-ai/dsh-tool-todo: host type reference; @deepseek-ai/dsh-tool-goal: host type reference; @deepseek-ai/dsh-repeat-tool-reminder: host type reference; @deepseek-ai/dsh-web: host type reference; @deepseek-ai/dsh-web-search-deepseek: host type reference; @deepseek-ai/dsh-web-deepseek-api: host type reference; @deepseek-ai/dsh-web-fetch-http: host type reference; @deepseek-ai/dsh-tool-web: host type reference; @deepseek-ai/dsh-tools: host type reference; @deepseek-ai/dsh-tool-executor-native: host type reference; @deepseek-ai/dsh-tool-executor-ptc: host type reference; @deepseek-ai/dsh-system-prompt: host type reference; @deepseek-ai/dsh-agent-loop: host type reference; @deepseek-ai/dsh-fs-sandbox: host type reference; @deepseek-ai/dsh-llm-deepseek-account: pnpm workspace link; @deepseek-ai/dsh-llm-deepseek-account: host type reference; @deepseek-ai/dsh-host-product-telemetry-otel: host type reference; @deepseek-ai/dsh-message-feedback: host type reference; @deepseek-ai/dsh-workspace: host type reference; @deepseek-ai/dsh-session-reference: host type reference; @deepseek-ai/dsh-session-stats: host type reference; @deepseek-ai/dsh-session-turn-outline: host type reference; @deepseek-ai/dsh-schedule: host type reference; @deepseek-ai/dsh-mcp-manager: host type reference; @deepseek-ai/dsh-cordis-host-runner: host type reference; @deepseek-ai/dsh-tool-cordis: host type reference; @deepseek-ai/dsh-harness-dev-context: host type reference; @deepseek-ai/dsh-tool-workspace-dependencies: host type reference; @deepseek-ai/dsh-skill-office: host type reference; @deepseek-ai/dsh-agent-preset-registry: host type reference; @deepseek-ai/dsh-persona: host type reference; @deepseek-ai/dsh-time-context: host type reference; @deepseek-ai/dsh-tool-schedule: host type reference; @deepseek-ai/dsh-tool-ask-user: host type reference; @deepseek-ai/dsh-terminal: host type reference; @deepseek-ai/dsh-terminal-bash: host type reference; @deepseek-ai/dsh-acp: host type reference; @deepseek-ai/dsh-hooks-claude-code: host type reference; @deepseek-ai/dsh-mcp-client: host type reference; @deepseek-ai/dsh-llm-pi-ai: host type reference; @deepseek-ai/dsh-typert-generator: host type reference; @deepseek-ai/schemastery: pnpm workspace link; @deepseek-ai/schemastery: host type reference; @deepseek-ai/cordis: pnpm workspace link; @deepseek-ai/cordis: host type reference; @deepseek-ai/cordis-plugin-loader: pnpm workspace link; @deepseek-ai/cordis-plugin-loader: host type reference; @deepseek-ai/dsh-subprocess: host type reference; @deepseek-ai/dsh-typert-protocol: host type reference; @deepseek-ai/dsh-sandbox: host type reference; @deepseek-ai/cordis-plugin-include: pnpm workspace link; @deepseek-ai/cordis-plugin-include: host type reference; @deepseek-ai/dsh-attachment: host type reference; @deepseek-ai/dsh-scope: host type reference; @deepseek-ai/dsh-session-title-llm: host type reference; @deepseek-ai/dsh-jobs: host type reference; @deepseek-ai/dsh-credentials: host type reference; @deepseek-ai/dsh-session-format: host type reference; @deepseek-ai/dsh-session-format-catalog: host type reference; @deepseek-ai/dsh-session-persistence: host type reference; @deepseek-ai/dsh-session-query: host type reference; @deepseek-ai/dsh-fs: host type reference; @deepseek-ai/dsh-session-telemetry: host type reference; @deepseek-ai/dsh-sandbox-windows-acl: host type reference; @deepseek-ai/dsh-shell: host type reference; @deepseek-ai/dsh-bash-local: host type reference; @deepseek-ai/dsh-pwsh-local: host type reference; @deepseek-ai/dsh-util-ripgrep: host type reference; @deepseek-ai/dsh-spill: host type reference; @deepseek-ai/dsh-compaction: host type reference; @deepseek-ai/dsh-ptc-runtime: host type reference; @deepseek-ai/dsh-workflow: host type reference; @deepseek-ai/dsh-fs-local: host type reference; @deepseek-ai/dsh-llm-deepseek: pnpm workspace link; @deepseek-ai/dsh-llm-deepseek: host type reference; @deepseek-ai/dsh-host-directory-picker: host type reference; @deepseek-ai/dsh-agent-tool-presentation: host type reference; @deepseek-ai/dsh-hook-protocol: host type reference; @deepseek-ai/dsh-session-format-v0-to-v1: host type reference; @deepseek-ai/dsh-session-format-v1-to-v2: host type reference"
+    },
+    {
+      "path": "vendor/group",
+      "reason": "@deepseek-ai/dsh-tool-cordis: host type reference; @deepseek-ai/dsh-app-boot: pnpm workspace link; @deepseek-ai/dsh-app-boot: host type reference"
+    },
+    {
+      "path": "vendor/include",
+      "reason": "@deepseek-ai/dsh-hmr: pnpm workspace link; @deepseek-ai/dsh-hmr: host type reference; @deepseek-ai/dsh-config-editor: pnpm workspace link; @deepseek-ai/dsh-config-editor: host type reference; @deepseek-ai/dsh-agent-preset-registry: pnpm workspace link; @deepseek-ai/dsh-agent-preset-registry: host type reference; @deepseek-ai/dsh-app-boot: pnpm workspace link; @deepseek-ai/dsh-app-boot: host type reference; @deepseek-ai/dsh-cmdline: host type reference; @deepseek-ai/cordis: pnpm workspace link"
+    },
+    {
+      "path": "vendor/loader",
+      "reason": "@deepseek-ai/dsh-plugin-manager: pnpm workspace link; @deepseek-ai/dsh-plugin-manager: host type reference; @deepseek-ai/dsh-hmr: pnpm workspace link; @deepseek-ai/dsh-hmr: host type reference; @deepseek-ai/dsh-typert-loader: pnpm workspace link; @deepseek-ai/dsh-typert-loader: host type reference; @deepseek-ai/dsh-plugin-package-inventory-deepseek: pnpm workspace link; @deepseek-ai/dsh-plugin-package-inventory-deepseek: host type reference; @deepseek-ai/dsh-config-editor: pnpm workspace link; @deepseek-ai/dsh-config-editor: host type reference; @deepseek-ai/dsh-settings: pnpm workspace link; @deepseek-ai/dsh-settings: host type reference; @deepseek-ai/dsh-llm-deepseek-api-key: pnpm workspace link; @deepseek-ai/dsh-llm-deepseek-api-key: host type reference; @deepseek-ai/dsh-llm-deepseek-account: pnpm workspace link; @deepseek-ai/dsh-llm-deepseek-account: host type reference; @deepseek-ai/dsh-client-product-analytics: host type reference; @deepseek-ai/dsh-host-plugin-inventory: pnpm workspace link; @deepseek-ai/dsh-host-plugin-inventory: host type reference; @deepseek-ai/dsh-mcp-manager: pnpm workspace link; @deepseek-ai/dsh-mcp-manager: host type reference; @deepseek-ai/dsh-tool-cordis: pnpm workspace link; @deepseek-ai/dsh-tool-cordis: host type reference; @deepseek-ai/dsh-web-app: pnpm workspace link; @deepseek-ai/dsh-web-app: host type reference; @deepseek-ai/dsh-action-cards: host type reference; @deepseek-ai/dsh-agent-preset-registry: pnpm workspace link; @deepseek-ai/dsh-agent-preset-registry: host type reference; @deepseek-ai/dsh-agent-preset: pnpm workspace link; @deepseek-ai/dsh-agent-preset: host type reference; @deepseek-ai/dsh-plugin-market: pnpm workspace link; @deepseek-ai/dsh-plugin-market: host type reference; @deepseek-ai/dsh-llm-pi-ai: pnpm workspace link; @deepseek-ai/dsh-llm-pi-ai: host type reference; @deepseek-ai/dsh-app-boot: pnpm workspace link; @deepseek-ai/dsh-app-boot: host type reference; @deepseek-ai/dsh-cmdline: pnpm workspace link; @deepseek-ai/dsh-cmdline: host type reference; @deepseek-ai/cordis: pnpm workspace link; @deepseek-ai/cordis-plugin-include: pnpm workspace link; @deepseek-ai/cordis-plugin-include: host type reference; @deepseek-ai/dsh-llm-deepseek: pnpm workspace link; @deepseek-ai/dsh-llm-deepseek: host type reference; @deepseek-ai/cordis-plugin-group: pnpm workspace link; @deepseek-ai/cordis-plugin-group: host type reference; @deepseek-ai/dsh-host-frontend-static: host type reference"
+    },
+    {
+      "path": "vendor/schemastery",
+      "reason": "@deepseek-ai/dsh-plugin-manager: pnpm workspace link; @deepseek-ai/dsh-plugin-manager: host type reference; @deepseek-ai/dsh-hmr: pnpm workspace link; @deepseek-ai/dsh-hmr: host type reference; @deepseek-ai/dsh-llm: pnpm workspace link; @deepseek-ai/dsh-llm: host type reference; @deepseek-ai/dsh-session-log-deepseek: pnpm workspace link; @deepseek-ai/dsh-session-log-deepseek: host type reference; @deepseek-ai/dsh-typert-loader: pnpm workspace link; @deepseek-ai/dsh-typert-loader: host type reference; @deepseek-ai/dsh-api-gateway: pnpm workspace link; @deepseek-ai/dsh-api-gateway: host type reference; @deepseek-ai/dsh-session-title: pnpm workspace link; @deepseek-ai/dsh-session-title: host type reference; @deepseek-ai/dsh-session-title-first-prompt-llm: pnpm workspace link; @deepseek-ai/dsh-session-title-first-prompt-llm: host type reference; @deepseek-ai/dsh-user-questions: pnpm workspace link; @deepseek-ai/dsh-user-questions: host type reference; @deepseek-ai/dsh-plugin-package-inventory-deepseek: pnpm workspace link; @deepseek-ai/dsh-plugin-package-inventory-deepseek: host type reference; @deepseek-ai/dsh-agent-default-model: pnpm workspace link; @deepseek-ai/dsh-agent-default-model: host type reference; @deepseek-ai/dsh-jobs-local: pnpm workspace link; @deepseek-ai/dsh-jobs-local: host type reference; @deepseek-ai/dsh-llm-retry: pnpm workspace link; @deepseek-ai/dsh-llm-retry: host type reference; @deepseek-ai/dsh-settings: pnpm workspace link; @deepseek-ai/dsh-settings: host type reference; @deepseek-ai/dsh-deepseek-account: pnpm workspace link; @deepseek-ai/dsh-deepseek-account: host type reference; @deepseek-ai/dsh-credentials-local: pnpm workspace link; @deepseek-ai/dsh-credentials-local: host type reference; @deepseek-ai/dsh-session-persistence-jsonl: pnpm workspace link; @deepseek-ai/dsh-session-persistence-jsonl: host type reference; @deepseek-ai/dsh-attachment-local: pnpm workspace link; @deepseek-ai/dsh-attachment-local: host type reference; @deepseek-ai/dsh-session-query-sqlite: pnpm workspace link; @deepseek-ai/dsh-session-query-sqlite: host type reference; @deepseek-ai/dsh-working-directory: pnpm workspace link; @deepseek-ai/dsh-working-directory: host type reference; @deepseek-ai/dsh-storage-json: pnpm workspace link; @deepseek-ai/dsh-storage-json: host type reference; @deepseek-ai/dsh-storage-domain: pnpm workspace link; @deepseek-ai/dsh-storage-domain: host type reference; @deepseek-ai/dsh-session-projection-cache: pnpm workspace link; @deepseek-ai/dsh-session-projection-cache: host type reference; @deepseek-ai/dsh-session-telemetry-otel: pnpm workspace link; @deepseek-ai/dsh-session-telemetry-otel: host type reference; @deepseek-ai/dsh-cli-account: pnpm workspace link; @deepseek-ai/dsh-cli-account: host type reference; @deepseek-ai/dsh-sandbox-local: pnpm workspace link; @deepseek-ai/dsh-sandbox-local: host type reference; @deepseek-ai/dsh-sandbox-policy: pnpm workspace link; @deepseek-ai/dsh-sandbox-policy: host type reference; @deepseek-ai/dsh-user-approval: pnpm workspace link; @deepseek-ai/dsh-user-approval: host type reference; @deepseek-ai/dsh-permission-presets: pnpm workspace link; @deepseek-ai/dsh-permission-presets: host type reference; @deepseek-ai/dsh-shell-env: pnpm workspace link; @deepseek-ai/dsh-shell-env: host type reference; @deepseek-ai/dsh-tool-bash: pnpm workspace link; @deepseek-ai/dsh-tool-bash: host type reference; @deepseek-ai/dsh-tool-pwsh: pnpm workspace link; @deepseek-ai/dsh-tool-pwsh: host type reference; @deepseek-ai/dsh-tool-jobs: pnpm workspace link; @deepseek-ai/dsh-tool-jobs: host type reference; @deepseek-ai/dsh-tool-fs: pnpm workspace link; @deepseek-ai/dsh-tool-fs: host type reference; @deepseek-ai/dsh-tool-fs-search: pnpm workspace link; @deepseek-ai/dsh-tool-fs-search: host type reference; @deepseek-ai/dsh-agent-instructions: pnpm workspace link; @deepseek-ai/dsh-agent-instructions: host type reference; @deepseek-ai/dsh-skill: pnpm workspace link; @deepseek-ai/dsh-skill: host type reference; @deepseek-ai/dsh-skill-filesystem: pnpm workspace link; @deepseek-ai/dsh-skill-filesystem: host type reference; @deepseek-ai/dsh-tool-skill: pnpm workspace link; @deepseek-ai/dsh-tool-skill: host type reference; @deepseek-ai/dsh-upstream-skills: pnpm workspace link; @deepseek-ai/dsh-upstream-skills: host type reference; @deepseek-ai/dsh-goal: pnpm workspace link; @deepseek-ai/dsh-goal: host type reference; @deepseek-ai/dsh-token-meter: pnpm workspace link; @deepseek-ai/dsh-token-meter: host type reference; @deepseek-ai/dsh-compaction-basic: pnpm workspace link; @deepseek-ai/dsh-compaction-basic: host type reference; @deepseek-ai/dsh-subagent: pnpm workspace link; @deepseek-ai/dsh-subagent: host type reference; @deepseek-ai/dsh-agent-team: pnpm workspace link; @deepseek-ai/dsh-agent-team: host type reference; @deepseek-ai/dsh-tool-agent-team: pnpm workspace link; @deepseek-ai/dsh-tool-agent-team: host type reference; @deepseek-ai/dsh-subagent-spawn-in-process: pnpm workspace link; @deepseek-ai/dsh-subagent-spawn-in-process: host type reference; @deepseek-ai/dsh-subagent-fork-in-process: pnpm workspace link; @deepseek-ai/dsh-subagent-fork-in-process: host type reference; @deepseek-ai/dsh-tool-subagent-control: pnpm workspace link; @deepseek-ai/dsh-tool-subagent-control: host type reference; @deepseek-ai/dsh-tool-subagent: pnpm workspace link; @deepseek-ai/dsh-tool-subagent: host type reference; @deepseek-ai/dsh-ptc-runtime-node: pnpm workspace link; @deepseek-ai/dsh-ptc-runtime-node: host type reference; @deepseek-ai/dsh-workflow-ptc: pnpm workspace link; @deepseek-ai/dsh-workflow-ptc: host type reference; @deepseek-ai/dsh-tool-workflow: pnpm workspace link; @deepseek-ai/dsh-tool-workflow: host type reference; @deepseek-ai/dsh-tool-call-timeout-policy: host type reference; @deepseek-ai/dsh-spill-local: pnpm workspace link; @deepseek-ai/dsh-spill-local: host type reference; @deepseek-ai/dsh-spill-policy: pnpm workspace link; @deepseek-ai/dsh-spill-policy: host type reference; @deepseek-ai/dsh-compaction-tool-result-pruner: pnpm workspace link; @deepseek-ai/dsh-compaction-tool-result-pruner: host type reference; @deepseek-ai/dsh-tool-todo: pnpm workspace link; @deepseek-ai/dsh-tool-todo: host type reference; @deepseek-ai/dsh-tool-goal: pnpm workspace link; @deepseek-ai/dsh-tool-goal: host type reference; @deepseek-ai/dsh-repeat-tool-reminder: pnpm workspace link; @deepseek-ai/dsh-repeat-tool-reminder: host type reference; @deepseek-ai/dsh-web: pnpm workspace link; @deepseek-ai/dsh-web: host type reference; @deepseek-ai/dsh-web-search-deepseek: pnpm workspace link; @deepseek-ai/dsh-web-search-deepseek: host type reference; @deepseek-ai/dsh-web-deepseek-api: pnpm workspace link; @deepseek-ai/dsh-web-deepseek-api: host type reference; @deepseek-ai/dsh-web-fetch-http: pnpm workspace link; @deepseek-ai/dsh-web-fetch-http: host type reference; @deepseek-ai/dsh-tool-web: pnpm workspace link; @deepseek-ai/dsh-tool-web: host type reference; @deepseek-ai/dsh-tools: pnpm workspace link; @deepseek-ai/dsh-tools: host type reference; @deepseek-ai/dsh-tool-executor-native: host type reference; @deepseek-ai/dsh-tool-executor-ptc: pnpm workspace link; @deepseek-ai/dsh-tool-executor-ptc: host type reference; @deepseek-ai/dsh-system-prompt: pnpm workspace link; @deepseek-ai/dsh-system-prompt: host type reference; @deepseek-ai/dsh-agent-loop: pnpm workspace link; @deepseek-ai/dsh-agent-loop: host type reference; @deepseek-ai/dsh-llm-deepseek-api-key: pnpm workspace link; @deepseek-ai/dsh-llm-deepseek-api-key: host type reference; @deepseek-ai/dsh-llm-deepseek-account: pnpm workspace link; @deepseek-ai/dsh-llm-deepseek-account: host type reference; @deepseek-ai/dsh-host-product-telemetry-otel: pnpm workspace link; @deepseek-ai/dsh-host-product-telemetry-otel: host type reference; @deepseek-ai/dsh-client-product-analytics: pnpm workspace link; @deepseek-ai/dsh-client-product-analytics: host type reference; @deepseek-ai/dsh-message-feedback: pnpm workspace link; @deepseek-ai/dsh-message-feedback: host type reference; @deepseek-ai/dsh-session-log-export: pnpm workspace link; @deepseek-ai/dsh-session-log-export: host type reference; @deepseek-ai/dsh-host-open-in-app: pnpm workspace link; @deepseek-ai/dsh-host-open-in-app: host type reference; @deepseek-ai/dsh-workspace: host type reference; @deepseek-ai/dsh-session-reference: pnpm workspace link; @deepseek-ai/dsh-session-reference: host type reference; @deepseek-ai/dsh-file-reference-local: pnpm workspace link; @deepseek-ai/dsh-file-reference-local: host type reference; @deepseek-ai/dsh-host-directory-picker-browse: pnpm workspace link; @deepseek-ai/dsh-host-directory-picker-browse: host type reference; @deepseek-ai/dsh-api-session-controller: pnpm workspace link; @deepseek-ai/dsh-api-session-controller: host type reference; @deepseek-ai/dsh-api-job-controller: pnpm workspace link; @deepseek-ai/dsh-api-job-controller: host type reference; @deepseek-ai/dsh-api-terminal-controller: pnpm workspace link; @deepseek-ai/dsh-api-terminal-controller: host type reference; @deepseek-ai/dsh-api-workspace-files: pnpm workspace link; @deepseek-ai/dsh-api-workspace-files: host type reference; @deepseek-ai/dsh-schedule: pnpm workspace link; @deepseek-ai/dsh-schedule: host type reference; @deepseek-ai/dsh-api-settings-controller: pnpm workspace link; @deepseek-ai/dsh-api-settings-controller: host type reference; @deepseek-ai/dsh-mcp-manager: pnpm workspace link; @deepseek-ai/dsh-mcp-manager: host type reference; @deepseek-ai/dsh-api-workspace-controller: pnpm workspace link; @deepseek-ai/dsh-api-workspace-controller: host type reference; @deepseek-ai/dsh-cordis-host-runner: pnpm workspace link; @deepseek-ai/dsh-cordis-host-runner: host type reference; @deepseek-ai/dsh-tool-cordis: host type reference; @deepseek-ai/dsh-web-app: pnpm workspace link; @deepseek-ai/dsh-web-app: host type reference; @deepseek-ai/dsh-host-webserver: pnpm workspace link; @deepseek-ai/dsh-host-webserver: host type reference; @deepseek-ai/dsh-client-connection: pnpm workspace link; @deepseek-ai/dsh-client-connection: host type reference; @deepseek-ai/dsh-host-authentication-token: pnpm workspace link; @deepseek-ai/dsh-host-authentication-token: host type reference; @deepseek-ai/dsh-client-shortcuts: pnpm workspace link; @deepseek-ai/dsh-client-shortcuts: host type reference; @deepseek-ai/dsh-office-kit: pnpm workspace link; @deepseek-ai/dsh-office-kit: host type reference; @deepseek-ai/dsh-tool-workspace-dependencies: pnpm workspace link; @deepseek-ai/dsh-tool-workspace-dependencies: host type reference; @deepseek-ai/dsh-skill-office: pnpm workspace link; @deepseek-ai/dsh-skill-office: host type reference; @deepseek-ai/dsh-client-remote-connection: pnpm workspace link; @deepseek-ai/dsh-client-remote-connection: host type reference; @deepseek-ai/dsh-workspace-changes: pnpm workspace link; @deepseek-ai/dsh-workspace-changes: host type reference; @deepseek-ai/dsh-action-cards: pnpm workspace link; @deepseek-ai/dsh-action-cards: host type reference; @deepseek-ai/dsh-agent-preset-registry: pnpm workspace link; @deepseek-ai/dsh-agent-preset-registry: host type reference; @deepseek-ai/dsh-agent-preset: pnpm workspace link; @deepseek-ai/dsh-agent-preset: host type reference; @deepseek-ai/dsh-persona: pnpm workspace link; @deepseek-ai/dsh-persona: host type reference; @deepseek-ai/dsh-time-context: pnpm workspace link; @deepseek-ai/dsh-time-context: host type reference; @deepseek-ai/dsh-tool-ask-user: pnpm workspace link; @deepseek-ai/dsh-tool-ask-user: host type reference; @deepseek-ai/dsh-tool-present: pnpm workspace link; @deepseek-ai/dsh-tool-present: host type reference; @deepseek-ai/dsh-tool-office: pnpm workspace link; @deepseek-ai/dsh-tool-office: host type reference; @deepseek-ai/dsh-plugin-market: pnpm workspace link; @deepseek-ai/dsh-plugin-market: host type reference; @deepseek-ai/dsh-terminal-bash: pnpm workspace link; @deepseek-ai/dsh-terminal-bash: host type reference; @deepseek-ai/dsh-tool-bash-persistent: pnpm workspace link; @deepseek-ai/dsh-tool-bash-persistent: host type reference; @deepseek-ai/dsh-tool-pwsh-persistent: pnpm workspace link; @deepseek-ai/dsh-tool-pwsh-persistent: host type reference; @deepseek-ai/dsh-acp: pnpm workspace link; @deepseek-ai/dsh-acp: host type reference; @deepseek-ai/dsh-hooks-claude-code: pnpm workspace link; @deepseek-ai/dsh-hooks-claude-code: host type reference; @deepseek-ai/dsh-mcp-client: pnpm workspace link; @deepseek-ai/dsh-mcp-client: host type reference; @deepseek-ai/dsh-llm-pi-ai: pnpm workspace link; @deepseek-ai/dsh-llm-pi-ai: host type reference; @deepseek-ai/cordis-plugin-loader: pnpm workspace link; @deepseek-ai/cordis-plugin-loader: host type reference; @deepseek-ai/dsh-session-title-llm: pnpm workspace link; @deepseek-ai/dsh-session-title-llm: host type reference; @deepseek-ai/dsh-sandbox-windows-acl: host type reference; @deepseek-ai/dsh-bash-local: pnpm workspace link; @deepseek-ai/dsh-bash-local: host type reference; @deepseek-ai/dsh-pwsh-local: pnpm workspace link; @deepseek-ai/dsh-pwsh-local: host type reference; @deepseek-ai/dsh-fs-local: pnpm workspace link; @deepseek-ai/dsh-fs-local: host type reference; @deepseek-ai/dsh-llm-deepseek: pnpm workspace link; @deepseek-ai/dsh-llm-deepseek: host type reference; @deepseek-ai/dsh-agent-tool-presentation: pnpm workspace link; @deepseek-ai/dsh-agent-tool-presentation: host type reference; @deepseek-ai/dsh-host-frontend-static: pnpm workspace link; @deepseek-ai/dsh-host-frontend-static: host type reference"
+    },
+    {
+      "path": "vendor/timer",
+      "reason": "host YAML composition; @deepseek-ai/dsh-plugin-manager: host type reference; @deepseek-ai/dsh-hmr: pnpm workspace link; @deepseek-ai/dsh-hmr: host type reference; @deepseek-ai/dsh-cordis-host-runner: host type reference; @deepseek-ai/dsh-tool-cordis: host type reference; @deepseek-ai/dsh-base: pnpm workspace link"
+    }
+  ],
+  "versionFile": "package.json",
+  "dependencyLockPath": "pnpm-lock.yaml"
+}

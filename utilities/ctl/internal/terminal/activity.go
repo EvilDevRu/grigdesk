@@ -37,6 +37,16 @@ type activity struct {
 	revision uint64
 }
 
+type activityQuestion struct {
+	choice Choice
+	answer chan activityAnswer
+}
+
+type activityAnswer struct {
+	index int
+	err   error
+}
+
 // Write собирает ограниченный хвост вывода дочерних процессов для экрана результата.
 // CR заменяет текущую строку индикатора, LF добавляет её к обычному выводу.
 func (work *activity) Write(data []byte) (int, error) {
@@ -95,7 +105,7 @@ func (work *activity) setProgress(status progressStatus) {
 // RunActivity меняет содержимое уже открытого экрана, сохраняя его владельца.
 // Результат можно просмотреть и закрыть отдельно от всего меню.
 func (screen *Screen) RunActivity(
-	input Input, labels ActivityLabels, run func(context.Context, io.Writer) int,
+	input Input, labels ActivityLabels, run func(context.Context, io.Writer, ChooseFunc) int,
 ) error {
 	work := &activity{}
 	code, err := screen.waitActivity(input, labels, work, run)
@@ -119,7 +129,7 @@ func (screen *Screen) RunActivity(
 // waitActivity читает Ctrl+C в raw-режиме и отменяет только выполняемую команду.
 // Сигнал всему CLI и закрытый ввод завершают сеанс после уборки дочерней команды.
 func (screen *Screen) waitActivity(input Input, labels ActivityLabels, work *activity,
-	run func(context.Context, io.Writer) int) (int, error) {
+	run func(context.Context, io.Writer, ChooseFunc) int) (int, error) {
 	restore, err := term.MakeRaw(input.FD)
 	if err != nil {
 		return 2, Exit(2)
@@ -128,9 +138,16 @@ func (screen *Screen) waitActivity(input Input, labels ActivityLabels, work *act
 
 	ctx, stop := context.WithCancel(input.Ctx)
 	defer stop()
+	questions := make(chan activityQuestion)
 	finished := make(chan int, 1)
-	go func() { finished <- run(ctx, work) }()
+	go func() {
+		finished <- run(ctx, work, func(choice Choice) (int, error) {
+			return askActivity(ctx, questions, choice)
+		})
+	}()
 
+	activityInput := input
+	activityInput.Ctx = ctx
 	var oldColumns, oldRows int
 	var oldRevision uint64
 	var redrawn time.Time
@@ -144,6 +161,14 @@ func (screen *Screen) waitActivity(input Input, labels ActivityLabels, work *act
 				return 130, nil
 			}
 			return code, nil
+		case question := <-questions:
+			index, err := screen.Choose(activityInput, question.choice)
+			question.answer <- activityAnswer{index, err}
+			if err == EndOfInput {
+				stop()
+				return <-finished, err
+			}
+			redrawn = time.Time{}
 		default:
 		}
 		columns, rows := Size(input.FD)
@@ -164,6 +189,24 @@ func (screen *Screen) waitActivity(input Input, labels ActivityLabels, work *act
 			}
 			redrawn = time.Time{}
 		}
+	}
+}
+
+// askActivity передаёт вопрос владельцу экрана и клавиатуры.
+// Отмена освобождает ожидающую команду, даже если экран уже закрывается.
+func askActivity(ctx context.Context, questions chan<- activityQuestion, choice Choice) (int, error) {
+	answer := make(chan activityAnswer, 1)
+	select {
+	case questions <- activityQuestion{choice, answer}:
+	case <-ctx.Done():
+		return -1, Exit(130)
+	}
+
+	select {
+	case result := <-answer:
+		return result.index, result.err
+	case <-ctx.Done():
+		return -1, Exit(130)
 	}
 }
 

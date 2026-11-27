@@ -38,7 +38,7 @@ Offline-тесты могут явно передать test admission, loopback
 той же рабочей копии, а следующая сборка замораживает новый список в metadata.
 
 Preflight `deepseek/scripts/admissionPreflight.mts` считает identity входов дерева той же
-`glmRuntimeIdentity`, что и сборка, и отвечает CLI, нужен ли вопрос о живом smoke.
-Авторитет допуска остаётся за `admission:check` собранного кандидата. Любая правка входов
+`glmRuntimeIdentity`, что и сборка. Go CLI предлагает живой smoke по результату
+`admission:check` собранного кандидата. Любая правка входов
 билдера, включая сам `buildRuntime.mts`, устаревляет записи допуска до нового живого
 smoke с `--admit` и следующей сборки. Подробности — [preflight допуска](glm-admission-preflight.md).

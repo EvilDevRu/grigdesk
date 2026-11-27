@@ -10,6 +10,7 @@ import { artifactsPath } from '../../shared/runtime/dataHome.ts';
 import {
   COMPOSITION_REVISION,
   discoverRuntimeClosure,
+  glmForegroundPreset,
   readRuntimeComposition,
   runtimeYaml,
 } from '../../deepseek/scripts/runtimeComposition.ts';
@@ -26,7 +27,32 @@ const DEPENDENCIES = await testDeepSeekRuntimeDependencies();
 
 const PLUGIN = '@deepseek-ai/dsh-llm-pi-ai';
 const ARTIFACTS = path.join(artifactsPath({ env: process.env, home: os.homedir() }), 'glm/G1');
-const UPSTREAM = path.resolve(import.meta.dirname, '../../deepseek/vendor/deepseek-harness/upstream');
+const VENDOR = process.env.GRIGDESK_TEST_DEEPSEEK_VENDOR_DIR
+  ?? path.resolve(import.meta.dirname, '../../deepseek/vendor/deepseek-harness');
+const UPSTREAM = path.join(VENDOR, 'upstream');
+
+test('профиль GLM сохраняет два scoped tools новой декларации', () => {
+  const rows = [
+    {
+      id: 'tool-subagent',
+      config: {
+        provider: 'spawn',
+        modelSelection: true,
+      },
+    },
+    {
+      id: 'tool-subagent-fork',
+      config: { provider: 'fork' },
+    },
+  ];
+  const transformed = glmForegroundPreset(rows);
+
+  assert.equal(transformed.length, 2);
+  assert.deepEqual(transformed.map((row) => row.config.provider), ['spawn', 'fork']);
+  assert.ok(transformed.every((row) => row.config.modelSelection === false && row.config.maxDepth === 3));
+  assert.ok(transformed.every((row) => row.config.grigdeskForeground === true));
+  assert.equal(rows[0].config.modelSelection, true);
+});
 
 /**
  * Малый стенд проверяет обход manifests и фильтрацию YAML настоящими функциями сборки.
@@ -93,21 +119,28 @@ test('llm-pi-ai входит в замыкание как host overlay, а base 
   assert.deepEqual(closure.reasons[PLUGIN], ['GrigDesk server-owned overlay']);
   assert.deepEqual(closure.external[PLUGIN], { 'synthetic-model-library': '3.4.0' });
   assert.equal(layers.base.some((patch) => patch.insert?.some((row) => row.name === PLUGIN)), false);
-  assert.equal(COMPOSITION_REVISION, 'grigdesk-host-web-acp-v4');
+  assert.equal(COMPOSITION_REVISION, 'grigdesk-host-web-acp-v5');
 });
 
-test('pi-ai разрешён в exact 0.85.1 с integrity из upstream lock', async () => {
+test('pi-ai использует exact версию и SRI выбранного upstream', async () => {
   const lock = runtimeYaml(DEPENDENCIES.directory).load(
     await fs.readFile(path.join(UPSTREAM, 'pnpm-lock.yaml'), 'utf8'),
   );
   const dependencies = llmPiAiExternalDependencies(lock);
   const modelLibrary = dependencies.find((entry) => entry.name === '@earendil-works/pi-ai');
+  const importer = lock.importers['packages/llm/llm-pi-ai'];
+  const reference = importer.dependencies['@earendil-works/pi-ai'].version;
+  const version = reference.split('(')[0];
+  const npm = JSON.parse(await fs.readFile(path.join(DEPENDENCIES.directory, 'package-lock.json'), 'utf8'));
+  const packageRecord = npm.packages['node_modules/@earendil-works/pi-ai'];
 
   assert.deepEqual(modelLibrary, {
     name: '@earendil-works/pi-ai',
-    version: '0.85.1',
-    integrity: lock.packages['@earendil-works/pi-ai@0.85.1'].resolution.integrity,
+    version,
+    integrity: lock.packages[`@earendil-works/pi-ai@${version}`].resolution.integrity,
   });
+  assert.equal(packageRecord.version, version);
+  assert.equal(packageRecord.integrity, modelLibrary.integrity);
 });
 
 test('внешние зависимости llm-pi-ai выводятся из upstream lock', async () => {
@@ -115,37 +148,37 @@ test('внешние зависимости llm-pi-ai выводятся из up
     await fs.readFile(path.join(UPSTREAM, 'pnpm-lock.yaml'), 'utf8'),
   );
   const dependencies = llmPiAiExternalDependencies(lock);
+  const openai = dependencies.find((entry) => entry.name === 'openai');
+  const reference = lock.importers['packages/llm/llm-pi-ai'].dependencies['@earendil-works/pi-ai'].version;
 
-  assert.equal(dependencies.length, 190);
-  assert.equal(new Set(dependencies.map((entry) => `${entry.name}@${entry.version}`)).size, 190);
-  assert.equal(dependencies.some((entry) => entry.name === 'openai' && entry.version === '6.40.0'), true);
+  assert.equal(new Set(dependencies.map((entry) => `${entry.name}@${entry.version}`)).size,
+    dependencies.length);
+  assert.ok(openai);
   assert.equal(dependencies.some((entry) => entry.name === '@aws-sdk/client-bedrock-runtime'), true);
   assert.equal(dependencies.every((entry) => /^sha512-/u.test(entry.integrity)), true);
 
   const brokenIntegrity = structuredClone(lock);
 
-  delete brokenIntegrity.packages['openai@6.40.0'].resolution.integrity;
+  delete brokenIntegrity.packages[`openai@${openai.version}`].resolution.integrity;
   assert.throws(() => llmPiAiExternalDependencies(brokenIntegrity), /integrity.*openai/u);
 
   const brokenSnapshot = structuredClone(lock);
 
-  delete brokenSnapshot.snapshots[
-    '@earendil-works/pi-ai@0.85.1(@modelcontextprotocol/sdk@1.29.0(zod@4.4.3))(ws@8.21.0)(zod@4.4.3)'
-  ];
+  delete brokenSnapshot.snapshots[`@earendil-works/pi-ai@${reference}`];
   assert.throws(() => llmPiAiExternalDependencies(brokenSnapshot), /snapshot/u);
 
   const native = structuredClone(lock);
 
-  native.packages['openai@6.40.0'].requiresBuild = true;
+  native.packages[`openai@${openai.version}`].requiresBuild = true;
   assert.throws(() => llmPiAiExternalDependencies(native), /нативн/u);
 });
 
 test('каждый внешний пакет closure pi-ai имеет лицензию в notices', async (t) => {
   const root = await fs.mkdtemp(path.join(ARTIFACTS, 'licenses-'));
-  const lock = runtimeYaml(DEPENDENCIES.directory).load(
-    await fs.readFile(path.join(UPSTREAM, 'pnpm-lock.yaml'), 'utf8'),
-  );
+  const lockSource = await fs.readFile(path.join(UPSTREAM, 'pnpm-lock.yaml'));
+  const lock = runtimeYaml(DEPENDENCIES.directory).load(lockSource.toString('utf8'));
   const dependencies = llmPiAiExternalDependencies(lock);
+  const port = sha256(lockSource) === 'dbe5dc43a686cad2e2c6d20c94a7d56abbfad8dd62213a7a8a7c91662b3537d1';
   const modules = path.join(DEPENDENCIES.directory, 'node_modules');
   const compilerPackages = ['typescript', 'esbuild', '@esbuild'];
 
@@ -163,11 +196,21 @@ test('каждый внешний пакет closure pi-ai имеет лицен
 
   const inventory = JSON.parse(await fs.readFile(path.join(root, 'licenses/index.json'), 'utf8'));
 
-  for (const dependency of dependencies) {
-    const record = inventory.packages.find((entry) => entry.name === dependency.name
-      && entry.version === dependency.version);
+  if (port) {
+    assert.equal(inventory.packages.some((entry) => entry.name === 'proxy-agent-negotiate'), false);
+  }
 
-    assert.ok(record, `${dependency.name}@${dependency.version}`);
+  for (const { name, version } of dependencies) {
+    if (port && name === 'proxy-agent-negotiate') {
+      continue;
+    }
+
+    const usesPort = port && version === '9.1.0' && ['http-proxy-agent', 'https-proxy-agent'].includes(name);
+    const expectedVersion = usesPort ? '9.0.0' : version;
+    const record = inventory.packages.find((entry) => entry.name === name
+      && entry.version === expectedVersion);
+
+    assert.ok(record, `${name}@${expectedVersion}`);
     assert.ok(record.files.length > 0);
 
     for (const file of record.files) {
@@ -211,7 +254,7 @@ test('вычисляемый import вне dynamic-imports.json даёт отк�
     'export const load = (moduleId) => import(moduleId);\n'
     + 'export const builtin = () => import("node:fs");\n');
 
-  const references = await scanDynamicRuntimeReferences(root, [], [directory]);
+  const references = await scanDynamicRuntimeReferences(root, [], [directory], DEPENDENCIES.directory);
   const known = JSON.parse(await fs.readFile(
     path.resolve(import.meta.dirname, '../../deepseek/build/dynamic-imports.json'), 'utf8',
   ));

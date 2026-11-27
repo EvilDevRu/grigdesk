@@ -1,0 +1,227 @@
+diff --git a/packages/api/settings-controller/src/index.ts b/packages/api/settings-controller/src/index.ts
+--- a/packages/api/settings-controller/src/index.ts
++++ b/packages/api/settings-controller/src/index.ts
+@@ -94,7 +94,13 @@
+    * @returns provider writability, local-document presence, and one view per namespace.
+    * @throws RemoteError when no settings provider is mounted.
+    */
+-  @Remote
++  @Remote({ name: 'describe' })
++  async describeWhenReady(): Promise<SettingsDescribeValue> {
++    await this.waitForEmbeddedProfile()
++    return this.describe()
++  }
++
++  /** Synchronous provider view for local callers that already own startup. */
+   describe(): SettingsDescribeValue {
+     const settings = this.provider()
+     return {
+@@ -165,6 +171,7 @@
+    */
+   @Remote
+   async openSettingsDocument(signal: AbortSignal): Promise<SettingsDocumentOpenValue> {
++    await this.waitForEmbeddedProfile()
+     const settings = this.provider()
+     if (isAborted(signal)) throw new RemoteError('gateway/cancelled', 'settings document open was aborted', {})
+     let path: string
+@@ -194,6 +201,7 @@
+     if (!parsed.success) {
+       throw new RemoteError('gateway/bad-request', `invalid payload for settings.${mode}`, { issues: parsed.error.issues })
+     }
++    await this.waitForEmbeddedProfile()
+     const settings = this.provider()
+     const namespace = parsed.data.ns
+     try {
+@@ -212,6 +220,14 @@
+     return namespaceView(descriptor)
+   }
+ 
++  /** A host can restore its copied settings before reporting values or accepting edits. */
++  private async waitForEmbeddedProfile(): Promise<void> {
++    const profile = this.ctx.get('embeddedSettingsProfile')
++    if (profile !== undefined && !await profile.ready) {
++      throw new RemoteError('gateway/internal', 'embedded settings profile failed to start', {})
++    }
++  }
++
+   /** Resolve the optional provider or report how to supply it. */
+   private provider(): SettingsForms {
+     const settings = this.ctx.get('settings')
+diff --git a/packages/boot/config-editor/src/index.ts b/packages/boot/config-editor/src/index.ts
+--- a/packages/boot/config-editor/src/index.ts
++++ b/packages/boot/config-editor/src/index.ts
+@@ -10,10 +10,26 @@
+ import { withFileLock, writeFileAtomic } from '@deepseek-ai/dsh-atomic-write'
+ import { isMap, isSeq, parseDocument, Scalar, visit } from 'yaml'
+ 
++/** Fixed composition supplied by a host that embeds the settings services. */
++interface EmbeddedSettingsProfile {
++  readonly path: string
++  readonly legacyPath?: string
++  readonly ready: Promise<boolean>
++  readonly base: PatchOptions[]
++  readonly accepts: (id: string) => boolean
++  read(patches?: PatchOptions[]): PatchOptions[]
++}
++
++interface EditorProfile {
++  layers: Array<{ patches: PatchOptions[] }>
++  patches: PatchOptions[]
++}
++
+ declare module '@deepseek-ai/cordis' {
+   interface Context {
+     /** Persistent edits to the active profile's plugin configuration. */
+     configEditor: ConfigEditor
++    embeddedSettingsProfile: EmbeddedSettingsProfile
+   }
+ }
+ 
+@@ -23,14 +39,33 @@
+ 
+ /** Persist complete raw configs and apply them through the normal Loader path. */
+ export class ConfigEditor extends Service {
+-  static inject = ['loader', 'profileContext']
++  static inject = ['loader']
+ 
+   constructor(private readonly ownerContext: Context) {
+     super(ownerContext, 'configEditor')
+   }
+ 
+   /** The profile patch edited by this service. */
+-  get documentPath(): string { return this.ownerContext.profileContext.patchPath }
++  get documentPath(): string { return this.embedded?.path ?? this.ownerContext.profileContext.patchPath }
++
++  private get embedded(): EmbeddedSettingsProfile | undefined {
++    return this.ownerContext.get('embeddedSettingsProfile')
++  }
++
++  private profile(): EditorProfile {
++    const embedded = this.embedded
++    if (embedded !== undefined) return { layers: [{ patches: embedded.base }], patches: embedded.read() }
++    const profile = this.ownerContext.profileContext
++    return loadProfileDirectory('dsh', profile.dir, profile.installAnchor)
++  }
++
++  private patches(overrides?: PatchOptions[]): PatchOptions[] {
++    const embedded = this.embedded
++    if (embedded !== undefined) return [...structuredClone(embedded.base), ...embedded.read(overrides)]
++    const profile = this.ownerContext.profileContext
++    const loaded = overrides === undefined ? undefined : { ...loadProfileDirectory('dsh', profile.dir, profile.installAnchor), patches: overrides }
++    return readProfilePatches('dsh', profile, loaded)
++  }
+ 
+   /** Addressable profile rows; nested Includes have independent configuration ownership.
+    * @returns Active entries with unique profile patch ids.
+@@ -39,15 +74,15 @@
+     const candidates = [...this.ownerContext.loader.entries()].filter(entry => entry.parent.tree.ctx.fiber.entry?.id === 'include')
+     const counts = new Map<string, number>()
+     for (const entry of candidates) counts.set(entry.options.id, (counts.get(entry.options.id) ?? 0) + 1)
+-    return candidates.filter(entry => counts.get(entry.options.id) === 1)
++    return candidates.filter(entry => counts.get(entry.options.id) === 1
++      && (this.embedded?.accepts(entry.options.id) ?? true))
+   }
+ 
+   /** Read inherited and explicit profile values for the active entries.
+    * @returns Detached layer values alongside their Loader entries.
+    */
+   configuration(): Array<{ entry: Entry; inherited: Record<string, unknown>; override: Record<string, unknown> }> {
+-    const profile = this.ownerContext.profileContext
+-    const loaded = loadProfileDirectory('dsh', profile.dir, profile.installAnchor)
++    const loaded = this.profile()
+     const entries = this.entries()
+     // An own config key can replace inherited config even when its value is undefined.
+     const overridden = new Set(loaded.patches.filter(patch => patch.insert === undefined && Object.hasOwn(patch, 'config')).map(patch => patch.id))
+@@ -68,7 +103,7 @@
+     }))
+   }
+ 
+-  private inherited(entry: Entry, loaded: ReturnType<typeof loadProfileDirectory>): Record<string, unknown> {
++  private inherited(entry: Entry, loaded: EditorProfile): Record<string, unknown> {
+     const patches = loaded.patches.map((patch) => {
+       if (patch.id !== entry.options.id || patch.insert !== undefined) return patch
+       const rest = { ...patch }; Reflect.deleteProperty(rest, 'config')
+@@ -89,13 +124,14 @@
+   ): Promise<void> {
+     const run = async (): Promise<void> => {
+       const path = this.documentPath
+-      await withFileLock(join(this.ownerContext.profileContext.dir, 'package.json'), async () => {
++      const lockPath = this.embedded === undefined ? join(this.ownerContext.profileContext.dir, 'package.json') : path
++      await withFileLock(lockPath, async () => {
+         if (!this.entries().includes(entry) || entry.fiber === undefined) throw new Error('Configuration entry is no longer available')
+-        const beforePatches = readProfilePatches('dsh', this.ownerContext.profileContext)
++        const beforePatches = this.patches()
+         await reconcileProfilePatches(this.ownerContext[Context.root], beforePatches, 'dsh')
+         if (!this.entries().includes(entry)) throw new Error('Configuration entry changed during reload')
+         const current = structuredClone((entry.options.config ?? {}) as Record<string, unknown>)
+-        const inherited = this.inherited(entry, loadProfileDirectory('dsh', this.ownerContext.profileContext.dir, this.ownerContext.profileContext.installAnchor))
++        const inherited = this.inherited(entry, this.profile())
+         const next = change(current, inherited)
+         const fiber = entry.fiber
+         if (fiber.state !== FiberState.ACTIVE) throw new Error('Configuration plugin is no longer active')
+@@ -130,9 +166,7 @@
+           expression.tag = 'tag:yaml.org,2002:js'
+           return expression
+         } })
+-        const profile = this.ownerContext.profileContext
+-        const loaded = loadProfileDirectory('dsh', profile.dir, profile.installAnchor)
+-        const patches = readProfilePatches('dsh', profile, { ...loaded, patches: parseEntryYaml(String(document)) as PatchOptions[] })
++        const patches = this.patches(parseEntryYaml(String(document)) as PatchOptions[])
+         const effective = flatten(composeEntries([patches])).find(row => row.id === entry.options.id)
+         if (!isDeepStrictEqual(effective?.config ?? {}, next)) {
+           throw new Error(`Configuration for "${entry.options.id}" is overridden by a home patch or command-line overlay`)
+diff --git a/packages/settings/settings/src/index.ts b/packages/settings/settings/src/index.ts
+--- a/packages/settings/settings/src/index.ts
++++ b/packages/settings/settings/src/index.ts
+@@ -221,7 +221,7 @@
+ 
+ /** Project Config schemas into forms and own optional instance-level UI policy. */
+ export class SettingsForms extends Service {
+-  static inject = ['configEditor', 'profileContext']
++  static inject = ['configEditor']
+   private revisions = new Map<string, { raw: string | undefined; revision: number; ns: SettingsNamespace; autoGenerate: boolean }>()
+   private closed = false
+   private scheduled = false
+@@ -232,7 +232,9 @@
+     const ctx = ownerContext
+     ctx.effect(() => () => { this.closed = true })
+     ctx.on('app-boot/config-reload', () => { this.invalidate() })
+-    void ctx[Context.root].loader.await().then(() => this.importLegacyDocument()).catch((error: unknown) => { ctx.logger.error(error) })
++    if (ctx.get('profileContext') !== undefined) {
++      void ctx[Context.root].loader.await().then(() => this.importLegacyDocument()).catch((error: unknown) => { ctx.logger.error(error) })
++    }
+   }
+ 
+   /** Move the sections of the removed `settings.yaml` into the active profile once the Loader has settled every entry.
+@@ -244,17 +246,28 @@
+     if (!existsSync(path)) return
+     const imported = `${path}.imported`
+     await rename(path, imported)
+-    const sections = parse(await readFile(imported, 'utf8')) as Record<string, object> | null
++    await this.importLegacySections(imported)
++    this.ownerContext.logger.info('settings: imported %s into profile %s', imported, profile.name)
++  }
++
++  /** Recover a GrigDesk-owned legacy document once, leaving the original available for rollback. */
++  async restoreEmbeddedDocument(): Promise<void> {
++    const profile = this.ownerContext.get('embeddedSettingsProfile')
++    if (profile?.legacyPath === undefined || existsSync(profile.path) || !existsSync(profile.legacyPath)) return
++    await this.importLegacySections(profile.legacyPath)
++  }
++
++  private async importLegacySections(source: string): Promise<void> {
++    const sections = parse(await readFile(source, 'utf8')) as Record<string, object> | null
+     for (const [section, values] of Object.entries(sections ?? {})) {
+       const ns = LEGACY_SECTION_ENTRIES[section] ?? section
+       try {
+         await this.update(ns, values)
+       } catch (error) {
+-        this.ownerContext.logger.warn('settings: section %s of %s was not imported into entry %s', section, imported, ns)
++        this.ownerContext.logger.warn('settings: section %s of %s was not imported into entry %s', section, source, ns)
+         this.ownerContext.logger.warn(error)
+       }
+     }
+-    this.ownerContext.logger.info('settings: imported %s into profile %s', imported, profile.name)
+   }
+ 
+   /** Register the calling plugin instance's page policy without changing its Config.

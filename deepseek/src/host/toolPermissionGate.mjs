@@ -61,7 +61,7 @@ export function apply(ctx, input) {
    * Эта синхронная установка происходит до systemPrompt.assemble, а pre-step остаётся veto.
    */
   function initialize(agent) {
-    if (!agents.roots().includes(agent)) {
+    if (agents.get(agent.id) !== agent || agent.session.header.origin === 'subagent') {
       return;
     }
 
@@ -87,7 +87,8 @@ export function apply(ctx, input) {
   function denial(agent) {
     const state = agent && roots.get(agent);
 
-    if (!state || state.error || agents.get(agent.id) !== agent || !agents.roots().includes(agent)) {
+    if (!state || state.error || agents.get(agent.id) !== agent
+      || agent.session.header.origin === 'subagent') {
       return 'Политика разрешений не установлена для этого агента';
     }
 
@@ -114,8 +115,8 @@ export function apply(ctx, input) {
       && snapshot.definition?.execute === snapshot.execute;
   }
 
-  ctx.on('agent/session-start', ({ agent }) => initialize(agent));
-  ctx.on('agent/disposed', ({ agent }) => roots.delete(agent));
+  ctx.on('agent/created', ({ agent }) => initialize(agent), { global: true });
+  ctx.on('agent/disposed', ({ agent }) => roots.delete(agent), { global: true });
   ctx.on('agent/pre-step', async ({ agent }, next) => {
     if (denial(agent)) {
       return { kind: 'reject' };

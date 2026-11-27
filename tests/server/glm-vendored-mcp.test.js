@@ -158,7 +158,7 @@ test(READY_TEST, async (t) => {
 
     const names = f.mock.requests[0].payload.tools.map((tool) => tool.function.name);
 
-    assert.deepEqual(atPrompt, ['spawn', 'initialize', 'tools/list']);
+    assert.deepEqual(atPrompt.slice(-3), ['spawn', 'initialize', 'tools/list']);
     assert.ok(names.includes('mcp__grigdesk-work__echo'));
   });
 
@@ -220,7 +220,7 @@ test('настоящий исключённый сервер не получае
 
   assert.deepEqual(project.lines(), []);
   assert.ok(names.every((name) => !name.startsWith('mcp__project__')));
-  assert.ok(warnings.some((warning) => /«project» не подключается к GLM/u.test(warning)));
+  assert.ok(warnings.some((warning) => /«project» не подключён к GLM/u.test(warning)));
 });
 
 test('настоящий инструмент grigdesk-work, объявленный после старта, не выполняется', async (t) => {

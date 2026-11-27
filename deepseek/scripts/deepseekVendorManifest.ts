@@ -575,34 +575,23 @@ async function replaceUpstream(
 /**
  * Патч проверяется и применяется лишь к сборочной копии вне рабочего Git checkout.
  * git apply не получает unsafe-paths; конфликт не может испортить исходный снимок.
- * Опциональный патч сборки применяется вслед за патчами из manifest.
  */
-export async function checkDeepSeekPatches(
-  directory: string,
-  destination: string,
-  buildPatch?: string,
-): Promise<void> {
+export async function checkDeepSeekPatches(directory: string, destination: string): Promise<void> {
   const manifest = await verifyDeepSeekSnapshot(directory);
-  const patches = manifest.patches.map(({ path: name }) => ({
-    name,
-    file: path.resolve(directory, 'patches', name),
-  }));
-
-  if (buildPatch) {
-    patches.push({ name: path.basename(buildPatch), file: buildPatch });
-  }
 
   await assertPlainPath(destination);
   await fs.mkdir(destination);
   await fs.cp(path.join(directory, 'upstream'), destination, { recursive: true });
   await exec('git', ['init', '-q', destination]);
 
-  for (const patch of patches) {
+  for (const patch of manifest.patches) {
+    const patchFile = path.resolve(directory, 'patches', patch.path);
+
     try {
-      await exec('git', ['-C', destination, 'apply', '--check', '--', patch.file]);
-      await exec('git', ['-C', destination, 'apply', '--', patch.file]);
+      await exec('git', ['-C', destination, 'apply', '--check', '--', patchFile]);
+      await exec('git', ['-C', destination, 'apply', '--', patchFile]);
     } catch {
-      throw new Error(`Конфликт или небезопасный путь патча: ${patch.name}`);
+      throw new Error(`Конфликт или небезопасный путь патча: ${patch.path}`);
     }
   }
 

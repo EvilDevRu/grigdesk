@@ -165,7 +165,10 @@ export function glmMcpLossError(
     return null;
   }
 
-  return /\bNot connected\b|Connection closed/iu.test(JSON.stringify(content ?? ''))
+  const result = JSON.stringify(content ?? '');
+  const disconnected = result.includes(`mcp-client(${hostServer}): server is disconnected`);
+
+  return disconnected || /\bNot connected\b|Connection closed/iu.test(result)
     ? glmAccessError('glm_mcp_not_ready', hostServer === GLM_WORK_SERVER_NAME ? NOT_READY
       : `Служебный MCP ${hostServer} не готов или потерян; действие не выполнено.`) : null;
 }

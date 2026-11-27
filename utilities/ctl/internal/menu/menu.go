@@ -148,7 +148,10 @@ func rootItems() []item {
 			{label: "serverOnly", argv: []string{"build", "server"}},
 			{label: "web", argv: []string{"build", "web"}},
 			{label: "window", argv: []string{"build", "window"}},
-			{label: "deepseek", argv: []string{"build", "deepseek"}},
+			{label: "deepseek", desc: "deepseekDescription", children: []item{
+				{label: "deepseekBuild", argv: []string{"build", "deepseek"}},
+				{label: "harnessAdmission.action", argv: []string{"build", "deepseek-admission"}},
+			}},
 			{label: "apk", argv: []string{"build", "apk"}},
 		}},
 		{label: "development", children: []item{
@@ -277,8 +280,9 @@ func (ui *session) activity(label string, args []string) int {
 		Done: ui.lang.Text("screens.done"), Failed: ui.lang.Text("screens.failed"),
 		Cancel: ui.lang.Text("screens.cancel"), Navigation: ui.lang.Text("screens.resultNavigation"),
 	}
-	err := ui.screen.RunActivity(ui.input, labels, func(ctx context.Context, output io.Writer) int {
-		return ui.run(ctx, args, service.Terminal{Stdout: output, Stderr: output, Screen: &ui.screen})
+	err := ui.screen.RunActivity(ui.input, labels, func(ctx context.Context, output io.Writer,
+		choose terminal.ChooseFunc) int {
+		return ui.run(ctx, args, service.Terminal{Stdout: output, Stderr: output, Screen: &ui.screen, Choose: choose})
 	})
 	switch err {
 	case terminal.EndOfInput:

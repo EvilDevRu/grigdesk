@@ -201,8 +201,11 @@ test(KILL_TEST, async (t) => {
   assert.equal(crashed.stopDetails.exit.signal, 'SIGKILL');
   assert.equal(next.reply, 'continued');
   assert.equal(await f.marker(), 1, 'эффект не повторён runtime');
-  // Восстановление DSH дописывает модели исход «неизвестен» вместо повтора вызова.
-  assert.match(messages, /outcome is unknown/u);
+  // После восстановления модель получает терминальный результат старого вызова.
+  const recovered = JSON.parse(messages).find((message) =>
+    message.role === 'tool' && message.tool_call_id === 'call-1');
+
+  assert.match(recovered?.content ?? '', /outcome is unknown|tool call aborted/u);
 });
 
 test(RETRY_TEST, async (t) => {

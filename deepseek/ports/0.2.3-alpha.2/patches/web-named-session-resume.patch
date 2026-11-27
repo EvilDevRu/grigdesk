@@ -1,0 +1,52 @@
+diff --git a/packages/api/session-controller/src/agent.ts b/packages/api/session-controller/src/agent.ts
+--- a/packages/api/session-controller/src/agent.ts
++++ b/packages/api/session-controller/src/agent.ts
+@@ -14,6 +14,13 @@
+ import { RemoteError, remoteErrorOf } from '@deepseek-ai/dsh-typert-protocol'
+ import type {} from '@deepseek-ai/dsh-typert-registry'
+ 
++declare module '@deepseek-ai/cordis' {
++  interface Context {
++    /** GrigDesk passes an explicit session id to resume an existing conversation. */
++    grigdeskResumeNamedSession: true
++  }
++}
++
+ /** Cold Session identity absent from persistence. */
+ export class ApiSessionNotFound extends Error {}
+ 
+@@ -331,6 +338,10 @@
+ 
+   /** @returns the reused Session, a new Session under `sessionId` when none is stored, or a new Session under a minted identity. */
+   private async claim(sessionId: SessionId, request: ApiSessionCreateRequest): Promise<Agent> {
++    const resumeNamed = request.agentPreset === undefined && this.ctx.get('grigdeskResumeNamedSession') === true
++    if (resumeNamed && !request.reusable(sessionId)) {
++      throw new ApiSessionNotFound(`session "${sessionId}" not found`)
++    }
+     const attached = this.ctx.sessions.get(sessionId)
+     const live = this.ctx.agents.get(sessionId)
+     if (attached !== undefined && hasApiSessionSubagentOwner(attached)) {
+@@ -340,6 +351,7 @@
+       if (!await this.namesDirectory(live.session.header.cwd, request.cwd)) {
+         throw new ApiSessionCwdConflict(live.id, request.cwd, live.session.header.cwd)
+       }
++      if (resumeNamed) return live
+       const composition = await this.composeAgent(request.agentPreset)
+       return await this.reuseLive(live, request, composition) ?? this.createMinted(request.cwd, composition)
+     }
+@@ -348,6 +360,7 @@
+       observation = await this.ctx.sessionQuery.observeSession(sessionId)
+     } catch (error: unknown) {
+       if (!(error instanceof SessionQueryError) || error.code !== 'SESSION_QUERY_SESSION_NOT_FOUND') throw error
++      if (resumeNamed) throw new ApiSessionNotFound(`session "${sessionId}" not found`)
+       return this.createAgent(sessionId, request.cwd, await this.composeAgent(request.agentPreset))
+     }
+     let reusable: boolean
+@@ -359,6 +372,7 @@
+       if (!await this.namesDirectory(observed.header.cwd, request.cwd)) {
+         throw new ApiSessionCwdConflict(sessionId, request.cwd, observed.header.cwd)
+       }
++      if (resumeNamed) return await this.resumeObserved(sessionId, observed)
+       reusable = request.reusable(sessionId) && !observed.events.some(event => event.type === 'turn/start')
+     }
+     const composition = await this.composeAgent(request.agentPreset)

@@ -47,7 +47,7 @@ HTTP, TLS, сигналы и синтетический синтез через 
 
 - [Замер press включает остановку драйвера, если HTTP-приёмник делит его Node event loop](chat-performance-isolation.md)
 - [Вложенный node_modules в снимке Harness: одна причина vendor/buildInputs и отказа общего preflight](deepseek-vendor-node-modules.md)
-- [Подготовка legacy fixture DeepSeek: ABI-кэш, последовательный CI preflight и восстановление](deepseek-legacy-preflight.md)
+- [Подготовка DeepSeek: ABI-кэш, legacy fixture и проверка staging](deepseek-legacy-preflight.md)
 - [Унаследованный ELF меняет установку CLI-фикстуры после переноса helper-а](cli-helper-binary-environment.md)
 - [Vite и i18n: холодный граф, формы, viewport и готовый документ после 401/reload](browser-navigation-timeout.md)
 - [Типы тестов установки: реестр без UI, Fastify, опись выпуска и TCP-адрес фикстуры](provider-install-type-boundaries.md)

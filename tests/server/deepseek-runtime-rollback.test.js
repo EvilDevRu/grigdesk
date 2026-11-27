@@ -84,7 +84,9 @@ test('настоящий binary rollback сохраняет активный A, 
 
   const home = chatHomeFor(f.config.deepseekRuntimeHome, 'running-a', 'stable');
   const directory = sessionJournalDirectory(home, f.cwd, third.sessionId);
-  const current = (await fs.readdir(directory)).find((name) => /^session\.v3\.jsonl(?:\.zstd)?$/u.test(name));
+  const expected = `session.v${a.info.journal.write}.jsonl`;
+  const current = (await fs.readdir(directory)).find((name) =>
+    name === expected || name === `${expected}.zstd`);
 
   assert.ok(current);
 

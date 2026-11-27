@@ -76,11 +76,11 @@ export async function desktopUsesBinary(input: {
  */
 async function main(): Promise<void> {
   const [command, value, ...extra] = process.argv.slice(2);
+  const commands = ['prepare-runtime', 'check-desktop', 'queue-desktop', 'glm-mode', 'glm54-backport'];
 
-  if (!value || extra.length > 0
-    || !['prepare-runtime', 'check-desktop', 'queue-desktop', 'glm-mode'].includes(command ?? '')) {
+  if (!value || extra.length > 0 || !commands.includes(command ?? '')) {
     process.stderr.write('Ожидается prepare-runtime <cache>, check-desktop <ELF>, '
-      + 'queue-desktop <ELF> или glm-mode <env-файл>\n');
+      + 'queue-desktop <ELF>, glm-mode <env-файл> или glm54-backport <upstream.lock.json>\n');
     process.exitCode = 2;
 
     return;
@@ -88,6 +88,11 @@ async function main(): Promise<void> {
 
   if (command === 'glm-mode') {
     process.stdout.write(`${await consumerGlmMode(value)}\n`);
+  } else if (command === 'glm54-backport') {
+    const { glm54BackportApplicable } = await import('../../deepseek/scripts/glm54Backport.mts');
+    const source = JSON.parse(await readFile(value, 'utf8'));
+
+    process.stdout.write(`${glm54BackportApplicable(source) ? '1' : '0'}\n`);
   } else if (command === 'prepare-runtime') {
     await prepareBuildRuntime(value);
   } else if (command === 'queue-desktop') {
