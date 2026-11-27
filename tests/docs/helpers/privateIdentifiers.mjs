@@ -93,7 +93,7 @@ export function scanText(file, source) {
     }
   }
 
-  for (const match of source.matchAll(/(?:^|[^A-Za-z0-9_$<])profiles\/([A-Za-z][A-Za-z0-9._-]*)/gu)) {
+  for (const match of source.matchAll(/(?<![A-Za-z0-9._$<-])profiles\/([A-Za-z][A-Za-z0-9._-]*)/gu)) {
     if (!SYNTHETIC_PROFILE_DIRS.has(match[1].toLowerCase())) {
       hits.push(`${file}:${lineAt(source, match.index)}: concrete profile directory in shared repository`);
     }

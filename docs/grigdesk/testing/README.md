@@ -110,7 +110,7 @@ HTTP, TLS, сигналы и синтетический синтез через 
 - [Замок полного прогона в папке данных, отдельный файл на рабочее дерево](full-suite-lock.md)
 - [Playwright падает до первой спеки: в общем кэше нет ревизии chromium под версию проекта](playwright-browser-revision.md)
 - [Перенаправленный XDG_CACHE_HOME прячет браузеры Playwright](playwright-xdg-cache.md)
-- [Удалённый JS-файл валит снимок миграции, хотя код рабочий](migration-inventory-snapshot.md)
+- [Снимок миграции: удалённые файлы и пути тестовых фикстур](migration-inventory-snapshot.md)
 - [Тест проходит из корня, но падает из папки своего пакета](package-test-working-directory.md)
 - [Протокольные проверки трекера: отдельный пакет и его session/API-контракт](tracker-driver-package.md)
 - [Нет соседнего пакета драйвера: skip; неверный явный путь: ошибка](tracker-package-skips.md)

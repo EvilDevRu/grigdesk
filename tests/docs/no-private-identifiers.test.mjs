@@ -56,6 +56,13 @@ test('Д2: имя с заглавной буквой ловится, симво�
   assert.deepEqual(synthetic.map((source) => scanText('docs/x.md', source).length), [0, 0, 0, 0, 0, 0]);
 });
 
+test('детектор различает каталог profiles и окончание имени каталога фикстур', () => {
+  const file = 'tests/fixtures/migration-inventory-baseline.json';
+
+  assert.deepEqual(scanText(file, 'tests/fixtures/access-profiles/login-cli.mjs'), []);
+  assert.equal(scanText(file, 'example/profiles/customer-project/profile.sh').length, 1);
+});
+
 test('regular-file scan skips links and still checks untracked sample files', async (t) => {
   const root = await scratch(t);
   const source = await repository(root);

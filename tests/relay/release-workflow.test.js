@@ -17,6 +17,12 @@ test('RL-45: посредник выпускается через общий wor
   assert.ok(text.includes(`go-version: '1.27.4'`));
 
   for (const action of uses) {
+    if (action.startsWith('./')) {
+      assert.match(action, /^\.\/\.github\/workflows\/[\w-]+\.yml$/u);
+
+      continue;
+    }
+
     assert.match(action, /^[\w-]+\/[\w-]+@[a-f0-9]{40}$/);
   }
 
