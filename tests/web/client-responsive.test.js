@@ -3,7 +3,22 @@ import test from 'node:test';
 import path from 'node:path';
 import { chatSession, clientBrowser, scaleClientText } from './helpers/client-browser.mjs';
 
-test('Android: обе шапки чатов сохраняют общие оси при раскрытии фильтров', { timeout: 90000 }, async (t) => {
+test('Desktop: обе шапки чатов сохраняют общие оси при раскрытии фильтров', { timeout: 90000 }, (t) => {
+  return checkChatHeaders(t, {}, [1920, 1280, 960]);
+});
+
+test('Android: обе шапки чатов сохраняют общие оси при раскрытии фильтров', { timeout: 90000 }, (t) => {
+  return checkChatHeaders(t, {
+    userAgent: 'Mozilla/5.0 (Linux; Android 16) AppleWebKit/537.36 Chrome/146.0.0.0 Mobile Safari/537.36',
+    hasTouch: true,
+  }, [1164, 960]);
+});
+
+/**
+ * На общей странице у шапок совпадают две оси и нижняя граница.
+ * Раскрытие фильтров добавляет высоту только под рядами списка.
+ */
+async function checkChatHeaders(t, contextOptions, widths) {
   const { browser, origin } = await clientBrowser(t, {
     chatStore: {
       sessions: [chatSession],
@@ -13,9 +28,8 @@ test('Android: обе шапки чатов сохраняют общие оси
   });
   const context = await browser.newContext({
     viewport: { width: 1164, height: 760 },
-    userAgent: 'Mozilla/5.0 (Linux; Android 16) AppleWebKit/537.36 Chrome/146.0.0.0 Mobile Safari/537.36',
-    hasTouch: true,
     reducedMotion: 'reduce',
+    ...contextOptions,
   });
 
   t.after(() => context.close());
@@ -50,7 +64,7 @@ test('Android: обе шапки чатов сохраняют общие оси
     };
   });
 
-  for (const width of [1164, 960]) {
+  for (const width of widths) {
     await page.setViewportSize({ width, height: 760 });
 
     const closed = await measure();
@@ -89,7 +103,7 @@ test('Android: обе шапки чатов сохраняют общие оси
   for (const field of [taskSelect, search, menuSearch]) {
     assert.equal((await field.boundingBox())?.height, 32);
   }
-});
+}
 
 test('Android: клавиатура не сдвигает иконки, док остаётся под шапкой', { timeout: 90000 }, async (t) => {
   const projects = Array.from({ length: 8 }, (_, index) => ({

@@ -7,8 +7,7 @@
       <div class="drop-box">{{ t('core.chatOtpustiChtobyPrilozhit') }}</div>
     </div>
     <!-- Шапка в два ряда: сверху название и задача, снизу — настройки хода.
-         Высота фиксирована токеном --chat-head-h: линия под шапкой чата идёт по той же
-         горизонтали, что и линия под шапкой списка чатов слева. -->
+         Общая высота рядов выравнивает основные действия и границу со списком чатов. -->
     <div class="cs-top">
       <div class="hrow">
         <div class="session-heading">
@@ -3115,6 +3114,7 @@ function skipQuestion() {
   --chat-head-gap: 16px;
   position: relative;
   display: flex;
+  flex: none;
   flex-direction: column;
   gap: 4px;
   padding: var(--chat-head-block-padding, 4px) var(--chat-gutter);
@@ -3123,9 +3123,6 @@ function skipQuestion() {
   justify-content: center;
 }
 .header-context { display: none; }
-/* На странице высота шапки — общий с левым списком токен, иначе две разделительные линии
-   расходятся. min-height, а не height: редкое предупреждение о модели важнее ровной линии —
-   пусть шапка подрастёт, чем текст обрежется. */
 /* Ряд настроек на странице НЕ переносится: перенос — это плюс 30px к шапке и разъехавшиеся
    линии. Вместо переноса ряд ужимается (см. shrink у .factbar), а на узком экране страница
    и так уходит в одну колонку, где шапке разрешено расти. */
@@ -3213,7 +3210,8 @@ function skipQuestion() {
    на ширину скроллбара (11px, base.css) — края совпадают с композером.
    scrollbar-gutter: stable — место под скролл зарезервировано всегда, сообщения
    не «скачут» по горизонтали, когда полоса появляется/исчезает. */
-.cs-body { flex: 1; overflow-y: auto; overflow-x: hidden; scrollbar-gutter: stable; padding: 0 max(0px, calc(var(--chat-gutter) - 11px)) 0 var(--chat-gutter);
+.cs-body { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; scrollbar-gutter: stable;
+  padding: 0 max(0px, calc(var(--chat-gutter) - 11px)) 0 var(--chat-gutter);
   margin: var(--chat-flow-inset) 0; }
 /* min-height 100% — пустое состояние центрируется */
 .flow { display: flex; flex-direction: column; gap: var(--chat-flow-gap); min-height: 100%; }
@@ -3501,7 +3499,7 @@ html[data-ui-touch] .touch-keyboard-hint { display: inline; }
 /* При чтении на телефоне шапка занимает один ряд. Настройки раскрываются явно,
    сохраняя те же экземпляры controls и все предупреждения о неизвестной модели. */
 @media (max-width: 600px) {
-  .cs-top { min-height: 45px; padding-block: 0; flex: none; }
+  .cs-top { min-height: 45px; padding-block: 0; }
   /* Дублируем шкалу настроек на границе шапки: она видна и при закрытом диалоге.
      Абсолютная линия не отнимает место у названия и сенсорных площадок действий. */
   .header-context { display: block; position: absolute; inset-inline: 0; bottom: -1px; }
@@ -3513,7 +3511,7 @@ html[data-ui-touch] .touch-keyboard-hint { display: inline; }
   .phone-options { display: grid; }
   .cs .session-workspace, .cs .session-controls, .bar .spacer { display: none; }
   .bar:not(:has(.warn)) { display: none; }
-  .cs-body { min-height: 0; scrollbar-gutter: auto; padding-inline: var(--chat-gutter); }
+  .cs-body { scrollbar-gutter: auto; padding-inline: var(--chat-gutter); }
   .cs-resize { display: none; }
   .composer { flex-wrap: wrap; align-items: center; }
   .composer > :deep([data-role='chat-composer']) {

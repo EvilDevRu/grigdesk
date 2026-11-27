@@ -2,8 +2,10 @@
 
 On Android, the Active / Archive switch and state buttons are compact.
 The filter fields are the same height as the search field.
-In the two-row tablet layout, the switch and filter icon line up with the model
-selector in the open conversation. The filters panel opens below them.
+In the two-row desktop and tablet layout, search and the new chat button line up
+with the conversation title. The switch and filter icon line up with the model selector.
+Both headers stay in place as you scroll the list or the conversation.
+The filters panel opens below the switch and filter icon.
 
 The chat list shows active conversations; the archive is switched by the compact
 "Active / Archive" segment next to the search field. In the full list, the number

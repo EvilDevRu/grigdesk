@@ -323,12 +323,19 @@ onBeforeUnmount(() => {
 .stage { flex: 1; min-width: 0; display: flex; }
 .stage :deep(.cs) { flex: 1; }
 
-/* В двухрядной раскладке шапки делят высоту и отступы рядов.
-   Когда над поиском появляется компактный выбор проекта, шапка списка растёт по содержимому. */
+/* Две шапки и каркас загрузки используют общую высоту: два ряда,
+   промежуток 4 px, поля по 4 px и нижняя граница 1 px. */
 @media (width > 1024px), (min-width: 900px) and (height > 600px) {
-  :root[data-ui-android] .agents {
+  .agents {
     --chat-head-row-h: max(36px, var(--toolbar-control-h));
     --chat-head-block-padding: 4px;
+    --chat-head-h: calc(2 * var(--chat-head-row-h) + 13px);
+  }
+
+  /* Полноразмерные сенсорные вкладки занимают 44 px плюс поля переключателя.
+     Компактные вкладки Android уже помещаются в общий ряд. */
+  :root[data-ui-touch]:not([data-ui-android]) .agents {
+    --chat-head-row-h: calc(var(--toolbar-control-h) + 4px);
   }
 }
 
