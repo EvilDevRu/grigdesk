@@ -2,6 +2,8 @@
 
 A pipeline runs a task along a published route. Agents, verification commands and human decisions form one attempt.
 Loading keeps header space on phones and diagram space in the full layout until current attempts arrive.
+Without a default tracker, the card and stage dialog show the saved ticket title
+or the task number if the title is unavailable.
 
 ## Before you begin
 

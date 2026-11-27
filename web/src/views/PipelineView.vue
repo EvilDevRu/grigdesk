@@ -373,7 +373,10 @@
           {{ title(t) }}
         </span>
         <span v-else class="ctitle pipeline-title-static muted">
-          <UiSpinner decorative /> {{ translate('core.pipelineZagruzkaNazvaniya') }} </span>
+          <template v-if="canLoadTrackerTitle">
+            <UiSpinner decorative /> {{ translate('core.pipelineZagruzkaNazvaniya') }}
+          </template>
+        </span>
         <span class="daemon" :class="t.readOnly ? 'idle' : (t.stall ? 'stall' : (t.daemonAlive ? 'alive' : 'idle'))">
           {{ t.readOnly ? translate('core.pipelineTolkoChtenie') : t.holdPending ? translate('core.coreSozdayotsya') : t.held ? translate('core.coreOzhidaetStarta') : t.stall ? (t.stall.kind === 'crashed' ? translate('core.pipelineOborvalas') : translate('core.pipelineVstala')) : (t.daemonAlive ? translate('core.pipelineIdet') : translate('core.pipelineStoit')) }}
         </span>
@@ -533,7 +536,9 @@
           <div class="stage-task-context">
             <span class="stage-context-label">{{ translate('core.chatOptionTask') }} <b class="mono">#{{ stage!.task }}</b></span>
             <span v-if="stageTaskTitle" class="stage-task-title" v-tooltip="stageTaskTitle">{{ stageTaskTitle }}</span>
-            <span v-else class="stage-task-title muted">{{ translate('core.pipelineNazvanieZagruzhaetsya') }}</span>
+            <span v-else-if="canLoadTrackerTitle" class="stage-task-title muted">
+              {{ translate('core.pipelineNazvanieZagruzhaetsya') }}
+            </span>
           </div>
           <div class="stage-stand-context">
             <span class="stage-context-label">{{ translate('core.pipelineStend2') }}</span>
@@ -1192,6 +1197,7 @@ import { useUiContextSource } from '../composables/useUiContextSource.ts';
 import { useUiStore } from '../stores/ui.ts';
 import { useTasksStore } from '../stores/tasks.ts';
 import { useBoardStore } from '../stores/board.ts';
+import { useTrackersStore } from '../stores/trackers.ts';
 import { liveTimerSec, pipelineWorkSec, secToHMS } from '../shared/format.ts';
 import {
   alertDialog,
@@ -1250,6 +1256,8 @@ import OpenDiffButton from './OpenDiffButton.vue';
 const ui = useUiStore();
 const taskStore = useTasksStore();
 const board = useBoardStore();
+const trackers = useTrackersStore();
+const canLoadTrackerTitle = computed(() => trackers.catalog?.externalId !== null);
 
 const tasks = ref<PipelineViewTask[]>([]);
 const error = ref<string | null>(null);
@@ -1274,7 +1282,7 @@ function collapsedCards(value: unknown): TaskId[] {
 }
 
 function trackerTitle(taskNum: TaskId) {
-  return taskStore.title(taskNum);
+  return canLoadTrackerTitle.value ? taskStore.title(taskNum) : null;
 }
 
 
@@ -3945,9 +3953,18 @@ async function loadSnapshot() {
 
       return graph ? [{ ...task, graph }] : [];
     });
-    // Названия задач из B24 (для заголовка) + доска (для «таймеров вне фабрики»).
-    tasks.value.forEach((task) => taskStore.load(task.task).catch(() => {}));
-    board.load();
+    // Каталог проверяется отдельно от графа. Старый сервер сохраняет прежний запрос названия.
+    if (tasks.value.length) {
+      void trackers.load().then(() => {
+        if (canLoadTrackerTitle.value) {
+          for (const task of tasks.value) {
+            void taskStore.load(task.task).catch(() => {});
+          }
+        }
+      });
+    }
+
+    void board.load();
     error.value = null;
   } catch (e) {
     error.value = errorMessage(e, '');

@@ -139,7 +139,7 @@ function confirmSelection(previous, payload) {
  */
 async function mountPipeline(t, {
   factoryTask, graph, runners = ['claude', 'codex'], applyOverride = false,
-  optionsHandler = null, applyHandler = null, settings = null,
+  optionsHandler = null, applyHandler = null, settings = null, trackerCatalog,
 }) {
   const { Window } = await import('../../web/node_modules/happy-dom/lib/index.js');
   const browser = new Window({ url: 'http://grigdesk.test/#/pipeline' });
@@ -202,6 +202,9 @@ async function mountPipeline(t, {
       if (url === '/api/factory/runners') {
         return { runners };
       }
+      if (url === '/api/trackers') {
+        return trackerCatalog;
+      }
       if (url.includes('/runner/options')) {
         optionCalls.push(url);
 
@@ -255,8 +258,10 @@ async function mountPipeline(t, {
   });
   globalThis.__pipelineRunnerTasksStore = defineStore('pipeline-runner-tasks', {
     actions: {
-      async load() {
-         return {};
+      async load(id) {
+        getCalls.push(`/api/tracker/task/${id}`);
+
+        return {};
       },
       title() {
          return null;
@@ -859,17 +864,35 @@ test('старый сервер без failureDetail показывает код
 });
 
 test('ручной запуск без Bitrix показывает заголовок сохранённого тикета', async (t) => {
-  const fixture = makeFixture();
+  const fixture = {
+    ...makeFixture(),
+    trackerCatalog: {
+      externalId: null,
+      activeIds: [],
+      enabledIds: [],
+      default: null,
+      drivers: [],
+      revision: 0,
+    },
+  };
+
+  const { wrapper, getCalls, openPlanStage } = await mountPipeline(t, fixture);
+
+  assert.ok(getCalls.includes('/api/trackers'));
+  assert.ok(!getCalls.includes(`/api/tracker/task/${fixture.factoryTask.task}`));
+  assert.doesNotMatch(wrapper.text(), /загрузка названия/i);
+
+  await openPlanStage('idle');
+  assert.doesNotMatch(wrapper.text(), /название загружается/i);
 
   fixture.factoryTask.title = 'Исправить источник задачи API';
-
-  const { wrapper } = await mountPipeline(t, fixture);
+  await wrapper.vm.load();
 
   const title = wrapper.get('.ctitle');
 
   assert.equal(title.text(), 'Исправить источник задачи API');
   assert.equal(title.element.tagName, 'SPAN');
-  assert.equal(wrapper.text().includes('загрузка названия'), false);
+  assert.equal(wrapper.get('.stage-task-title').text(), title.text());
 });
 
 test('reset-executor-saves-immediately', async (t) => {
