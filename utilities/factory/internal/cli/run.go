@@ -44,7 +44,7 @@ func Run(args []string, out, diagnostic io.Writer) int {
 		}
 		features := baseCapabilities
 		if runtime.GOOS == "linux" {
-			features += `,"stage-runner-settings-v1"`
+			features += `,"stage-runner-settings-v1","stage-runner-speed-v1"`
 		}
 		return printLine(out, `{"schema":1,"features":[`+features+`]}`)
 	}

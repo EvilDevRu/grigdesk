@@ -1763,6 +1763,7 @@ export default {
   graphModelProcess: true,
   usageRequiresRuntime: false,
   chatSpeed: {
+    // Согласовано с SupportsSpeed, runnerOperations и PROFILE_SPEED_MODES фабрики.
     modes: ['standard', 'fast'] as const,
     /**
      * Явный выбор чата перекрывает общий default только в снимке данного запуска.

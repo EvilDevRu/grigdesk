@@ -84,10 +84,13 @@ settings for that stage.
 On Linux, the node stops advancing if its stand control channel fails to close.
 The launch log shows the profile hook error.
 
-Open a node's Executors tab. Select an executor, available model and compatible effort.
-Choices save immediately without Apply. From profile, separately for model and effort, restores current project
-inheritance. Invalid pairs require manual correction; the app explains why without choosing a replacement.
-Field-label tooltips show the setting's source.
+Open a node's Executors tab and select an executor tile. Choose a model and compatible effort
+in the fields below the tiles.
+Choices save immediately. From profile restores current project inheritance independently
+for model, effort and speed. The app explains which selection needs correction, and each
+field label has a tooltip for its source. Codex and Claude support a separate speed choice.
+Standard disables acceleration. Fast and Ultrafast require a confirmed exact model ID and can
+increase limit or credit usage. Aliases remain available for the model and effort settings.
 You may close the dialog or open another node while saving continues.
 Reopening shows the choice and pending status; failures name the original task and stage.
 
@@ -95,19 +98,30 @@ Settings apply only to that stage of this run. Resume a stopped run normally.
 An unstarted node immediately shows the saved executor/model. Profiles, other stages and new runs retain their settings.
 During execution, new choices apply to the next launch. Restart with these settings asks to stop the current launch
 and creates a new one, including for an effort-only change.
-Fields and the next-launch summary show saved settings; the header and log show actual running settings.
+A speed-only restart also creates a new epoch. Requested speed shows the mode sent to the
+CLI for the current launch. An unavailable inherited mode falls back to standard on the same
+model and shows a warning. If an explicit mode loses support, that candidate stops before
+launch and any allowed fallback uses its own policy. Older engine pins show the previous editor.
+If a restart stops the current process and the new launch is refused because of its speed,
+correct the speed and resume the same run.
+The next-launch summary updates after a successful save. The header and log show actual running settings.
 Confirmed choices survive reload. After restart, an open dialog follows the new launch and preserves unsaved input
 so you can apply subsequent settings there.
 
 Catalog changes preserve drafts and show the reason. Reload and choose an available pair.
-Use Retry save after a write failure. If restart was accepted but process startup failed, the message distinguishes
+Use Retry save after a write failure. If you reopen the node while saving and the response is lost,
+the button repeats the same request. If restart was accepted but process startup failed, the message distinguishes
 saved settings from startup failure. While the selected executor catalog is unavailable, fields and application
-are blocked; the saved local model/effort remain visible without another executor's models being substituted.
+are blocked; the saved local model, effort and speed remain visible without another executor's models being substituted.
 An unavailable project default does not block opening a confirmed override using another executor.
 The editor opens when the pinned engine supports saving settings and restarting from the card.
 The Go factory in the Linux x64 package supports both actions. Settings saved
 during a launch take effect the next time that stage runs.
 History remains available when the editor is unavailable.
+
+Offline checks cover native launch parameters and the new epoch. Browser checks with an offline
+executor covered saved speed selections, the older pin and catalog recovery. Account eligibility
+is set by the provider.
 
 ## Graph runs
 

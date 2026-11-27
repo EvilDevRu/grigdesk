@@ -53,6 +53,18 @@ export async function probeFactoryStageRunnerSettingsCapability(
 }
 
 /**
+ * Новый формат скорости требует подтверждённого пина попытки.
+ * Его capability проверяется отдельно от доступности прежнего редактора.
+ */
+export async function probeFactoryStageRunnerSpeedCapability(
+  config: RouteConfig,
+  identity: Pick<StopIdentity, 'task' | 'attempt' | 'profile'>,
+  deps: ProbeDeps = {},
+): Promise<Omit<ArbiterCapabilities, 'targets'>> {
+  return probeFactoryCapability(config, identity, 'stage-runner-speed-v1', deps);
+}
+
+/**
  * Общий probe сохраняет authority pin и разделяет положительный кэш по capability.
  * Исходная поставка и ошибки перечитываются без подмены текущей версией сервера.
  */
@@ -97,7 +109,7 @@ async function probeFactoryCapability(
     return { status: 'unknown', message: unknownMessage };
   }
 
-  if (!selected) {
+  if (!selected || (feature === 'stage-runner-speed-v1' && !selected.packageId)) {
     return {
       status: 'unavailable', message: 'У этой попытки нет подтверждённого закрепления движка. '
         + 'Доступны чтение и разбор; защищённое применение пока недоступно.'

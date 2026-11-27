@@ -32,6 +32,20 @@ test('PIPE-SETTINGS: точная связка и пустой effort сохра
 
     assert.equal(result.code, 0, result.stderr);
     assert.deepEqual(JSON.parse(fx.requests[0]!.body.toString()), input);
+    assert.equal(fx.requests[0]?.headers.accept, 'application/json; grigdesk-stage-speed=1');
+
+    const speedInput = { ...input, selection: { ...input.selection, speed: 'fast' } };
+    const speedResult = await fx.run(['runner-set', '7'], speedInput);
+
+    assert.equal(speedResult.code, 0, speedResult.stderr);
+    assert.deepEqual(JSON.parse(fx.requests.at(-1)!.body.toString()), speedInput);
+
+    const calls = fx.requests.length;
+    const invalidSpeed = { ...input, selection: { ...input.selection, speed: 'priority' } };
+    const invalidResult = await fx.run(['runner-set', '7'], invalidSpeed);
+
+    assert.equal(invalidResult.code, 2);
+    assert.equal(fx.requests.length, calls);
 
     const count = fx.requests.length;
 
@@ -62,6 +76,7 @@ test('PIPE-SETTINGS-READ: каталог адресует точный stage/pro
 
     assert.equal(result.code, 0, result.stderr);
     assert.equal(fx.requests[0]?.method, 'GET');
+    assert.equal(fx.requests[0]?.headers.accept, 'application/json; grigdesk-stage-speed=1');
     assert.equal(fx.requests[0]?.url, '/api/tasks/7/runner/options?' + new URLSearchParams({
         profile: 'demo',
         attempt,

@@ -12,7 +12,7 @@ func TestCapabilities(t *testing.T) {
 	rc := Run([]string{"capabilities", "--format", "json"}, &out, &diagnostic)
 	expected := `{"schema":1,"features":["goto-expected-stage-v1","native-subcommands"`
 	if runtime.GOOS == "linux" {
-		expected += `,"stage-runner-settings-v1"`
+		expected += `,"stage-runner-settings-v1","stage-runner-speed-v1"`
 	}
 	expected += `]}` + "\n"
 	if rc != 0 || out.String() != expected || diagnostic.Len() != 0 {

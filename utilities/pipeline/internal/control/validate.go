@@ -184,7 +184,7 @@ func runnerSettings(value any, task string) error {
 // runnerSelection учитывает отдельно основного и параметризуемого исполнителя.
 // Строковые опции проверяются без переписывания или автоподбора.
 func runnerSelection(value any) bool {
-	row, err := Exact(value, "primary parametersFor model effort", "")
+	row, err := Exact(value, "primary parametersFor model effort", "speed")
 	if err != nil || row["primary"] != nil && !Matches("provider", row["primary"]) ||
 		!Matches("provider", row["parametersFor"]) {
 		return false
@@ -200,5 +200,9 @@ func runnerSelection(value any) bool {
 			return false
 		}
 	}
-	return true
+	if row["speed"] == nil {
+		return true
+	}
+	speed, ok := row["speed"].(string)
+	return ok && (speed == "standard" || speed == "fast" || speed == "ultrafast")
 }

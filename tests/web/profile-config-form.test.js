@@ -68,6 +68,67 @@ test('RE-B3-05: stage/provider с подчёркиваниями разбира�
     row.name === 'MODEL_REVIEW_SECOND_QWEN_CLI_EXACT').editable, false);
 });
 
+test('профиль может установить отсутствующую скорость проекта и роли', () => {
+  const config = structuredClone(CONFIG);
+
+  config.runners.MODEL_REVIEW_SECOND_CODEX_EXACT = 'sol';
+
+  const key = 'MODEL_REVIEW_SECOND_CODEX_SPEED';
+  const fallback = 'MODEL_DEFAULT_CODEX_SPEED';
+  const rows = form.configFormModel(config).rows;
+
+  assert.equal(rows.find((row) => row.name === key)?.value, null);
+  assert.equal(rows.find((row) => row.name === fallback)?.editable, true);
+  assert.equal(rows.find((row) => row.name === 'MODEL_DEFAULT_QWEN_CLI_SPEED'), undefined);
+  assert.equal(rows.find((row) => row.name === 'MODEL_DEFAULT_CLAUDE_SPEED'), undefined);
+  assert.equal(rows.find((row) => row.name === 'MODEL_REVIEW_SECOND_QWEN_CLI_SPEED'), undefined);
+  config.runners.MODEL_REVIEW_SECOND_QWEN_CLI_SPEED = 'fast';
+
+  const stale = form.configFormModel(config).rows.find((row) =>
+    row.name === 'MODEL_REVIEW_SECOND_QWEN_CLI_SPEED');
+
+  assert.equal(stale?.speedModes, undefined);
+  assert.equal(stale?.value, 'fast');
+
+  const save = form.configSavePlan(config, {
+    [`r:${key}`]: 'standard',
+    [`r:${fallback}`]: 'fast',
+  });
+
+  assert.deepEqual(save.blocked, []);
+  assert.ok(save.operations.some((item) => item.role === 'REVIEW_SECOND' && item.speed === 'standard'));
+  assert.ok(save.operations.some((item) => item.role === 'DEFAULT' && item.speed === 'fast'));
+  config.runners[key] = 'fast';
+  assert.equal(form.configSavePlan(config, { [`r:${key}`]: '' }).operations[0]?.speed, '');
+  assert.deepEqual(form.configSavePlan(config, { 'r:MODEL_REVIEW_SECOND_CODEX_EXACT': 'next' })
+    .operations.find((item) => item.role === 'REVIEW_SECOND'), {
+    kind: 'model',
+    role: 'REVIEW_SECOND',
+    provider: 'codex',
+    exact: 'next',
+  });
+});
+
+test('Codex и Claude учитываются при разборе модельных ключей вне цепочки', () => {
+  const config = structuredClone(CONFIG);
+  const ambiguous = 'MODEL_PLAN_TEAM_CLAUDE_SPEED';
+  const unique = 'MODEL_REVIEW_CLAUDE_EXACT';
+  const synthetic = 'MODEL_REVIEW_CLAUDE_SPEED';
+
+  config.runners.STAGE_PLAN_PRIMARY = 'team_claude';
+  config.runners[ambiguous] = 'fast';
+  config.runners[unique] = 'opus-exact';
+
+  const rows = form.configFormModel(config).rows;
+  const clear = form.configSavePlan(config, { [`r:${ambiguous}`]: '' });
+
+  assert.equal(rows.find((row) => row.name === ambiguous)?.editable, false);
+  assert.deepEqual(clear.blocked, [`r:${ambiguous}`]);
+  assert.deepEqual(clear.operations, []);
+  assert.equal(rows.find((row) => row.name === unique)?.editable, true);
+  assert.deepEqual(rows.find((row) => row.name === synthetic)?.speedModes, ['standard', 'fast']);
+});
+
 test('RE-B3-06: reconciliation снимает применённое и хранит неприменённое/исчезнувшее', () => {
   const edits = {
     'r:PROJECT_RUNNER_PRIMARY': 'codex',

@@ -28,7 +28,7 @@
 - [Первый импорт папки данных, синхронный граф и отдельный поиск CLI/AppImage](early-data-home-imports.md)
 - [Shell-установщик, офлайн-ZIP и .deb для Linux x64, кандидат Apple Silicon и доверие dist](lightweight-installer.md)
 - [Локальная сборка Windows x64 из Linux, офлайн-установка Windows x64 и ARM64 и приёмка](windows-offline-installation.md)
-- [Darwin, владение задачами, flock при системном PATH, закрепление runtime и допуск обновления](darwin-process-identity.md)
+- [Darwin, владение задачами и каталогом моделей, flock, закрепление runtime и допуск обновления](darwin-process-identity.md)
 - [История автономного установщика: потоковый хвост архивов, ограничение postject и проверка ELF](installer-archive-tail.md)
 - [Подписанный канал сайта, защита от отката, офлайн-приёмка и справка RU/EN](site-release-channel.md)
 - [Ручной выбор full/skip, причина, identity и запись решения в выпуске](release-test-selection.md)

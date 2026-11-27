@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -51,11 +52,15 @@ export async function settingsFixture(t) {
 
   return {
     root,
+    task,
+    profile,
+    attempt,
+    controlDir,
     env,
     config: path.join(profileDir, 'runners.env'),
-    cli(operation, extra = []) {
+    cli(operation, extra = [], node = 'plan', stage = 'PLAN') {
       return spawnSync(testFactoryBinary(), [task, 'runner', 'settings', operation,
-        '--profile', profile, '--attempt', attempt, '--node', 'plan', '--stage', 'PLAN',
+        '--profile', profile, '--attempt', attempt, '--node', node, '--stage', stage,
         '--routes-dir', routesDir, '--control-dir', controlDir, '--state-dir', stateDir, ...extra,
       ], {
         env,
@@ -64,6 +69,36 @@ export async function settingsFixture(t) {
       });
     },
   };
+}
+
+/**
+ * Пишет доверенный снимок metadata scope попытки в формате Store.ReadStageMetadataScope.
+ * Только для офлайн-фикстуры без запуска движка: schema 1, точная попытка, режим 0600,
+ * digest содержимого каждой копии CLI — как их вычисляет Go при записи.
+ */
+export async function writeStageMetadataScope(fx, providers, metadataEnvironment, checkout = '') {
+  const file = path.join(fx.controlDir, 'protocol-v2', 'tasks', `t${fx.task}`, 'attempts', fx.attempt,
+    'runner-metadata.json');
+  const entries = {};
+
+  for (const [provider, entry] of Object.entries(providers)) {
+    entries[provider] = {
+      ...entry, digest: createHash('sha256').update(await readFile(entry.executable)).digest('hex'),
+    };
+  }
+
+  await mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
+  await writeFile(file, JSON.stringify({
+    schema: 1,
+    task: fx.task,
+    profile: fx.profile,
+    attempt: fx.attempt,
+    ...(checkout ? { checkout } : {}),
+    providers: entries,
+    metadataEnvironment,
+  }), { mode: 0o600 });
+
+  return file;
 }
 
 /**

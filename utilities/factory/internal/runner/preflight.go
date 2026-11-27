@@ -133,7 +133,9 @@ func metadataEnvironment(provider string, environment []string) []string {
 	var result []string
 	for _, entry := range environment {
 		key, _, _ := strings.Cut(entry, "=")
-		if systemRunnerEnv(key) || slices.Contains([]string{
+		nativeHome := (provider == "codex" && key == "CODEX_HOME") ||
+			(provider == "claude" && key == "CLAUDE_CONFIG_DIR")
+		if systemRunnerEnv(key) || nativeHome || slices.Contains([]string{
 			"GRIGDESK_HOME", "GRIGDESK_GLM_API_MODE", "GRIGDESK_DEEPSEEK_RUNTIME_MODE",
 			"GRIGDESK_QWEN_HOME", "GRIGDESK_QWEN_CONFIG_ROOT", "PYTHONDONTWRITEBYTECODE",
 		}, key) {

@@ -30,8 +30,21 @@
           </UiDisclosureButton>
           <div v-show="openGroup === group.id" :id="`${bodyId}-${group.id}`"
                class="factory-config__group factory-config__fields">
+            <p v-if="group.rows.some((row) => row.speedModes)" class="factory-config__speed-hint">
+              {{ t('core.projectSpeedHint') }}
+            </p>
             <UiField v-for="row in group.rows" :key="row.id" :label="row.name">
-              <UiInput :model-value="session.edits[row.id] ?? row.value ?? ''"
+              <UiSelect v-if="row.speedModes" :model-value="session.edits[row.id] ?? row.value ?? ''"
+                        :disabled="locked" :data-test="`field-${row.name}`"
+                        @update:model-value="edit(row, String($event ?? ''))">
+                <option value="">{{ t('core.projectSpeedInherit') }}</option>
+                <option v-if="row.value && !row.speedModes.some((mode) => mode === row.value)"
+                        :value="row.value" disabled>{{ row.value }}</option>
+                <option v-for="mode in row.speedModes" :key="mode" :value="mode">
+                  {{ t(speedLabels[mode]) }}
+                </option>
+              </UiSelect>
+              <UiInput v-else :model-value="session.edits[row.id] ?? row.value ?? ''"
                        :placeholder="display(row.id in session.edits || row.value !== null ? '' : null)"
                        :disabled="locked" :data-test="`field-${row.name}`"
                        @update:model-value="edit(row, String($event ?? ''))" />
@@ -112,11 +125,11 @@ import {
 } from '../../shared/profileConfigApi.ts';
 import type { ProfileConfigView } from '../../shared/profileConfigApi.ts';
 import {
-  configFormModel, configSavePlan, reconcileConfigEdits,
+  configFormModel, configSavePlan, matchesConfigRowValue, reconcileConfigEdits,
 } from './profileConfigForm.ts';
 import type { ConfigFormRow, ConfigSavePlan } from './profileConfigForm.ts';
 import {
-  UiButton, UiDialog, UiDisclosureButton, UiField, UiFormActions, UiInput, t,
+  UiButton, UiDialog, UiDisclosureButton, UiField, UiFormActions, UiInput, UiSelect, t,
 } from '../../ui';
 
 interface ConfigSession {
@@ -142,6 +155,11 @@ const openGroup = ref<string | null>(null);
 const bodyId = `factory-config-${useId()}`;
 const readonlyId = `factory-config-readonly-${useId()}`;
 const confirmation = shallowRef<{ session: ConfigSession; plan: ConfigSavePlan } | null>(null);
+const speedLabels = {
+  standard: 'core.chatSpeedStandard',
+  fast: 'core.chatSpeedFast',
+  ultrafast: 'core.chatSpeedUltrafast',
+} as const;
 let selectionVersion = 0;
 let alive = true;
 
@@ -197,8 +215,8 @@ function display(value: string | null): string {
 }
 
 /**
- * Ввод хранится как намерение отдельно от серверного снимка. Пустая строка
- * для отсутствующей переменной — намерение создать её, а не отсутствие правки.
+ * Ввод хранится отдельно от серверного снимка.
+ * Пустое наследование совпадает с отсутствующей строкой только у скорости.
  */
 function edit(row: ConfigFormRow, value: string): void {
   const current = session.value;
@@ -206,7 +224,7 @@ function edit(row: ConfigFormRow, value: string): void {
   if (!current || locked.value || !row.editable) {
     return;
   }
-  if (row.value === value) {
+  if (matchesConfigRowValue(row, value)) {
     delete current.edits[row.id];
   } else {
     current.edits[row.id] = value;
@@ -450,6 +468,12 @@ onBeforeUnmount(() => {
   color: var(--ink-mid);
   font-size: 12px;
   overflow-wrap: anywhere;
+}
+
+.factory-config__speed-hint {
+  grid-column: 1 / -1;
+  color: var(--ink-mid);
+  font-size: 12px;
 }
 
 .factory-config__facts {

@@ -100,3 +100,29 @@ func claudeFixtureSettings(t *testing.T, run Run, kind string) string {
 	}
 	return file
 }
+
+// TestClaudeFactorySpeedSettings проверяет явный булев fastMode.
+// Наследование оставляет исходную форму settings.
+func TestClaudeFactorySpeedSettings(t *testing.T) {
+	dir := t.TempDir()
+	for speed, want := range map[string]any{"": nil, "standard": false, "fast": true} {
+		run := Run{Speed: speed, Worktree: filepath.Join(dir, "work"), Factory: filepath.Join(dir, "factory")}
+		run.Store.ControlDir = filepath.Join(dir, "control")
+		run.Store.StateDir = filepath.Join(dir, "state")
+		doc, err := run.claudeSettingsDocument(routePolicy{filesystem: "workspace-write"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		data, err := json.Marshal(doc)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var value map[string]any
+		if err := json.Unmarshal(data, &value); err != nil {
+			t.Fatal(err)
+		}
+		if got, present := value["fastMode"]; got != want || present != (speed != "") {
+			t.Fatalf("%q: fastMode=%v, присутствует=%t", speed, got, present)
+		}
+	}
+}

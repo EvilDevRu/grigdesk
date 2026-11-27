@@ -1,3 +1,4 @@
+import type { ChatSpeed } from '../../../shared/chat/chatSpeed.ts';
 import { contractDecoders } from '../../../shared/lib/contractDecoders.ts';
 import { localeTranslator } from '../../../shared/i18n/catalogs.ts';
 
@@ -37,6 +38,7 @@ export interface ModelConfigOperationView {
   version?: string;
   variant?: string;
   effort?: string;
+  speed?: ChatSpeed | '';
   exact?: string;
 }
 

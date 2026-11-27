@@ -883,16 +883,27 @@
               <div v-if="stage!.meta.runner" class="sect runner-sect">
                 <!-- Главное действие узла: выбрать исполнителя одним кликом, не закрывая модалку. -->
                 <div v-if="!stage!.readOnly && stageRunnerOptions.length" class="runner-override">
-                  <div v-if="runnerDraft?.primary || stage!.meta.runner.source === 'task-stage'"
-                       class="runner-override-row">
-                    <UiButton
-                      class="btn runner-reset"
-                      data-role="pipeline-compact-action"
-                      variant="text"
-                      tone="warning"
-                      :disabled="Boolean(stageBusy)"
-                      @click="setStageRunner('')"
-                    > {{ translate('settings.reset') }} </UiButton>
+                  <div class="runner-picks" role="group" :aria-label="translate('core.stageExecutors')">
+                    <UiSelectableRow
+                      v-for="id in stageRunnerOptions"
+                      :key="id"
+                      data-context="pipeline-executor"
+                      data-role="pipeline-runner"
+                      :selected="id === stageRunnerActive"
+                      :pressed="id === stageRunnerActive"
+                      :aria-busy="runnerPending === id"
+                      :disabled="Boolean(stageBusy && stageBusy !== 'runner-options')"
+                      @select="pickStageRunner(id)"
+                    >
+                      <span class="executor-tile-label">
+                        <span class="executor-tile-icon" aria-hidden="true">
+                          <ProviderIcon :provider="{ id, name: providerLabel(id) }" :size="17" equal-height />
+                        </span>
+                        <span>{{ providerLabel(id) }}</span>
+                      </span>
+                      <UiSpinner v-if="runnerPending === id" decorative />
+                      <span v-else-if="id === stageRunnerActive" class="executor-check" aria-hidden="true">✓</span>
+                    </UiSelectableRow>
                   </div>
                   <span id="stage-executor-preview" class="ui-visually-hidden">
                     {{ translate('core.stageSettingsScope') }}
@@ -911,48 +922,49 @@
                     {{ translate('core.stageSettingsEmpty') }}
                   </p>
                   <p v-if="runnerSettingsInvalid" class="runner-hint" role="alert">
-                    {{ translate('core.stageSettingsInvalid') }}
+                    {{ runnerSettingsHint(runnerSettingsInvalid) || translate('core.stageSettingsInvalid') }}
                   </p>
-                  <div class="runner-picks">
-                    <UiSelectableRow
-                      v-for="id in stageRunnerOptions"
-                      :key="id"
-                      class="executor-row"
-                      data-context="pipeline-executor"
-                      data-role="pipeline-runner"
-                      :selected="id === stageRunnerActive"
-                      :pressed="id === stageRunnerActive"
-                      :aria-busy="runnerPending === id"
-                      :disabled="Boolean(stageBusy && stageBusy !== 'runner-options')"
-                      @select="pickStageRunner(id)"
-                    >
-                      <span class="executor-identity">
-                        <span class="executor-monogram" aria-hidden="true">{{ providerLabel(id).slice(0, 1) }}</span>
-                        <span class="executor-name">
-                          <b>{{ providerLabel(id) }}</b>
-                          <small>{{ translate(id === stageRunnerActive
-                            ? 'core.stageSelectedExecutor' : 'core.stageChooseExecutor') }}</small>
-                        </span>
-                        <UiSpinner v-if="runnerPending === id" decorative />
-                        <span v-else-if="id === stageRunnerActive" class="executor-check" aria-hidden="true">✓</span>
-                      </span>
-                      <template #actions>
-                        <StageExecutorFields :runner="stage!.meta.runner" :provider="id"
-                                             :options="id === stageRunnerActive ? runnerSettings : null"
-                                             :draft="id === stageRunnerActive ? runnerDraft : null"
-                                             :editable="id === stageRunnerActive && !runnerSettingsLoading
-                                               && !stageBusy && Boolean(runnerSettings?.models.length)"
-                                             description-id="stage-executor-preview"
-                                             @model="setRunnerParameter('model', $event)"
-                                             @effort="setRunnerParameter('effort', $event)" />
-                      </template>
-                    </UiSelectableRow>
+                  <StageExecutorFields
+                    v-if="stageRunnerOptions.includes(stageRunnerActive)"
+                    :key="stageRunnerActive"
+                    :runner="stage!.meta.runner"
+                    :provider="stageRunnerActive"
+                    :options="runnerSettings"
+                    :draft="runnerDraft"
+                    :editable="!runnerSettingsLoading && !stageBusy && Boolean(runnerSettings?.models.length)"
+                    description-id="stage-executor-preview"
+                    @model="setRunnerParameter('model', $event)"
+                    @effort="setRunnerParameter('effort', $event)"
+                    @speed="setRunnerParameter('speed', $event)"
+                  />
+                  <div v-if="runnerDraft?.primary || stage!.meta.runner.source === 'task-stage'"
+                       class="runner-override-row">
+                    <UiButton
+                      class="btn runner-reset"
+                      data-role="pipeline-compact-action"
+                      variant="text"
+                      tone="warning"
+                      :disabled="Boolean(stageBusy)"
+                      @click="setStageRunner('')"
+                    > {{ translate('settings.reset') }} </UiButton>
                   </div>
                   <p v-if="stageRunnerLive && runnerConfirmed" class="runner-hint">
                     {{ translate('core.stageSettingsFuture', {
                       model: runnerConfirmedModel,
                       effort: runnerConfirmed.effective.effort || ''
                     }) }}
+                  </p>
+                  <p v-if="stageRunnerLive && runnerConfirmedActual?.speed" class="runner-hint">
+                    {{ translate('core.stageSpeedRequested') }} · {{ speedLabel(runnerConfirmedActual.speed) }}
+                  </p>
+                  <p v-if="stageRunnerLive && runnerConfirmedActual?.speedWarning" class="runner-hint" role="alert">
+                    {{ translate('core.stageSpeedProfileFallback') }}
+                  </p>
+                  <p v-if="stageRunnerLive && runnerNextSpeed" class="runner-hint">
+                    {{ translate('core.stageSpeedNext', runnerNextSpeed) }}
+                  </p>
+                  <p v-if="runnerSpeedForecast" class="runner-hint">
+                    {{ translate('core.stageSpeedProfileForecast', { value: speedLabel(runnerSpeedForecast) }) }}
                   </p>
                   <div v-if="stageRunnerLive || runnerSettingsError && runnerSettingsDirty"
                        class="runner-settings-actions">
@@ -965,8 +977,8 @@
                       {{ translate('core.stageSettingsRestart') }}
                     </UiButton>
                   </div>
-                  <p v-if="runnerSettings?.receipt?.reason" role="alert">
-                    {{ translate('core.stageSettingsSaved') }}: {{ runnerSettings.receipt.reason }}
+                  <p v-if="runnerConfirmed?.receipt?.reason" role="alert">
+                    {{ translate('core.stageSettingsSaved') }}: {{ runnerConfirmed.receipt.reason }}
                   </p>
                   <p v-if="stage!.status === 'run' && !stage!.daemonAlive" class="runner-hint"> {{ translate('core.pipelineProgonOstanovlenVybrannyyIspolnitel') }} </p>
                 </div>
@@ -1106,6 +1118,7 @@
 
 <script setup lang="ts">
 import { boardSupportsTimer } from '../shared/trackerCapabilities.ts';
+import ProviderIcon from '../shared/ProviderIcon.vue';
 import StandLink from '../shared/browser/StandLink.vue';
 import PipelineLoading from './PipelineLoading.vue';
 import PipelinePhoneToolbar from './pipeline/PipelinePhoneToolbar.vue';
@@ -1122,6 +1135,7 @@ import type {
 import BootstrapDecision from './pipeline/BootstrapDecision.vue';
 import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue';
 import { api, ApiError } from '../shared/apiClient.ts';
+import { isChatSpeed, type ChatSpeed } from '../../../shared/chat/chatSpeed.ts';
 import { isRecord } from '../../../shared/lib/objects.ts';
 import { errorMessage } from '../../../shared/lib/errors.ts';
 import {
@@ -1168,6 +1182,8 @@ interface PendingStageAction {
   runner?: string;
   selection?: StageRunnerSelection;
   options?: StageRunnerOptions;
+  confirmed?: StageRunnerOptions | null;
+  request?: StageRunnerApply;
   token?: symbol;
 }
 
@@ -2567,10 +2583,23 @@ const runnerSettingsLoading = ref(false);
 const runnerSettingsError = ref('');
 let runnerSettingsSequence = 0;
 let runnerApplyRequest: StageRunnerApply | null = null;
+let pendingRunnerRefresh = false;
+const runnerObservedRun = computed(() => {
+  const attempts = stageLive.value?.meta.runner?.attempts;
+
+  return attempts?.findLast((attempt) => typeof attempt.epoch === 'number') ?? attempts?.at(-1);
+});
+const matchesObservedRunnerRun = (
+  actual: StageRunnerOptions['actual'], run: typeof runnerObservedRun.value,
+) => typeof run?.epoch !== 'number' || (actual?.run.id === run.id && actual?.run.epoch === run.epoch);
+const runnerConfirmedActual = computed(() => {
+  const actual = runnerConfirmed.value?.actual ?? null;
+
+  return matchesObservedRunnerRun(actual, runnerObservedRun.value) ? actual : null;
+});
 const runnerRunObservation = computed(() => {
   const live = stageLive.value;
-  const attempts = live?.meta.runner?.attempts;
-  const run = attempts?.findLast((attempt) => typeof attempt.epoch === 'number') ?? attempts?.at(-1);
+  const run = runnerObservedRun.value;
 
   return JSON.stringify([live?.status, live?.daemonAlive, live?.meta.runner?.actual, run?.id, run?.epoch]);
 });
@@ -2578,20 +2607,77 @@ const runnerPending = computed(() => stagePending.value?.runner || null);
 const stageRunnerActive = computed(() => (
   runnerDraft.value?.parametersFor || stage.value?.meta.runner?.primary || ''
 ));
-const runnerSettingsDirty = computed(() => Boolean(runnerDraft.value && runnerConfirmed.value
-  && JSON.stringify(runnerDraft.value) !== JSON.stringify(runnerConfirmed.value.selection)));
+const speedLabels = {
+  standard: 'core.chatSpeedStandard',
+  fast: 'core.chatSpeedFast',
+  ultrafast: 'core.chatSpeedUltrafast',
+} as const;
+const speedLabel = (speed: ChatSpeed) => translate(speedLabels[speed]);
+const runnerNextSpeed = computed(() => {
+  const options = runnerConfirmed.value;
+
+  if (!options || (options.sources.speed === undefined && options.selection.speed == null
+    && !options.models.some((model) => model.speedModes?.length))) {
+    return null;
+  }
+
+  const speed = options.effective.speed ?? options.selection.speed ?? options.inherited?.speed;
+  const source = options.sources.speed === 'node' ? 'core.stageSpeedSourceNode'
+    : options.inherited?.speed ? 'core.stageSpeedSourceProfile' : 'core.stageSpeedSourceNative';
+
+  return { speed: speed ? speedLabel(speed) : translate('core.stageSpeedNative'), source: translate(source) };
+});
+const runnerSpeedForecast = computed(() => {
+  const options = runnerSettings.value;
+  const draft = runnerDraft.value;
+  const inherited = options?.inherited;
+  const speed = inherited?.speed;
+
+  if (!draft || draft.speed != null || (speed !== 'fast' && speed !== 'ultrafast')) {
+    return null;
+  }
+
+  const model = options?.models.find((item) => item.id === (draft.model ?? inherited?.model));
+
+  return model?.speedModes?.includes(speed) ? null : speed;
+});
+const comparableRunnerSelection = (value: StageRunnerSelection) =>
+  JSON.stringify({ ...value, speed: value.speed ?? null });
+const runnerSettingsDirty = computed(() => {
+  const draft = runnerDraft.value;
+  const confirmed = runnerConfirmed.value?.selection;
+
+  return Boolean(draft && confirmed
+    && comparableRunnerSelection(draft) !== comparableRunnerSelection(confirmed));
+});
 const runnerSettingsInvalid = computed(() => {
   const draft = runnerDraft.value;
   const options = runnerSettings.value;
 
   if (!draft || !options) {
-    return false;
+    return null;
   }
 
-  return Boolean(stageRunnerSelectionError(draft, options));
+  return stageRunnerSelectionError(draft, options);
 });
 const runnerSettingsDisabled = computed(() => Boolean(stageBusy.value || runnerSettingsLoading.value
   || !runnerSettings.value?.models.length || !runnerDraft.value || runnerSettingsInvalid.value));
+
+/**
+ * Отказ о скорости можно исправить в текущем окне или в профиле.
+ * При гонке профиль может измениться до ответа на POST.
+ */
+function runnerSettingsHint(message: string) {
+  if (!message.startsWith('speed_unavailable:')) {
+    return '';
+  }
+
+  const invalidProfile = runnerDraft.value?.speed == null
+    && (runnerSettings.value?.inherited?.speedIssue === 'invalid_profile'
+      || message.includes('неизвестный режим в профиле'));
+
+  return translate(invalidProfile ? 'core.stageSpeedInvalidProfile' : 'core.stageSpeedUnavailable');
+}
 
 /**
  * Запрос захватывает точную identity до ожидания и не зависит от жизни модального окна.
@@ -2616,11 +2702,13 @@ async function loadRunnerSettings(keepDraft = false) {
   const sequence = ++runnerSettingsSequence;
   const provider = runnerDraft.value?.parametersFor;
   const observation = runnerRunObservation.value;
+  const run = runnerObservedRun.value;
 
   if (!opened || opened.readOnly || !opened.meta.runner || !opened.attempt || opened.isGate) {
     return;
   }
 
+  pendingRunnerRefresh = false;
   runnerSettingsLoading.value = true;
   runnerSettingsError.value = '';
   runnerSettings.value = null;
@@ -2641,7 +2729,8 @@ async function loadRunnerSettings(keepDraft = false) {
       selection: result.selection,
     });
 
-    if (stage.value !== opened || sequence !== runnerSettingsSequence) {
+    if (stage.value !== opened || sequence !== runnerSettingsSequence
+      || observation !== runnerRunObservation.value) {
       return;
     }
 
@@ -2667,6 +2756,26 @@ async function loadRunnerSettings(keepDraft = false) {
     if (stage.value === opened && sequence === runnerSettingsSequence) {
       console.log('AGENT-DBG[3] Ошибка настроек этапа', errorMessage(error, ''));
       runnerSettingsError.value = errorMessage(error, '');
+
+      if (provider !== undefined && error instanceof ApiError && error.status === 503) {
+        try {
+          const result = await readRunnerSettings(opened);
+          const confirmed = runnerConfirmed.value;
+          const actual = result.actual;
+
+          if (stage.value === opened && sequence === runnerSettingsSequence
+            && observation === runnerRunObservation.value
+            && confirmed && matchesObservedRunnerRun(actual, run)) {
+            runnerConfirmed.value = {
+              ...confirmed,
+              actual,
+              receipt: result.receipt,
+            };
+          }
+        } catch {
+          // Причину строгого discovery оставляем рядом с кнопкой повтора.
+        }
+      }
     }
   } finally {
     if (stage.value === opened && sequence === runnerSettingsSequence) {
@@ -2687,13 +2796,15 @@ watch(() => stage.value, () => {
   runnerSettingsError.value = '';
   runnerSettingsLoading.value = false;
   runnerApplyRequest = null;
+  pendingRunnerRefresh = false;
 
   const pending = stagePending.value;
 
   if (pending?.selection) {
     runnerDraft.value = { ...pending.selection };
     runnerSettings.value = pending.options ?? null;
-    runnerConfirmed.value = pending.options ?? null;
+    runnerConfirmed.value = pending.confirmed ?? null;
+    runnerApplyRequest = pending.request ?? null;
     runnerSettingsLoading.value = pending.action === 'runner-options';
 
     return;
@@ -2704,8 +2815,22 @@ watch(() => stage.value, () => {
 
 // Смена запуска перечитывает trusted actual через options, сохраняя набранную пару.
 // Токены и прочая telemetry не меняют ключ наблюдения и не вызывают discovery.
-watch(runnerRunObservation, () => {
-  if (runnerDraft.value && !stageBusy.value) {
+watch([stage, runnerRunObservation, stageBusy], ([opened, observation, busy], previousState) => {
+  const [previous, lastObservation] = previousState;
+
+  if (opened === previous && observation !== lastObservation) {
+    if (runnerConfirmed.value?.actual) {
+      runnerConfirmed.value = { ...runnerConfirmed.value, actual: null };
+    }
+    if (runnerSettings.value?.actual) {
+      runnerSettings.value = { ...runnerSettings.value, actual: null };
+    }
+
+    pendingRunnerRefresh = true;
+  }
+
+  if (pendingRunnerRefresh && runnerDraft.value && !busy) {
+    pendingRunnerRefresh = false;
     void loadRunnerSettings(true);
   }
 });
@@ -2714,23 +2839,27 @@ watch(runnerRunObservation, () => {
  * Поле сразу сохраняет совместимую пару; несовместимая остаётся видимой для исправления.
  * Второй параметр никогда не сбрасывается ради автоматического сохранения.
  */
-function setRunnerParameter(field: 'model' | 'effort', value: string | null) {
-  if (runnerDraft.value && !stageBusy.value) {
-    runnerDraft.value = { ...runnerDraft.value, [field]: value };
-    runnerApplyRequest = null;
-    void applyRunnerSettings('next');
+function setRunnerParameter(field: 'model' | 'effort' | 'speed', value: string | null) {
+  const draft = runnerDraft.value;
+
+  if (!draft || stageBusy.value || (field === 'speed' && (value === undefined || !isChatSpeed(value)))) {
+    return;
   }
+
+  runnerDraft.value = { ...draft, [field]: value };
+  runnerApplyRequest = null;
+  void applyRunnerSettings('next');
 }
 
 /**
- * Повтор discovery сохраняет захваченный выбор независимо от закрытия окна.
- * Начальная загрузка сама по себе не создаёт новую локальную настройку.
+ * Повтор загрузки завершает выбор исполнителя, пока запись ещё не отправлена.
+ * При неизвестном исходе POST загрузка сначала ищет квитанцию того же запроса.
  */
 async function retryRunnerSettings() {
   const opened = stage.value;
   const draft = runnerDraft.value;
 
-  if (opened && draft && runnerSettingsDirty.value) {
+  if (!runnerApplyRequest && opened && draft && runnerSettingsDirty.value) {
     await saveRunnerSelection(opened, { ...draft });
   } else {
     await loadRunnerSettings(true);
@@ -2776,6 +2905,7 @@ async function saveRunnerSelection(opened: Stage, selection: StageRunnerSelectio
     action: 'runner-options',
     runner: selection.parametersFor,
     selection: { ...selection },
+    confirmed: runnerConfirmed.value,
     token,
   });
   runnerSettingsSequence += 1;
@@ -2794,8 +2924,11 @@ async function saveRunnerSelection(opened: Stage, selection: StageRunnerSelectio
 
     if (runnerSaveVisible(opened)) {
       runnerSettings.value = options;
-      runnerConfirmed.value = options;
       runnerSettingsLoading.value = false;
+
+      if (options.selection.parametersFor === selection.parametersFor) {
+        runnerConfirmed.value = options;
+      }
     }
 
     const invalid = stageRunnerSelectionError(selection, options);
@@ -2807,7 +2940,9 @@ async function saveRunnerSelection(opened: Stage, selection: StageRunnerSelectio
     await persistRunnerSettings(opened, options, selection, 'next', token);
   } catch (error) {
     if (pendingStageActions.value.get(key)?.token === token) {
-      reportRunnerSaveError(opened, errorMessage(error, ''));
+      const message = errorMessage(error, '');
+
+      reportRunnerSaveError(opened, runnerSettingsHint(message) || message);
     }
   } finally {
     if (pendingStageActions.value.get(key)?.token === token) {
@@ -2906,6 +3041,7 @@ async function persistRunnerSettings(
   } else if (beginStageAction(opened, 'runner-override', selection.parametersFor)) {
     pending = pendingStageActions.value.get(key)!;
     pending.token = token;
+    pending.confirmed = runnerConfirmed.value;
   } else {
     return;
   }
@@ -2924,12 +3060,19 @@ async function persistRunnerSettings(
     selection: { ...selection },
   };
 
+  pending.request = payload;
+
   if (runnerSaveVisible(opened)) {
     runnerApplyRequest = payload;
   }
 
   try {
     const result = decodeStageRunnerOptions(await taskStore.applyStageRunnerSettings(opened.task, payload));
+
+    pending.selection = { ...result.selection };
+    pending.options = result;
+    pending.confirmed = result;
+    delete pending.request;
 
     if (runnerSaveVisible(opened)) {
       runnerSettingsSequence += 1;
@@ -2943,16 +3086,22 @@ async function persistRunnerSettings(
 
     await load();
 
-    if (runnerSaveVisible(opened) && mode === 'restart') {
+    if (runnerSaveVisible(opened) && !result.models.length) {
       await loadRunnerSettings(true);
     }
   } catch (error) {
-    if (runnerSaveVisible(opened) && error instanceof ApiError && error.status === 409) {
-      runnerApplyRequest = null;
-      await loadRunnerSettings(true);
+    if (error instanceof ApiError && error.status === 409) {
+      delete pending.request;
+
+      if (runnerSaveVisible(opened)) {
+        runnerApplyRequest = null;
+        await loadRunnerSettings(true);
+      }
     }
 
-    reportRunnerSaveError(opened, errorMessage(error, ''));
+    const message = errorMessage(error, '');
+
+    reportRunnerSaveError(opened, runnerSettingsHint(message) || message);
   } finally {
     if (pendingStageActions.value.get(key)?.token === token) {
       finishStageAction(opened);
@@ -4765,43 +4914,25 @@ function cardState(g: PipelineViewGraph) {
 .runner-override { display: flex; flex-direction: column; gap: 8px; }
 .runner-override-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .runner-picks {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 136px), 1fr));
+  gap: 8px;
+  margin-bottom: 4px;
 }
-.executor-identity {
+.executor-tile-label {
   display: flex;
   align-items: center;
-  gap: 11px;
-  width: 100%;
+  gap: 8px;
   min-width: 0;
 }
-.executor-monogram {
-  flex: none;
+.executor-tile-icon {
   display: grid;
   place-items: center;
-  width: 24px;
-  height: 24px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
+  flex: 0 0 24px;
   color: var(--ink-mid);
-  font-size: 16px;
-}
-.executor-name {
-  font-size: 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-.executor-name b {
-  font-weight: 600;
-}
-.executor-name small {
-  color: var(--ink-mid);
-  font-size: 10px;
 }
 .executor-check {
-  margin-left: auto;
+  flex: none;
   color: var(--accent);
   font-size: 12px;
 }

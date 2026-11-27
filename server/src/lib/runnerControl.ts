@@ -29,6 +29,40 @@ export interface RunnerControlResult {
   output: string;
 }
 
+/**
+ * Убирает поля скорости из ответа для клиента с прежней закрытой схемой.
+ * Авторитетный каталог и selection остаются доступны для проверок внутри сервера.
+ */
+export function legacyStageRunnerOptions(options: StageRunnerOptions): StageRunnerOptions {
+  const { speed: _selection, ...selection } = options.selection;
+  const { speed: _sources, ...sources } = options.sources;
+  const { speed: _effective, speedIssue: _effectiveIssue, ...effective } = options.effective;
+  let inherited: StageRunnerOptions['inherited'];
+  let actual: StageRunnerOptions['actual'] = null;
+
+  if (options.inherited) {
+    const { speed: _speed, speedIssue: _issue, ...rest } = options.inherited;
+
+    inherited = rest;
+  }
+
+  if (options.actual) {
+    const { speed: _speed, speedWarning: _warning, ...rest } = options.actual;
+
+    actual = rest;
+  }
+
+  return {
+    ...options,
+    selection,
+    sources,
+    effective,
+    actual,
+    models: options.models.map(({ speedModes: _speed, ...model }) => model),
+    ...(inherited ? { inherited } : {}),
+  };
+}
+
 export class FactoryRunnerControl {
   readonly routeConfig: RouteConfig;
 
@@ -42,12 +76,14 @@ export class FactoryRunnerControl {
    */
   async settingsCommand(
     operation: 'options' | 'apply' | 'show', identity: StageRunnerIdentity, extra: string[] = [],
+    speedWire = false,
   ): Promise<StageRunnerOptions> {
     identity = decodeStageRunnerIdentity(identity);
 
     const args = [identity.task, 'runner', 'settings', operation,
       '--profile', identity.profile, '--attempt', identity.attempt,
-      '--node', identity.node, '--stage', identity.stage, ...extra, ...routePathArgs(this.routeConfig)];
+      '--node', identity.node, '--stage', identity.stage, ...extra,
+      ...(speedWire ? ['--speed-v1', '1'] : []), ...routePathArgs(this.routeConfig)];
     const result = await runRouteEngine(this.routeConfig, args);
 
     if (!result.ok) {
@@ -61,25 +97,27 @@ export class FactoryRunnerControl {
    * Без provider читается сохранённый выбор точного узла, независимо от graph primary.
    * Явный provider открывает его каталог без нормализации недопустимых символов.
    */
-  async settingsOptions({ identity, provider }: {
-    identity: StageRunnerIdentity; provider?: string;
+  async settingsOptions({ identity, provider, speedWire = false }: {
+    identity: StageRunnerIdentity;
+    provider?: string;
+    speedWire?: boolean;
   }): Promise<StageRunnerOptions> {
     if (provider === undefined) {
-      return this.settingsCommand('show', identity);
+      return this.settingsCommand('show', identity, [], speedWire);
     }
 
     if (!PROVIDER_RE.test(provider)) {
       throw new RunnerControlInputError('Некорректный исполнитель.');
     }
 
-    return this.settingsCommand('options', identity, ['--provider', provider]);
+    return this.settingsCommand('options', identity, ['--provider', provider], speedWire);
   }
 
   /**
    * Передаёт целый apply без per-field мутаций; CAS повторно проверяет сам движок.
    * Неопределённый исход команды восстанавливается чтением receipt того же запроса.
    */
-  async applySettings(input: StageRunnerApply): Promise<StageRunnerOptions> {
+  async applySettings(input: StageRunnerApply, speedWire = false): Promise<StageRunnerOptions> {
     const payload = decodeStageRunnerApply(input);
     let options;
 
@@ -87,9 +125,10 @@ export class FactoryRunnerControl {
       options = await this.settingsOptions({
         identity: payload.identity,
         provider: payload.selection.parametersFor,
+        speedWire,
       });
     } catch (error) {
-      const current = await this.settingsCommand('show', payload.identity);
+      const current = await this.settingsCommand('show', payload.identity, [], speedWire);
 
       if (current.receipt?.requestId !== payload.requestId) {
         throw error;
@@ -102,15 +141,22 @@ export class FactoryRunnerControl {
       const invalid = stageRunnerSelectionError(payload.selection, options);
 
       if (invalid) {
+        if (invalid.startsWith('speed_unavailable:') && !Object.hasOwn(payload.selection, 'speed')
+          && options.selection.parametersFor === payload.selection.parametersFor && options.selection.speed) {
+          throw new StageRunnerCommandError(75,
+            'speed_unavailable: Откройте обновлённый редактор скорости или выберите совместимую модель');
+        }
+
         throw new StageRunnerCommandError(75, invalid);
       }
     }
 
     try {
-      return await this.settingsCommand('apply', payload.identity, ['--payload', JSON.stringify(payload)]);
+      return await this.settingsCommand('apply', payload.identity,
+        ['--payload', JSON.stringify(payload)], speedWire);
     } catch (error) {
       if (error instanceof StageRunnerCommandError && error.timedOut) {
-        const current = await this.settingsCommand('show', payload.identity);
+        const current = await this.settingsCommand('show', payload.identity, [], speedWire);
 
         if (current.receipt?.requestId === payload.requestId) {
           return current;
@@ -126,12 +172,21 @@ export class FactoryRunnerControl {
    * Пара сохранённой модели остаётся только у того провайдера, которому принадлежит.
    */
   async changeStageProvider(
-    identity: StageRunnerIdentity, primary: string | null, mode: StageRunnerApply['mode'],
+    identity: StageRunnerIdentity, primary: string | null, mode: StageRunnerApply['mode'], speedWire = false,
   ): Promise<RunnerControlResult> {
-    const selected = await this.settingsOptions({ identity, provider: primary ?? undefined });
+    const selected = await this.settingsOptions({
+      identity,
+      provider: primary ?? undefined,
+      speedWire,
+    });
     const provider = primary ?? selected.inherited?.primary ?? selected.effective.primary;
-    const options = provider === (primary ?? selected.selection.parametersFor)
-      ? selected : await this.settingsOptions({ identity, provider });
+    const canReuseCatalog = primary !== null
+      || (selected.selection.parametersFor === provider && selected.models.length > 0);
+    const options = canReuseCatalog ? selected : await this.settingsOptions({
+      identity,
+      provider,
+      speedWire,
+    });
     const own = options.selection.parametersFor === provider;
 
     if (mode === 'restart' && !options.actual) {
@@ -151,8 +206,11 @@ export class FactoryRunnerControl {
         model: own ? options.selection.model : null,
         effort: own ? options.selection.effort : null,
       },
-    });
+    }, speedWire);
 
-    return { ok: true, output: JSON.stringify(result) };
+    return {
+      ok: true,
+      output: JSON.stringify(legacyStageRunnerOptions(result)),
+    };
   }
 }

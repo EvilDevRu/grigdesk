@@ -80,10 +80,18 @@ task-stage → task → profile-stage → profile-project
 Модель задаётся семейством. `version=latest` обновляет actual id только внутри семейства;
 неизвестный exact id движок не угадывает.
 
-Route bundle не хранит `provider`, `model` или `effort`. Исполняемый узел задаёт только
+Route bundle хранит топологию отдельно от исполнителя, модели, effort и скорости. Исполняемый узел задаёт
 `runKey`; по нему движок выбирает stage-policy `MODEL_<RUN_KEY>_<PROVIDER>_*` с fallback
 на `MODEL_DEFAULT_<PROVIDER>_*` из `runners.env`. Поэтому опубликованный маршрут остаётся
-provider-neutral, а смена модели или effort не требует публикации новой схемы.
+provider-neutral, а смена модели, effort или скорости применяется без публикации новой схемы.
+
+`MODEL_DEFAULT_<PROVIDER>_SPEED` задаёт режим проекта, `MODEL_<RUN_KEY>_<PROVIDER>_SPEED`
+переопределяет его для роли. Пустая строка наследует следующую ступень. Явный `standard`
+перекрывает ускорение, а локальный режим узла имеет приоритет над профилем. Codex
+принимает `standard`, `fast`, `ultrafast`, Claude — `standard` и `fast`.
+У остальных исполнителей ключ при запуске игнорируется.
+`factory profile <name> model set <RUN_KEY|DEFAULT> <provider> speed=<режим>` использует
+существующий writer и revision. `speed=` очищает выбранное значение.
 
 Допустимые семейства объявляет сам раннер (`runner_<provider>_family_alias`), потому что без
 каталога семейство уходит в CLI как имя модели: у `claude` это `opus|fable|sonnet|haiku`,

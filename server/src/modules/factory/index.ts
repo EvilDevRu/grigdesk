@@ -1,10 +1,12 @@
 import { accessService } from '../../lib/accessProfiles/service.ts';
 import { randomUUID } from 'node:crypto';
 import {
-  decodeStageRunnerApply, decodeStageRunnerIdentity, StageRunnerSettingsInputError,
+  decodeStageRunnerApply, decodeStageRunnerIdentity, StageRunnerSettingsInputError, STAGE_RUNNER_SPEED_ACCEPT,
 } from '../../../../shared/pipeline/stageRunnerSettings.ts';
 import type { StageRunnerIdentity } from '../../../../shared/pipeline/stageRunnerSettings.ts';
-import { probeFactoryStageRunnerSettingsCapability } from '../../lib/factoryRuntimeCapabilities.ts';
+import {
+  probeFactoryStageRunnerSettingsCapability, probeFactoryStageRunnerSpeedCapability,
+} from '../../lib/factoryRuntimeCapabilities.ts';
 import { hasPendingDarwinLaunch, retryUnreleasedDarwinLaunch } from '../../lib/factoryDarwinLaunch.ts';
 import { verifyDarwinOwnershipRoots } from '../../lib/factoryDarwinOwnershipRoots.ts';
 import { stopDarwinOrchestrator } from '../../lib/factoryDarwinStop.ts';
@@ -81,6 +83,7 @@ import {
 } from '../../lib/factoryRouteCli.ts';
 import {
   FactoryRunnerControl,
+  legacyStageRunnerOptions,
   RunnerControlInputError,
 } from '../../lib/runnerControl.ts';
 import { listInstalledRunners } from '../../lib/runnersCatalog.ts';
@@ -2893,6 +2896,8 @@ async function factoryModule(
 
   fastify.get<{ Params: { id: string }; Querystring: Record<string, unknown> }>(
     '/api/tasks/:id/runner/options', async (request, reply) => {
+      reply.header('Vary', 'Accept').header('Cache-Control', 'no-store');
+
       try {
         const query = request.query;
 
@@ -2914,7 +2919,16 @@ async function factoryModule(
           return reply;
         }
 
-        return await runnerControl.settingsOptions({ identity, provider });
+        const capability = await probeFactoryStageRunnerSpeedCapability(config, identity);
+        const speedWire = capability.status === 'supported';
+        const options = await runnerControl.settingsOptions({
+          identity,
+          provider,
+          speedWire,
+        });
+
+        return speedWire && request.headers.accept === STAGE_RUNNER_SPEED_ACCEPT
+          ? options : legacyStageRunnerOptions(options);
       } catch (error) {
         return stageSettingsError(error, reply);
       }
@@ -2923,6 +2937,8 @@ async function factoryModule(
 
   fastify.post<{ Params: { id: string }; Body: unknown }>(
     '/api/tasks/:id/runner/settings', async (request, reply) => {
+      reply.header('Vary', 'Accept').header('Cache-Control', 'no-store');
+
       try {
         const payload = decodeStageRunnerApply(request.body);
 
@@ -2934,7 +2950,17 @@ async function factoryModule(
           return reply;
         }
 
-        return await runnerControl.applySettings(payload);
+        const capability = await probeFactoryStageRunnerSpeedCapability(config, payload.identity);
+        const speedWire = capability.status === 'supported';
+
+        if (Object.hasOwn(payload.selection, 'speed') && !speedWire) {
+          return reply.code(503).send({ error: 'settings_unavailable', message: capability.message });
+        }
+
+        const options = await runnerControl.applySettings(payload, speedWire);
+
+        return speedWire && request.headers.accept === STAGE_RUNNER_SPEED_ACCEPT
+          ? options : legacyStageRunnerOptions(options);
       } catch (error) {
         return stageSettingsError(error, reply);
       }
@@ -2997,7 +3023,11 @@ async function factoryModule(
         return reply.code(503).send({ error: 'settings_unavailable', message: capability.message });
       }
 
-      return await runnerControl.changeStageProvider(identity, target, 'restart');
+      const speed = await probeFactoryStageRunnerSpeedCapability(config, identity);
+
+      return await runnerControl.changeStageProvider(
+        identity, target, 'restart', speed.status === 'supported',
+      );
     } catch (err) {
       const failure = runtimeLaunchFailure(err);
 
@@ -3077,7 +3107,11 @@ async function factoryModule(
         return reply.code(503).send({ error: 'settings_unavailable', message: capability.message });
       }
 
-      return await runnerControl.changeStageProvider(identity, primary || null, 'next');
+      const speed = await probeFactoryStageRunnerSpeedCapability(config, identity);
+
+      return await runnerControl.changeStageProvider(
+        identity, primary || null, 'next', speed.status === 'supported',
+      );
     } catch (err) {
       const failure = runtimeLaunchFailure(err);
 

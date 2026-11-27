@@ -81,14 +81,9 @@ export function settingsButton(wrapper, pattern) {
 }
 
 /**
- * Читает поля выбранной карточки; остальные карточки могут показывать собственные варианты.
- * Контракт сохраняет существующие .executor-row и .executor-fields из fixture страницы.
+ * Читает единый блок параметров на вкладке исполнителей.
+ * Тесты находят актуальные поля после смены исполнителя или переоткрытия узла.
  */
 export function settingsFields(wrapper) {
-  const rows = wrapper.findAll('.executor-row');
-  const row = rows.find((item) => item.find('[aria-selected="true"]').exists()) || rows[0];
-
-  assert.ok(row, 'Работающий этап должен иметь редактируемую карточку исполнителя');
-
-  return row.findAll('.executor-fields select');
+  return wrapper.get('#stage-executors-panel .executor-fields').findAll('select');
 }

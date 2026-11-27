@@ -24,7 +24,7 @@
 - [Сеть лимитов Claude, GLM, DeepSeek и Tripo: изоляция DNS и завершение зависшего запроса](../server/isolated-statistics-fetch.md)
 - [Профили доступа: имя и ключ в одном окне, переименование без проб и сброса сессий, допуск, login и память](access-profiles.md)
 
-- [Скорость чата: меню с «Обычная», Fast → priority у Codex, Ultrafast и наследование](chat-speed.md)
+- [Скорость чата: меню с «Обычная», Fast → priority у Codex, Ultrafast и наследование](chat-speed.md). У фабрики [свой выбор скорости](../pipeline/node-model-and-effort.md).
 - [Индивидуальный и Team Plan GLM: поколения, общие часы и разные квоты](glm-plan-variants.md)
 - [Веб-инструменты GLM: разрешение поиска и чтения страниц, провайдеры и ревизия v4](glm-web-tools.md)
 - [Веб-инструменты DeepSeek: поиск и чтение страниц без вопросов во всех режимах](deepseek-web-tools.md)

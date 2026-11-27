@@ -868,33 +868,18 @@
   padding: 8px 12px;
 }
 
-/* Строка исполнителя наследует выбор, наведение и фокус общей составной строки.
-   Контекст задаёт только место параметров справа и их перенос на узком экране. */
-.ui-selectable-row[data-context='pipeline-executor'] {
-  display: grid;
-  grid-template-columns: minmax(150px, .7fr) minmax(0, 1.3fr);
-  gap: 12px;
-}
-
+/* Плитка исполнителя наследует выбор, наведение и фокус общей строки.
+   Кнопка занимает всю плитку и вмещает отметку выбора или индикатор записи. */
 .ui-selectable-row[data-context='pipeline-executor'] .ui-selectable-row__primary {
-  padding: 8px 10px;
-}
-
-.ui-selectable-row[data-context='pipeline-executor'] .ui-selectable-row__actions {
-  display: block;
-  min-width: 0;
-  padding: 8px 10px 8px 0;
-}
-
-@media (max-width: 700px) {
-  .ui-selectable-row[data-context='pipeline-executor'] {
-    grid-template-columns: minmax(0, 1fr);
-    gap: 0;
-  }
-
-  .ui-selectable-row[data-context='pipeline-executor'] .ui-selectable-row__actions {
-    padding: 0 10px 10px;
-  }
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: max(42px, var(--control-height));
+  padding: 8px 12px;
+  font-size: var(--workspace-text-size);
+  font-weight: 600;
+  overflow-wrap: anywhere;
 }
 
 .ui-control-group[data-context='workspace-project'] { flex-wrap: nowrap; align-items: center; }

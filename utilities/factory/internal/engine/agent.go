@@ -52,6 +52,10 @@ func (e execution) runAgent(
 	request.RecordRestart = e.restartLifecycle(visit)
 	startedAt := time.Now()
 	result, err := e.dispatchAgent(ctx, request)
+	if canCloseSpeedRefusal(result, err) {
+		failure := e.recordClosedAgent(visit, result, err, startedAt)
+		return cursor, 75, errors.Join(err, failure)
+	}
 	if err != nil && filesystem == "state-only" && guardErr == nil && result.OwnedTreeClosed {
 		if ctx.Err() != nil {
 			if guardErr := request.AfterInvoke(result); guardErr != nil {
@@ -143,8 +147,14 @@ func (e execution) runnerRequest(
 	max, _ := strconv.Atoi(fmt.Sprint(retry["noResult"]))
 	role := e.loopRole(cursor.CurrentNode)
 	request.Store, request.Task, request.Attempt = e.request.Store, e.attempt.Task, e.attempt.ID
+	request.Profile = e.attempt.Profile
 	request.Node, request.Stage, request.Role, request.Prompt = cursor.CurrentNode, key, role, prompt
 	request.Filesystem, request.Worktree = filesystem, e.invoke.Directory
+	scope, problem := request.Store.ReadStageMetadataScope(e.attempt)
+	request.MetadataScope = scope
+	if problem != "" && e.request.Log != nil {
+		fmt.Fprintln(e.request.Log, "metadata scope:", problem)
+	}
 	request.Timeout, request.NoResultRetries = 20*time.Minute, max
 	request.Shared = e.workspace.Mode == "shared"
 	request.Selection = e.runnerSelections[cursor.CurrentNode]
@@ -236,27 +246,41 @@ func environmentValue(env []string, name string) string {
 	return ""
 }
 
-// recordClosedAgent фиксирует завершение проверенного хостом запуска без результата этапа.
+// canCloseSpeedRefusal разрешает закрыть визит после отказа в новой эпохе.
+// Если предыдущая эпоха уже была выдана, нужно подтверждение остановки её дерева.
+func canCloseSpeedRefusal(result runner.DispatchResult, err error) bool {
+	return errors.Is(err, runner.ErrStageSpeedUnavailable) && (!result.Run.Valid() || result.OwnedTreeClosed)
+}
+
+// recordClosedAgent закрывает визит после отказа в запуске или остановки без результата этапа.
 // Завершённый stage-result требует отдельного перехода и не даёт разрешения запустить узел снова.
 func (e execution) recordClosedAgent(
 	visit commandVisit, result runner.DispatchResult, failure error, startedAt time.Time,
 ) error {
-	run, _, err := e.request.Store.ReadRun(result.Run)
-	if err != nil {
-		return err
-	}
-	if run.State != "active" {
-		return nil
+	var runID any
+	if result.Run.Valid() {
+		run, _, err := e.request.Store.ReadRun(result.Run)
+		if err != nil {
+			return err
+		}
+		if run.State != "active" {
+			return nil
+		}
+		runID = result.Run.ID
 	}
 	status, reason := "failed", "process_exit"
-	if errors.Is(failure, context.Canceled) {
+	switch {
+	case errors.Is(failure, runner.ErrStageSpeedUnavailable):
+		reason = "unavailable"
+	case errors.Is(failure, context.Canceled):
 		status, reason = "interrupted", "signal"
 	}
+
 	details := map[string]any{
 		"status": status, "reasonCode": reason, "reasonTextSha256": lifecycleDigest(failure.Error()),
 		"durationMs": time.Since(startedAt).Milliseconds(), "durationFidelity": "monotonic",
 		"evidenceSha256": nil, "retryBudgetAfter": 0, "productOutcome": nil,
-		"productOutcomeSource": "none", "productVerdictHash": nil, "finalRunId": result.Run.ID,
+		"productOutcomeSource": "none", "productVerdictHash": nil, "finalRunId": runID,
 	}
 	return e.appendLife(visit, "node_execution_finished", visit.executionSpan, details)
 }

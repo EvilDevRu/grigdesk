@@ -29,3 +29,6 @@ pipeline — управление конвейерами GrigDesk.
   pipeline arbiter-resume <task> <conversation>
   pipeline arbiter-stop <task>
   pipeline wait <task> <attempt> <timeoutMs> <intervalMs>
+
+В JSON selection команды runner-set можно выбрать speed standard, fast или ultrafast.
+Значение null возвращает наследование из профиля. Пропущенное поле сохраняет прежний выбор.

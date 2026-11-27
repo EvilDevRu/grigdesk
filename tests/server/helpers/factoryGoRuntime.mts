@@ -8,8 +8,10 @@ import type { TestContext } from 'node:test';
 
 import * as fixtures from '../../engine/fixtures/routes-catalog-definitions.mjs';
 import { FactoryStateAdapter } from '../../../server/src/adapters/factoryState.ts';
+import { AuthStore } from '../../../server/src/lib/authStore.ts';
 import factoryModule from '../../../server/src/modules/factory/index.ts';
 import { RoutesStore } from '../../../server/src/modules/routes/store.ts';
+import authPlugin from '../../../server/src/plugins/auth.ts';
 import type { RouteConfig } from '../../../server/src/lib/factoryRouteCli.ts';
 
 const requireFromServer = createRequire(new URL('../../../server/package.json', import.meta.url));
@@ -40,7 +42,7 @@ exec </dev/null
  */
 export async function prepareCommandServer(
   t: TestContext, root: string, factoryBin: string,
-  withAgent = false, withBrowser = false, noResultRetries = 0,
+  withAgent = false, withBrowser = false, noResultRetries = 0, withSpeedAgent = false,
 ) {
   const profile = fixtures.PROFILE_ID;
   const profilesDir = path.join(root, 'profiles');
@@ -141,13 +143,28 @@ fi
     profilesDir,
     controlDir,
   });
-  const catalog = await publishCommandRoute(routesDir, withAgent, withBrowser, noResultRetries);
+  const catalog = await publishCommandRoute(
+    routesDir, withAgent, withBrowser, noResultRetries, 'skip', withSpeedAgent,
+  );
   /**
    * Каждый новый Fastify модуль заново читает профиль и попытку.
    * Каталоги установки остаются теми же после закрытия предыдущего экземпляра.
    */
-  const open = async (overrides: Partial<RouteConfig> = {}) => {
+  const open = async (overrides: Partial<RouteConfig> = {}, auth?: { cliToken: string }) => {
     const app = Fastify({ logger: false });
+
+    if (auth) {
+      const authStore = new AuthStore({
+        sessionsPath: path.join(root, 'sessions.json'),
+        legacyAccountPath: path.join(root, 'account.json'),
+      });
+
+      await app.register(authPlugin, {
+        authStore,
+        internalToken: 'internal',
+        cliToken: auth.cliToken,
+      });
+    }
 
     await app.register(factoryModule, {
       config: { ...config, ...overrides },
@@ -172,12 +189,50 @@ fi
 }
 
 /**
+ * Изолирует рабочую копию тестового Codex от профиля shared.
+ * Хук публикует только descriptor уже готовой временной копии без сервисов.
+ */
+export async function prepareIsolatedCommandWorkspace(
+  fixture: Awaited<ReturnType<typeof prepareCommandServer>>,
+) {
+  const root = fixture.config.rootDir;
+  const source = path.join(root, 'source');
+  const profile = path.join(fixture.config.profilesDir, 'demo-profile');
+
+  execFileSync('git', ['init', '-qb', 'shared-main', source], {
+    env: { HOME: root, PATH: '/usr/bin:/bin' },
+    timeout: 10_000,
+  });
+  await fs.appendFile(path.join(profile, 'profile.sh'), `
+profile_workspace_mode() { printf 'isolated\\n'; }
+profile_stand_mode() { printf 'none\\n'; }
+profile_repositories() { printf 'app\\t%s\\t%s\\n' "${source}" "${fixture.checkout}"; }
+`);
+  await fs.writeFile(path.join(profile, 'up.sh'), `#!/bin/bash
+cat >"$STATE_DIR/t$1.env" <<EOF
+TASK=$1
+WORKSPACE_MODE=isolated
+STAND_OWNERSHIP=task
+SB_K=0
+API_PORT=
+FE_PORT=
+SOURCE_BRANCH=shared-main
+REPO_COUNT=1
+REPO_0_NAME=app
+REPO_0_SOURCE=${source}
+REPO_0_WT=${fixture.checkout}
+REPO_0_BRANCH=shared-main
+EOF
+`, { mode: 0o700 });
+}
+
+/**
  * Использует штатного писателя каталога для маршрута с командой и воротами.
  * Воспроизводимость нужна для сравнения с отдельной установкой.
  */
 export async function publishCommandRoute(
   routesDir: string, withAgent: boolean, withBrowser = false, noResultRetries = 0,
-  bootstrapMode: 'skip' | 'required' = 'skip',
+  bootstrapMode: 'skip' | 'required' = 'skip', withSpeedAgent = false,
 ) {
   const profile = fixtures.PROFILE_ID;
   const base = fixtures.ROUTE_DEFINITIONS.command.route;
@@ -223,6 +278,24 @@ export async function publishCommandRoute(
     on: { approved: withAgent ? { next: 'build' } : { stop: 'done' }, rejected: stop },
   };
   const nodes = withAgent ? [verify, gate, agent] : [verify, gate];
+
+  if (withSpeedAgent) {
+    const second = {
+      ...agent,
+      id: 'validate_speed',
+      runKey: 'VALIDATE_SPEED',
+    };
+    const build = {
+      ...agent,
+      on: {
+        ...agent.on,
+        done: { next: second.id },
+      },
+    };
+
+    nodes.splice(2, 1, build, second);
+  }
+
   const route = {
     ...base,
     bootstrap: bootstrapMode,

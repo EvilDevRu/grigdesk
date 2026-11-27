@@ -19,6 +19,9 @@ import (
 // runClaudeAdapter проверяет settings до старта и оставляет только объявленные источники.
 // Терминал принимается через run-scoped capability.
 func runClaudeAdapter(run Run, binary, settings, prompt string, policy routePolicy) (Outcome, *AdapterError) {
+	if settings != "" && run.Speed != "" {
+		return Outcome{RC: 78}, adapterError(78, "скорость Claude требует генерируемых настроек")
+	}
 	deferred := settings == ""
 	var env []string
 	var document *claudeSettings

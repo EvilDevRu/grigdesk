@@ -147,12 +147,19 @@ func checkSettingsWhileAgentRuns(t *testing.T, f routeFixture) {
 	receipt := state.StageRunnerReceipt{
 		RequestID: "2ace21bb-166f-40dd-9192-59d378807fde", PayloadHash: strings.Repeat("a", 64), State: "saved",
 	}
+	attempt, err := f.store.ReadAttempt(testTask, id.Attempt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scope, _ := f.store.ReadStageMetadataScope(attempt)
+	fingerprint := scope.Fingerprint()
 	validate := func() error { return nil }
-	if _, err := f.store.SaveStageRunnerSettings(id, 0, nil, selection, receipt, nil, validate); !errors.Is(err, state.ErrConflict) {
+	_, err = f.store.SaveStageRunnerSettings(id, 0, nil, selection, receipt, nil, validate, fingerprint)
+	if !errors.Is(err, state.ErrConflict) || !strings.Contains(err.Error(), "identity_conflict") {
 		t.Fatalf("снимок работающего этапа принят без run: %v", err)
 	}
 	id.Node, id.Stage = "skeptic", "SKEPTIC"
-	saved, err := f.store.SaveStageRunnerSettings(id, 0, nil, selection, receipt, nil, validate)
+	saved, err := f.store.SaveStageRunnerSettings(id, 0, nil, selection, receipt, nil, validate, fingerprint)
 	if err != nil || saved.Revision != 1 || saved.Selection.Primary != "codex" {
 		t.Fatalf("сохранение будущего узла во время PLAN: %+v %v", saved, err)
 	}

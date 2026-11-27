@@ -81,6 +81,9 @@ func Launch(ctx context.Context, request LaunchRequest) (code int, failure error
 			return rc, err
 		}
 	}
+	if err := request.Store.WriteStageMetadataScope(e.attempt, state.StageMetadataScope{}); err != nil {
+		return 78, fmt.Errorf("metadata_scope_invalidation_failed: %w", err)
+	}
 	defer func() {
 		fields := []state.ProjectionField{{Key: "ORCH_PID", Value: ""}}
 		if code == 130 && errors.Is(failure, context.Canceled) {

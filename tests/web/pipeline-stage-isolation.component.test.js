@@ -191,7 +191,13 @@ async function mountPipelines(t, { running = false } = {}) {
   });
   const wrapper = mount(component, {
     attachTo: browser.document.querySelector('#mount'),
-    global: { plugins: [createPinia()], stubs: { teleport: true } },
+    global: {
+      plugins: [createPinia()],
+      stubs: {
+        teleport: true,
+        GraphWorkflowLauncher: true,
+      },
+    },
   });
 
   t.after(() => {
@@ -364,7 +370,7 @@ test('завершение выбора исполнителя не сбрасы
     await fx.open(index);
     await fx.wrapper.get('#stage-executors-tab').trigger('click');
 
-    const picks = fx.wrapper.findAll('.executor-row .ui-selectable-row__primary');
+    const picks = fx.wrapper.findAll('[data-role="pipeline-runner"] button');
 
     assert.equal(picks[1].element.disabled, false);
     await picks[1].trigger('click');
@@ -390,7 +396,7 @@ test('завершение выбора исполнителя не сбрасы
   first.resolve(confirmed(0));
   await fx.flushPromises();
 
-  const selected = fx.wrapper.findAll('.executor-row .ui-selectable-row__primary')[1];
+  const selected = fx.wrapper.findAll('[data-role="pipeline-runner"] button')[1];
 
   assert.equal(selected.attributes('aria-pressed'), 'true');
   assert.equal(fx.posts.filter((post) => post.url.endsWith('/runner/settings')).length, 2);
@@ -407,7 +413,7 @@ test('закрытие окна во время каталога не отмен
   await fx.open(0);
   await fx.wrapper.get('#stage-executors-tab').trigger('click');
   fx.pendingOptions.set(42, metadata);
-  await fx.wrapper.findAll('.executor-row .ui-selectable-row__primary')[1].trigger('click');
+  await fx.wrapper.findAll('[data-role="pipeline-runner"] button')[1].trigger('click');
   fx.wrapper.vm.closeStage();
   await fx.flushPromises();
   metadata.resolve(stageSettingsOptions({
@@ -437,7 +443,7 @@ test('повторное открытие подхватывает сохран�
   await fx.wrapper.get('#stage-executors-tab').trigger('click');
   fx.pendingOptions.set(42, metadata);
   fx.writes.set('/api/tasks/42/runner/settings', write);
-  await fx.wrapper.findAll('.executor-row .ui-selectable-row__primary')[1].trigger('click');
+  await fx.wrapper.findAll('[data-role="pipeline-runner"] button')[1].trigger('click');
 
   const reads = fx.optionsRequests.length;
 
@@ -445,7 +451,7 @@ test('повторное открытие подхватывает сохран�
   await fx.wrapper.get('#stage-executors-tab').trigger('click');
   assert.equal(fx.optionsRequests.length, reads, 'повторное открытие не дублирует discovery');
   assert.equal(fx.wrapper.vm.stageBusy, 'runner-options');
-  assert.equal(fx.wrapper.findAll('.executor-row .ui-selectable-row__primary')[1]
+  assert.equal(fx.wrapper.findAll('[data-role="pipeline-runner"] button')[1]
     .attributes('aria-pressed'), 'true');
 
   const options = stageSettingsOptions({
@@ -485,7 +491,7 @@ test('сохранение после смены окна не меняет вы
   await fx.open(0);
   await fx.wrapper.get('#stage-executors-tab').trigger('click');
   fx.pendingOptions.set(42, metadata);
-  await fx.wrapper.findAll('.executor-row .ui-selectable-row__primary')[1].trigger('click');
+  await fx.wrapper.findAll('[data-role="pipeline-runner"] button')[1].trigger('click');
   await fx.open(1);
   await fx.wrapper.get('#stage-executors-tab').trigger('click');
   await settingsFields(fx.wrapper)[1].setValue('high');
@@ -521,7 +527,7 @@ for (const phase of ['catalog', 'save', 'effort']) {
     if (phase === 'effort') {
       await settingsFields(fx.wrapper)[1].setValue('high');
     } else {
-      await fx.wrapper.findAll('.executor-row .ui-selectable-row__primary')[1].trigger('click');
+      await fx.wrapper.findAll('[data-role="pipeline-runner"] button')[1].trigger('click');
     }
 
     await fx.flushPromises();
@@ -547,7 +553,7 @@ test('занятый узел блокирует повтор и соседни�
   await fx.flushPromises();
   await fx.wrapper.get('.rewind-sect .play').trigger('click');
   await fx.wrapper.get('#stage-executors-tab').trigger('click');
-  assert.equal(fx.wrapper.get('.executor-row .ui-selectable-row__primary').element.disabled, true);
+  assert.equal(fx.wrapper.get('[data-role="pipeline-runner"] button').element.disabled, true);
   assert.equal(fx.posts.length, 1);
 
   fx.tasks[0].attempt = `a_${'9'.repeat(32)}`;

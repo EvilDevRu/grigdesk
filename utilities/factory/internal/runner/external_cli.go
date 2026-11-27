@@ -5,6 +5,7 @@ import (
 	"encoding/json/jsontext"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -12,6 +13,7 @@ import (
 	"strings"
 
 	"grigdesk.local/tools/utilities/factory/internal/host"
+	"grigdesk.local/tools/utilities/factory/internal/state"
 )
 
 type externalCLI struct {
@@ -95,4 +97,69 @@ func (entry *externalCLI) command(path string, args []string) (string, []string)
 		"--identity", entry.Identity, "--lease-dir", entry.LeaseDirectory,
 		"--provider", entry.ProviderID, "--resource", entry.ResourceKey, "--", path)
 	return entry.LeaseCommand[0], append(prefix, args...)
+}
+
+// SaveStageMetadataScope закрепляет те же копии CLI, которые выбрал бы запуск.
+// Недоступный провайдер исключается, а его причина передаётся безопасным кодом.
+func SaveStageMetadataScope(
+	attempt state.Attempt, store state.Store, checkout string, environment []string,
+) (problems []string, err error) {
+	scope := state.StageMetadataScope{
+		Checkout: checkout, Providers: make(map[string]state.StageMetadataCLI),
+		MetadataEnvironment: make(map[string]string),
+	}
+	for key, value := range environmentMap(environment) {
+		if systemRunnerEnv(key) || key == "GRIGDESK_HOME" {
+			scope.MetadataEnvironment[key] = value
+		}
+	}
+	request := DispatchRequest{
+		FactoryHome: environmentMap(environment)["FACTORY_HOME"], Environment: environment,
+	}
+	for _, provider := range []string{"codex", "claude"} {
+		candidate, err := prepareCandidate(request, provider)
+		if err != nil {
+			problems = append(problems, "entry_unavailable:"+provider)
+			continue
+		}
+		digest, err := state.StageMetadataExecutableDigest(candidate.Binary)
+		if err != nil {
+			problems = append(problems, "entry_unavailable:"+provider)
+			continue
+		}
+		entry := state.StageMetadataCLI{Executable: candidate.Binary, Digest: digest}
+		if external := candidate.Run.External; external != nil {
+			entry.Identity, entry.ResourceKey = external.Identity, external.ResourceKey
+			entry.LeaseDirectory, entry.LeaseCommand = external.LeaseDirectory, external.LeaseCommand
+		}
+		nativeHome := "CODEX_HOME"
+		if provider == "claude" {
+			nativeHome = "CLAUDE_CONFIG_DIR"
+		}
+		entry.MetadataEnvironment = make(map[string]string)
+		for key, value := range environmentMap(candidate.Run.Environment) {
+			if !systemRunnerEnv(key) && key != "GRIGDESK_HOME" && key != nativeHome {
+				continue
+			}
+			if inherited, present := scope.MetadataEnvironment[key]; !present || value != inherited {
+				entry.MetadataEnvironment[key] = value
+			}
+		}
+		scope.Providers[provider] = entry
+	}
+	return problems, store.WriteStageMetadataScope(attempt, scope)
+}
+
+// scopeMetadataEnvironment добавляет разрешённое окружение конкретной копии CLI.
+// Отдельные PATH внешних исполнителей не подменяют друг друга.
+func scopeMetadataEnvironment(scope *state.StageMetadataScope, provider string) []string {
+	overrides := scope.Providers[provider].MetadataEnvironment
+	environment := make(map[string]string, len(scope.MetadataEnvironment)+len(overrides))
+	maps.Copy(environment, scope.MetadataEnvironment)
+	maps.Copy(environment, overrides)
+	result := make([]string, 0, len(environment))
+	for _, key := range slices.Sorted(maps.Keys(environment)) {
+		result = append(result, key+"="+environment[key])
+	}
+	return metadataEnvironment(provider, result)
 }

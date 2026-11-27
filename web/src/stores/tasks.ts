@@ -14,10 +14,13 @@ import {
   decodeTaskDetail, decodeTaskLaunchOptions, decodeTaskLaunchResult,
 } from '../shared/boardContracts.ts';
 import type { TaskDetail } from '../shared/boardContracts.ts';
-import { decodeStageRunnerOptions } from '../../../shared/pipeline/stageRunnerSettings.ts';
+import {
+  decodeStageRunnerOptions, STAGE_RUNNER_SPEED_ACCEPT,
+} from '../../../shared/pipeline/stageRunnerSettings.ts';
 import type { StageRunnerApply, StageRunnerIdentity } from '../../../shared/pipeline/stageRunnerSettings.ts';
 
 const t = localeTranslator(uiLocalePort);
+const stageRunnerRequest = { headers: { Accept: STAGE_RUNNER_SPEED_ACCEPT } };
 
 type TaskId = string | number;
 
@@ -330,7 +333,9 @@ export const useTasksStore = defineStore('tasks', {
         query.set('provider', provider);
       }
 
-      return decodeStageRunnerOptions(await api.get(`/api/tasks/${task}/runner/options?${query}`));
+      const result = await api.get(`/api/tasks/${task}/runner/options?${query}`, stageRunnerRequest);
+
+      return decodeStageRunnerOptions(result);
     },
 
     /**
@@ -338,7 +343,9 @@ export const useTasksStore = defineStore('tasks', {
      * Receipt подтверждает отдельно сохранение и результат возможного перезапуска.
      */
     async applyStageRunnerSettings(task: TaskId, payload: StageRunnerApply) {
-      return decodeStageRunnerOptions(await api.post(`/api/tasks/${task}/runner/settings`, payload));
+      return decodeStageRunnerOptions(await api.post(
+        `/api/tasks/${task}/runner/settings`, payload, stageRunnerRequest,
+      ));
     },
 
     async resume(id: TaskId) {

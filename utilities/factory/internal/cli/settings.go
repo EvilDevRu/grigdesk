@@ -18,7 +18,7 @@ import (
 var (
 	settingsProfile = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
 	settingsStage   = regexp.MustCompile(`^[A-Z][A-Z0-9_]*$`)
-	modelFields     = []string{"FAMILY", "FAMILY_FAILOVER", "VERSION", "VARIANT", "EFFORT", "EXACT"}
+	modelFields     = []string{"FAMILY", "FAMILY_FAILOVER", "VERSION", "VARIANT", "EFFORT", "SPEED", "EXACT"}
 )
 
 // profileRunnerSettings разбирает профильные команды до работы с конфигурацией.
@@ -61,7 +61,10 @@ func profileRunnerSettings(args []string, out, diagnostic io.Writer) int {
 		if verb == "show" && len(args) == 2 {
 			return showModel(out, stage, provider, prefix, p.Values)
 		}
-		updates = modelUpdates(verb, prefix, args[2:])
+		updates = modelUpdates(verb, prefix, provider, args[2:])
+		if _, present := p.Values[prefix+"SPEED"]; verb == "clear" && !present {
+			delete(updates, prefix+"SPEED")
+		}
 	default:
 		return unavailable(diagnostic)
 	}
@@ -161,7 +164,9 @@ func showModel(out io.Writer, stage, provider, prefix string, values map[string]
 	return printLine(out, "")
 }
 
-func modelUpdates(verb, prefix string, args []string) map[string]string {
+// modelUpdates строит одну правку для всех полей до записи профиля.
+// Недопустимый режим скорости отклоняет всю команду set.
+func modelUpdates(verb, prefix, provider string, args []string) map[string]string {
 	values := make(map[string]string)
 	switch {
 	case verb == "clear" && len(args) == 0:
@@ -172,7 +177,8 @@ func modelUpdates(verb, prefix string, args []string) map[string]string {
 		for _, arg := range args {
 			key, value, ok := strings.Cut(arg, "=")
 			key = strings.ToUpper(key)
-			if !ok || !slices.Contains(modelFields, key) {
+			if !ok || !slices.Contains(modelFields, key) ||
+				(key == "SPEED" && !runner.SupportsSpeed(provider, value)) {
 				return nil
 			}
 			values[prefix+key] = value

@@ -8,6 +8,17 @@ type AgentStage struct {
 	Node, Key string
 }
 
+// AgentFilesystem возвращает файловую политику точного agent-узла бандла.
+// Редактор использует тот же cwd нативного каталога, что и запуск.
+func (b MachineBundle) AgentFilesystem(node string) (string, bool) {
+	item := b.model.nodes[node]
+	if item["executor"] != "agent" {
+		return "", false
+	}
+	filesystem := textValue(objectValue(item["policy"])["filesystem"])
+	return filesystem, filesystem != ""
+}
+
 // AgentStages возвращает точные узлы и ключи нужных цепочек у проверенного бандла.
 // Пустой узел означает весь маршрут, иначе обход включает next и rewind всех исходов.
 func (b MachineBundle) AgentStages(node string) []AgentStage {

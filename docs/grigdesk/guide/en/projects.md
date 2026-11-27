@@ -72,14 +72,20 @@ summary and confirm Write to profile. Failover and unchanged model fields appear
 is sent. Edited fields show the last server value next to the input. Profile metadata are
 read without executing Bash.
 
+For Codex and Claude, the Models group can set speed for the project and a configured role.
+Profile keys that can refer to multiple role and runner pairs are read-only.
+Inherit clears the value at that level. Standard explicitly disables acceleration.
+Fast and Ultrafast can increase limit or credit usage. The factory checks availability for
+the selected model before launch. Changes take effect the next time the profile is read.
+
 After a conflict or partial failure, wait for reload, compare actual values and confirm the remaining
 changes again. An unknown write outcome is never retried automatically. Reload and keep input retains
 unapplied intent. Discard unapplied input removes intent; completed writes remain applied.
 
 Apply necessary changes before leaving: navigation to another project and page reload discard local
 panel input. Read-only fields explain the restriction; edit complex assignments manually in the trusted
-profile according to its contract. The form does not create a profile. Manual acceptance of writes
-through the live engine after restarting the server is still required.
+profile according to its contract. The form does not create a profile. A browser check with an
+offline executor covered saving project speed and restoring role inheritance.
 
 ## Result
 

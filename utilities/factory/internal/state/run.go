@@ -115,23 +115,43 @@ func rootsOverlap(first, second string) bool {
 // BeginRun создаёт новое случайное право в точной эпохе.
 // На диск попадает хэш capability, а действующая попытка проверяется под lock.
 func (s Store) BeginRun(id RunIdentity) (string, int, error) {
-	return s.beginRun(&id, false)
+	return s.beginRun(&id, false, nil)
 }
 
 // NextRun выбирает эпоху и новое право в одной критической секции.
 // Предыдущий token не может подтвердить результат новой попытки запуска.
 func (s Store) NextRun(task, attempt, node, stage, role string) (RunIdentity, string, int, error) {
+	return s.nextRun(task, attempt, node, stage, role, nil)
+}
+
+// NextRunWithSelection выдаёт эпоху поверх проверенного под lock выбора.
+// Несовпадение не создаёт новое право запуска.
+func (s Store) NextRunWithSelection(
+	task, attempt, node, stage, role string, expected StageSelectionAdmission,
+) (RunIdentity, string, int, error) {
+	return s.nextRun(task, attempt, node, stage, role, &expected)
+}
+
+// nextRun создаёт собственный идентификатор до входа в критическую секцию.
+// Номер эпохи появляется только после проверки durable состояния.
+func (s Store) nextRun(
+	task, attempt, node, stage, role string, expected *StageSelectionAdmission,
+) (RunIdentity, string, int, error) {
 	var value [16]byte
 	_, _ = rand.Read(value[:])
 	value[6] = (value[6] & 0x0f) | 0x40
 	value[8] = (value[8] & 0x3f) | 0x80
 	id := RunIdentity{Task: task, Attempt: attempt, Stage: stage, ID: "r" + hex.EncodeToString(value[:]),
 		Epoch: 1, LoopRole: role, Node: node}
-	token, rc, err := s.beginRun(&id, true)
+	token, rc, err := s.beginRun(&id, true, expected)
 	return id, token, rc, err
 }
 
-func (s Store) beginRun(id *RunIdentity, allocate bool) (string, int, error) {
+// beginRun проверяет активную попытку, прежнюю эпоху и снимок выбора до записи.
+// Запуск получает capability и номер под одной блокировкой.
+func (s Store) beginRun(
+	id *RunIdentity, allocate bool, expected *StageSelectionAdmission,
+) (string, int, error) {
 	if id.LoopRole != "" && id.LoopRole != "lead" && id.LoopRole != "worker" {
 		return "", 2, fmt.Errorf("неверная роль узла цикла")
 	}
@@ -157,6 +177,14 @@ func (s Store) beginRun(id *RunIdentity, allocate bool) (string, int, error) {
 		}
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return "", 78, err
+	}
+	if expected != nil {
+		if err := handle.task.checkStageAdmissionSelection(id.stageRunnerIdentity(), *expected); err != nil {
+			if errors.Is(err, ErrConflict) {
+				return "", 75, err
+			}
+			return "", 78, err
+		}
 	}
 	if allocate {
 		epoch, err := handle.projectEpoch(id.Stage)

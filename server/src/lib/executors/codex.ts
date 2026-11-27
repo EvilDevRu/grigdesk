@@ -3265,6 +3265,7 @@ export default {
   accessProfiles: codexAccess,
   graphModelProcess: true,
   chatSpeed: {
+    // Согласовано с SupportsSpeed, runnerOperations и PROFILE_SPEED_MODES фабрики.
     modes: ['standard', 'fast', 'ultrafast'] as const,
     /**
      * Явный выбор чата перекрывает общий default только в снимке данного запуска.

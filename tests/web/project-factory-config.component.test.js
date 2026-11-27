@@ -97,6 +97,10 @@ export const api = {
           if (operation.kind === 'runner') {
             state.config.runners.PROJECT_RUNNER_PRIMARY = operation.primary;
             state.config.runners.PROJECT_RUNNER_FAILOVER = operation.failover;
+          } else if (Object.hasOwn(operation, 'speed')) {
+            const provider = operation.provider.toUpperCase().replaceAll('-', '_');
+
+            state.config.runners[`MODEL_${operation.role}_${provider}_SPEED`] = operation.speed;
           }
         }
 
@@ -224,6 +228,38 @@ export const api = {
         effort: 'high'
       },
     ] }]);
+  });
+
+  await t.test('скорость проекта создаётся, перечитывается и возвращается к наследованию', async (s) => {
+    const f = await fixture(s, () => ({}));
+    const key = 'MODEL_DEFAULT_CODEX_SPEED';
+    const patches = () => f.state.calls.filter(([method]) => method === 'PATCH').map(([, , body]) => body);
+
+    await f.click('config-toggle');
+    await f.click('config-group-models');
+    await f.field(key).setValue('fast');
+    await f.field(key).setValue('');
+    assert.equal(f.wrapper.get('[data-test="apply-config"]').isVisible(), false);
+    assert.equal(patches().length, 0);
+
+    await f.field(key).setValue('fast');
+    await f.click('apply-config');
+    await f.click('confirm-config');
+    assert.equal(patches()[0].operations[0].role, 'DEFAULT');
+    assert.equal(patches()[0].operations[0].provider, 'codex');
+    assert.equal(patches()[0].operations[0].speed, 'fast');
+    await f.click('reload-config');
+    assert.equal(f.field(key).element.value, 'fast');
+
+    await f.field(key).setValue('');
+    await f.click('apply-config');
+    await f.click('confirm-config');
+    assert.equal(patches()[1].operations[0].speed, '');
+    await f.click('reload-config');
+    assert.equal(f.field(key).element.value, '');
+
+    await f.wrapper.setProps({ readonly: true });
+    assert.equal(f.field(key).element.disabled, true);
   });
 
   await t.test('RE-B3-02: readonly и pending не позволяют отправить вторую запись', async (s) => {

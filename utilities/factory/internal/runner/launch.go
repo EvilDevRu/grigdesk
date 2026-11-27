@@ -40,10 +40,15 @@ type AdapterError struct {
 	Marker  string
 	Detail  string
 	Restart *state.StageRunnerRestart
+	Err     error
 }
 
 func (e *AdapterError) Error() string {
 	return strings.TrimSpace(fmt.Sprintf("runner rc=%d %s %s", e.Code, e.Marker, e.Detail))
+}
+
+func (e *AdapterError) Unwrap() error {
+	return e.Err
 }
 
 type Run struct {
@@ -52,6 +57,7 @@ type Run struct {
 	Node                                              string
 	Dir, Worktree, Factory, FactoryHome               string
 	Model, Effort, Version, ExpectedVersion           string
+	Speed, SpeedWarning                               string
 	Wrapper, RuntimeHome, Binary                      string
 	ExpectedIdentity, RuntimeIdentity, CacheDirectory string
 	Environment                                       []string
@@ -151,7 +157,7 @@ func (run Run) invoke(provider string, call invocation) (host.ProcessResult, *Ad
 	recordOwner := func(owner host.TreeOwner) error {
 		if run.Node != "" {
 			unregister, ownerErr = run.Store.PublishStageRunnerProcess(
-				run.Identity, run.Node, provider, run.Model, run.Effort, owner.Leader,
+				run.Identity, run.Node, provider, run.Model, run.Effort, run.Speed, run.SpeedWarning, owner.Leader,
 			)
 			if ownerErr != nil {
 				return ownerErr
@@ -269,6 +275,13 @@ func (run Run) openLogs(provider string) (*runtimeLogs, error) {
 	if err != nil {
 		logs.close()
 		return nil, err
+	}
+	if run.SpeedWarning == "profile_speed_unavailable" {
+		if _, err := fmt.Fprintln(logs.stderr,
+			"Режим скорости из профиля недоступен. Узел запущен на обычной скорости."); err != nil {
+			logs.close()
+			return nil, err
+		}
 	}
 	if logs.debug.Level != "off" {
 		logs.openTrace()

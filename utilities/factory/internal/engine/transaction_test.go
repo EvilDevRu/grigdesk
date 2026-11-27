@@ -359,3 +359,93 @@ func (f routeFixture) transactionStartOptions() []string {
 	return []string{"--route", "command", "--ticket-json", filepath.Join(f.dir, "ticket.json"),
 		"--expected-catalog-hash", f.catalog, "--instrumentation-file", "app:scope.txt"}
 }
+
+// TestTransactionKeepsPreparedScopeOnRunnerSettingsConflict меняет выбор под живым lock.
+// Одна эпоха INSTRUMENT и обычный PROOF должны восстановить файлы и убрать active pointer.
+func TestTransactionKeepsPreparedScopeOnRunnerSettingsConflict(t *testing.T) {
+	f := transactionFixture(t, `printf '%s\n' "$@" >"$dir/instrument.argv"`)
+	bin := filepath.Join(f.dir, "bin")
+	if err := os.Mkdir(bin, 0700); err != nil {
+		t.Fatal(err)
+	}
+	git, err := exec.LookPath("git")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ready, release := filepath.Join(f.dir, "tx-ready"), filepath.Join(f.dir, "tx-release")
+	wrapper := filepath.Join(bin, "git")
+	f.write(t, wrapper, fmt.Sprintf(`#!/bin/bash
+if [[ "$3:${5:-}" == rev-parse:--git-dir && ! -e %q ]]; then
+  touch %q
+  for ((i=0; i<250; i++)); do
+    [[ ! -e %q ]] || break
+    sleep .04
+  done
+  [[ -e %q ]] || exit 91
+fi
+exec %q "$@"
+`, ready, ready, release, release, git))
+	if err := os.Chmod(wrapper, 0700); err != nil {
+		t.Fatal(err)
+	}
+	f.extraEnv = append(f.extraEnv, "PATH="+bin+":"+os.Getenv("PATH"))
+	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
+	defer cancel()
+	cmd := f.factoryCommand(ctx, "start", f.transactionStartOptions()...)
+	var output bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &output, &output
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	wait := make(chan error, 1)
+	go func() {
+		wait <- cmd.Wait()
+	}()
+	for {
+		if _, err := os.Stat(ready); err == nil {
+			break
+		}
+		select {
+		case err := <-wait:
+			t.Fatalf("запуск завершился до захвата lock: %v %s", err, &output)
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		case <-time.After(15 * time.Millisecond):
+		}
+	}
+	id := f.attempt(t)
+	attempt, err := f.store.ReadAttempt(testTask, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scope, _ := f.store.ReadStageMetadataScope(attempt)
+	identity := state.StageRunnerIdentity{
+		Task: testTask, Profile: attempt.Profile, Attempt: id, Node: "instrument", Stage: "INSTRUMENT",
+	}
+	standard := "standard"
+	selection := state.StageRunnerSelection{ParametersFor: "codex", Speed: &standard}
+	receipt := state.StageRunnerReceipt{
+		RequestID: "instrument-next", PayloadHash: strings.Repeat("a", 64), State: "saved",
+	}
+	if _, err := f.store.SaveStageRunnerSettings(identity, 0, nil, selection,
+		receipt, nil, func() error { return nil }, scope.Fingerprint()); err != nil {
+		t.Fatal(err)
+	}
+	f.write(t, release, "")
+	if err := <-wait; err != nil {
+		t.Fatalf("запуск после конфликта: %v %s", err, &output)
+	}
+	f.expectCount(t, "runner", "INSTRUMENT\nPROOF\n")
+	argv, err := os.ReadFile(filepath.Join(f.dir, "instrument.argv"))
+	if err != nil || !bytes.Contains(argv, []byte(`service_tier="default"`)) {
+		t.Fatalf("инструментация получила прежний выбор: %q %v", argv, err)
+	}
+	if f.projection(t)["ACTIVE_EPOCH_INSTRUMENT"] != "1" {
+		t.Fatal("конфликт израсходовал эпоху инструментации")
+	}
+	f.readEqual(t, filepath.Join(f.checkout, "scope.txt"), "baseline\n")
+	active := filepath.Join(f.store.ControlDir, "transactions", "t"+testTask, "active.env")
+	if _, err := os.Lstat(active); !os.IsNotExist(err) {
+		t.Fatalf("временная инструментация не снята: %v", err)
+	}
+}

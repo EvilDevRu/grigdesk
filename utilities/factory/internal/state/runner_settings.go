@@ -118,6 +118,7 @@ func decodeStageRunnerSettings(raw []byte, id StageRunnerIdentity) (StageRunnerS
 func (s Store) SaveStageRunnerSettings(
 	id StageRunnerIdentity, revision uint64, expectedRun *StageRunnerEpoch, selection StageRunnerSelection,
 	receipt StageRunnerReceipt, restart *StageRunnerRestart, validatePolicy func() error,
+	expectedScopeFingerprint string,
 ) (StageRunnerSettings, error) {
 	var result StageRunnerSettings
 	if restart != nil {
@@ -157,6 +158,10 @@ func (s Store) SaveStageRunnerSettings(
 	if err := validatePolicy(); err != nil {
 		return result, err
 	}
+	scope, _ := task.readStageMetadataScope(attempt)
+	if scope.Fingerprint() != expectedScopeFingerprint {
+		return result, fmt.Errorf("%w: catalog_stale: закреплённый CLI изменился во время проверки", ErrConflict)
+	}
 	if err := s.requireNoLegacySwitch(id); err != nil {
 		return result, err
 	}
@@ -181,6 +186,9 @@ func (t *taskState) publishStageRunnerSettings(id StageRunnerIdentity, value Sta
 	wire := record{
 		"primary": nil, "parametersFor": selection.ParametersFor,
 		"model": selection.Model, "effort": selection.Effort,
+	}
+	if selection.Speed != nil {
+		wire["speed"] = selection.Speed
 	}
 	var failover []string
 	if selection.Primary != "" {

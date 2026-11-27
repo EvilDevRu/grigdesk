@@ -17,7 +17,8 @@ type claudeSettings struct {
 		Allow []string `json:"allow"`
 		Deny  []string `json:"deny"`
 	} `json:"permissions"`
-	Sandbox map[string]any `json:"sandbox"`
+	Sandbox  map[string]any `json:"sandbox"`
+	FastMode *bool          `json:"fastMode,omitempty"`
 }
 
 // writeClaudeSettings выпускает закрытый файл на один запуск.
@@ -95,6 +96,13 @@ func (run Run) claudeSettingsDocument(policy routePolicy) (*claudeSettings, erro
 		},
 	}
 	document.Permissions.Allow, document.Permissions.Deny = allow, deny
+	if run.Speed != "" {
+		if !SupportsSpeed("claude", run.Speed) {
+			return nil, fmt.Errorf("недопустимая скорость Claude")
+		}
+		fast := run.Speed == "fast"
+		document.FastMode = &fast
+	}
 	return document, nil
 }
 

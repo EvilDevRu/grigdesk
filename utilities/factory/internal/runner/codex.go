@@ -64,12 +64,21 @@ func runCodexAdapter(run Run, binary, prompt string, policy routePolicy) (Outcom
 	return out, failure
 }
 
+// codexWorkingDir задаёт единый cwd для features list, model/list и запуска.
+// Политика state-only читает нативные настройки из каталога состояния.
+func codexWorkingDir(run Run, filesystem string) string {
+	if filesystem == "state-only" {
+		return run.Store.StateDir
+	}
+	return run.Worktree
+}
+
 func codexArgs(run Run, policy routePolicy) ([]string, string, *AdapterError) {
 	args := []string{"exec", "--json", "--skip-git-repo-check"}
-	sandbox, cwd := policy.sandbox, run.Worktree
+	sandbox, cwd := policy.sandbox, codexWorkingDir(run, policy.filesystem)
 	switch policy.filesystem {
 	case "state-only":
-		sandbox, cwd = "read-only", run.Store.StateDir
+		sandbox = "read-only"
 	case "workspace-write", "transactional-write":
 		if sandbox == "" {
 			sandbox = "workspace-write"
@@ -115,6 +124,17 @@ func codexArgs(run Run, policy routePolicy) ([]string, string, *AdapterError) {
 			return nil, "", adapterError(4, "неверный Codex effort")
 		}
 		args = append(args, "-c", "model_reasoning_effort="+strconv.Quote(run.Effort))
+	}
+	switch run.Speed {
+	case "":
+	case "standard":
+		args = append(args, "-c", "service_tier="+strconv.Quote("default"))
+	case "fast":
+		args = append(args, "-c", "service_tier="+strconv.Quote("priority"))
+	case "ultrafast":
+		args = append(args, "-c", "service_tier="+strconv.Quote("ultrafast"))
+	default:
+		return nil, "", adapterError(4, "недопустимая скорость Codex")
 	}
 	for _, dir := range addDirs {
 		real, err := filepath.EvalSymlinks(dir)

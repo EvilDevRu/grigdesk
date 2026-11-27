@@ -1,4 +1,7 @@
+import { isChatSpeed, type ChatSpeed } from '../chat/chatSpeed.ts';
 import { contractDecoders } from '../lib/contractDecoders.ts';
+
+export const STAGE_RUNNER_SPEED_ACCEPT = 'application/json; grigdesk-stage-speed=1';
 
 export interface StageRunnerIdentity {
   task: string;
@@ -13,6 +16,7 @@ export interface StageRunnerSelection {
   parametersFor: string;
   model: string | null;
   effort: string | null;
+  speed?: ChatSpeed | null;
 }
 
 export interface StageRunnerRun {
@@ -25,6 +29,7 @@ export interface StageRunnerModel {
   label?: string;
   efforts: string[];
   aliases?: string[];
+  speedModes?: ChatSpeed[];
 }
 
 export interface StageRunnerReceipt {
@@ -43,11 +48,14 @@ export interface StageRunnerOptions {
     primary: string;
     model: string;
     effort: string;
+    speed?: string;
   };
   effective: {
     primary: string;
     model: string;
     effort: string;
+    speed?: ChatSpeed | null;
+    speedIssue?: 'invalid_profile';
   };
   chain: string[];
   models: StageRunnerModel[];
@@ -57,12 +65,16 @@ export interface StageRunnerOptions {
     provider: string | null;
     model: string | null;
     effort: string | null;
+    speed?: ChatSpeed | null;
+    speedWarning?: 'profile_speed_unavailable';
   } | null;
   receipt: StageRunnerReceipt | null;
   inherited?: {
     primary: string;
     model: string;
     effort: string;
+    speed?: ChatSpeed | null;
+    speedIssue?: 'invalid_profile';
     chain: string[];
   };
 }
@@ -89,10 +101,11 @@ const d = contractDecoders(fail);
  * Закрытый объект отклоняет лишние поля до обращения к движку.
  * Поля проверяются тем же общим каркасом, что и остальные сетевые контракты.
  */
-function exact(value: unknown, keys: string[], path: string) {
+function exact(value: unknown, keys: string[], path: string, optional: string[] = []) {
   const source = d.record(value, path);
 
-  if (Object.keys(source).some((key) => !keys.includes(key)) || keys.some((key) => !(key in source))) {
+  if (Object.keys(source).some((key) => !keys.includes(key) && !optional.includes(key))
+    || keys.some((key) => !Object.hasOwn(source, key))) {
     fail(path);
   }
 
@@ -107,6 +120,45 @@ function identifier(value: unknown, pattern: RegExp, path: string): string {
 
 const provider = (value: unknown, path: string) => identifier(value, /^[a-z][a-z0-9_-]{0,63}$/u, path);
 const nullableText = (value: unknown, path: string) => value === null ? null : d.text(value, path);
+
+/**
+ * Публичный режим и null передаются без подмены.
+ * Отсутствие поля обрабатывается отдельно для старых клиентов.
+ */
+function speedAt(value: unknown, label: string): ChatSpeed | null {
+  if (value === undefined || !isChatSpeed(value)) {
+    return fail(label);
+  }
+
+  return value;
+}
+
+/**
+ * Профильная и эффективная части используют общий enum и закрытый код причины.
+ * Пропущенные поля остаются пропущенными в прежнем DTO.
+ */
+function speedFields(source: Record<string, unknown>, label: string) {
+  return {
+    ...(Object.hasOwn(source, 'speed') ? { speed: speedAt(source.speed, `${label}.speed`) } : {}),
+    ...(Object.hasOwn(source, 'speedIssue') ? {
+      speedIssue: d.oneOf('invalid_profile')(source.speedIssue, `${label}.speedIssue`),
+    } : {}),
+  };
+}
+
+/**
+ * Каталог перечисляет каждый режим ровно один раз и в собственном порядке.
+ * Невалидный список не даёт положительного подтверждения ускорения.
+ */
+function speedModesAt(value: unknown): ChatSpeed[] {
+  const modes = d.listOf(d.oneOf('standard', 'fast', 'ultrafast'))(value, 'model.speedModes');
+
+  if (new Set(modes).size !== modes.length) {
+    return fail('model.speedModes');
+  }
+
+  return modes;
+}
 
 /**
  * Identity сохраняется без нормализации: опечатка не может стать чужим узлом.
@@ -129,12 +181,13 @@ export function decodeStageRunnerIdentity(value: unknown): StageRunnerIdentity {
  * Прозрачные подписи модели не участвуют в проверке её непрозрачного идентификатора.
  */
 export function decodeStageRunnerSelection(value: unknown): StageRunnerSelection {
-  const source = exact(value, ['primary', 'parametersFor', 'model', 'effort'], 'selection');
+  const source = exact(value, ['primary', 'parametersFor', 'model', 'effort'], 'selection', ['speed']);
   const result = {
     primary: source.primary === null ? null : provider(source.primary, 'primary'),
     parametersFor: provider(source.parametersFor, 'parametersFor'),
     model: nullableText(source.model, 'model'),
     effort: nullableText(source.effort, 'effort'),
+    ...(Object.hasOwn(source, 'speed') ? { speed: speedAt(source.speed, 'selection.speed') } : {}),
   };
 
   for (const key of ['model', 'effort'] as const) {
@@ -198,8 +251,13 @@ export function decodeStageRunnerOptions(value: unknown): StageRunnerOptions {
     'schema', 'identity', 'revision', 'selection', 'sources', 'effective', 'chain',
     'models', 'catalogRevision', 'actual', 'receipt',
   ], 'options');
-  const sources = exact(source.sources, ['primary', 'model', 'effort'], 'sources');
-  const effective = exact(source.effective, ['primary', 'model', 'effort'], 'effective');
+  const sources = exact(source.sources, ['primary', 'model', 'effort'], 'sources', ['speed']);
+  const effective = exact(
+    source.effective, ['primary', 'model', 'effort'], 'effective', ['speed', 'speedIssue'],
+  );
+  const base = inherited === undefined ? null : exact(
+    inherited, ['primary', 'model', 'effort', 'chain'], 'inherited', ['speed', 'speedIssue'],
+  );
   const models = source.models;
 
   if (!Array.isArray(models)) {
@@ -207,7 +265,7 @@ export function decodeStageRunnerOptions(value: unknown): StageRunnerOptions {
   }
 
   const actual = source.actual === null ? null : exact(
-    source.actual, ['run', 'provider', 'model', 'effort'], 'actual',
+    source.actual, ['run', 'provider', 'model', 'effort'], 'actual', ['speed', 'speedWarning'],
   );
   const receipt = source.receipt === null ? null : d.record(source.receipt, 'receipt');
 
@@ -220,11 +278,13 @@ export function decodeStageRunnerOptions(value: unknown): StageRunnerOptions {
       primary: d.text(sources.primary, 'sources.primary'),
       model: d.text(sources.model, 'sources.model'),
       effort: d.text(sources.effort, 'sources.effort'),
+      ...(Object.hasOwn(sources, 'speed') ? { speed: d.text(sources.speed, 'sources.speed') } : {}),
     },
     effective: {
       primary: provider(effective.primary, 'effective.primary'),
       model: d.text(effective.model, 'effective.model'),
       effort: d.text(effective.effort, 'effective.effort'),
+      ...speedFields(effective, 'effective'),
     },
     chain: d.listOf(provider)(source.chain, 'chain'),
     models: models.map((item) => {
@@ -235,6 +295,7 @@ export function decodeStageRunnerOptions(value: unknown): StageRunnerOptions {
         label: d.text(model.label ?? model.id, 'label'),
         efforts: d.listOf(d.text)(model.efforts, 'efforts'),
         aliases: d.listOf(d.text)(model.aliases ?? [], 'aliases'),
+        ...(Object.hasOwn(model, 'speedModes') ? { speedModes: speedModesAt(model.speedModes) } : {}),
       };
     }),
     catalogRevision: d.text(source.catalogRevision, 'catalogRevision'),
@@ -243,6 +304,10 @@ export function decodeStageRunnerOptions(value: unknown): StageRunnerOptions {
       provider: nullableText(actual.provider, 'actual.provider'),
       model: nullableText(actual.model, 'actual.model'),
       effort: nullableText(actual.effort, 'actual.effort'),
+      ...(Object.hasOwn(actual, 'speed') ? { speed: speedAt(actual.speed, 'actual.speed') } : {}),
+      ...(Object.hasOwn(actual, 'speedWarning') ? {
+        speedWarning: d.oneOf('profile_speed_unavailable')(actual.speedWarning, 'actual.speedWarning'),
+      } : {}),
     } : null,
     receipt: receipt ? {
       requestId: d.text(receipt.requestId, 'receipt.requestId'),
@@ -254,13 +319,14 @@ export function decodeStageRunnerOptions(value: unknown): StageRunnerOptions {
       }),
       ...(receipt.reason === undefined ? {} : { reason: d.text(receipt.reason, 'reason') }),
     } : null,
-    ...(inherited === undefined ? {} : {
-      inherited: d.objectOf({
-        primary: provider,
-        model: d.text,
-        effort: d.text,
-        chain: d.listOf(provider),
-      })(inherited, 'inherited'),
+    ...(base === null ? {} : {
+      inherited: {
+        primary: provider(base.primary, 'inherited.primary'),
+        model: d.text(base.model, 'inherited.model'),
+        effort: d.text(base.effort, 'inherited.effort'),
+        chain: d.listOf(provider)(base.chain, 'inherited.chain'),
+        ...speedFields(base, 'inherited'),
+      },
     }),
   };
 }
@@ -281,15 +347,34 @@ export function stageRunnerSelectionError(
   const model = selection.model ?? options.inherited?.model ?? options.effective.model;
   const effort = selection.effort ?? options.inherited?.effort ?? options.effective.effort;
 
-  if (model === '' && selection.model === null && selection.effort === null) {
-    return null;
-  }
-
   const entry = options.models.find((item) => item.id === model || item.aliases?.includes(model));
+  const nativeModel = model === '' && selection.model === null && selection.effort === null;
 
-  if (!entry) {
+  if (!entry && !nativeModel) {
     return `model_unavailable: модель ${model} недоступна.`;
   }
 
-  return entry.efforts.includes(effort) ? null : `effort_unavailable: ${effort} не подходит модели ${model}.`;
+  if (entry && !nativeModel && !entry.efforts.includes(effort)) {
+    return `effort_unavailable: ${effort} не подходит модели ${model}.`;
+  }
+
+  const storedSpeed = options.selection.parametersFor === selection.parametersFor
+    ? options.selection.speed : undefined;
+  const localSpeed = Object.hasOwn(selection, 'speed') ? selection.speed : storedSpeed;
+  const inherited = options.inherited ?? options.effective;
+
+  if (localSpeed == null) {
+    return inherited.speedIssue === 'invalid_profile'
+      ? 'speed_unavailable: неизвестный режим в профиле.' : null;
+  }
+
+  const supported = options.sources.speed !== undefined
+    || options.models.some((item) => item.speedModes?.includes('standard'));
+
+  if (localSpeed === 'standard' && supported) {
+    return null;
+  }
+
+  return entry?.id === model && entry.speedModes?.includes(localSpeed)
+    ? null : `speed_unavailable: скорость ${localSpeed} недоступна для модели ${model}.`;
 }

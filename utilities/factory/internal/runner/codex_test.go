@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -313,6 +314,34 @@ func TestCodexBrowserRequest(t *testing.T) {
 	} {
 		if fixedCodexBrowserRequest(command, paths) {
 			t.Fatalf("лишняя команда принята: %q", command)
+		}
+	}
+}
+
+// TestCodexFactorySpeedArgs проверяет нативный tier для каждого режима.
+// Наследование оставляет прежний argv.
+func TestCodexFactorySpeedArgs(t *testing.T) {
+	for speed, expected := range map[string]string{
+		"": "", "standard": `service_tier="default"`, "fast": `service_tier="priority"`,
+		"ultrafast": `service_tier="ultrafast"`,
+	} {
+		dir := t.TempDir()
+		args, _, err := codexArgs(Run{Dir: dir, Worktree: dir, Speed: speed},
+			routePolicy{filesystem: "workspace-write"})
+		if err != nil {
+			t.Fatalf("%q: %v", speed, err)
+		}
+		found := slices.IndexFunc(args, func(arg string) bool {
+			return strings.HasPrefix(arg, "service_tier=")
+		})
+		if expected == "" {
+			if found >= 0 {
+				t.Fatalf("наследование добавило tier: %v", args)
+			}
+			continue
+		}
+		if found <= 0 || args[found-1] != "-c" || args[found] != expected {
+			t.Fatalf("%q: нет отдельного native параметра %s: %v", speed, expected, args)
 		}
 	}
 }

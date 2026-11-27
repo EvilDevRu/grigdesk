@@ -2,6 +2,7 @@ package runner
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -18,13 +19,16 @@ import (
 type DispatchRequest struct {
 	Store                        state.Store
 	Task, Attempt, Stage, Role   string
+	Profile                      string
 	Node                         string
 	Prompt, Filesystem, Worktree string
 	Factory, FactoryHome         string
 	Primary                      string
 	Selection                    state.StageRunnerSelection
+	SpeedFromProfile             bool
 	Config                       map[string]string
 	Environment                  []string
+	MetadataScope                *state.StageMetadataScope
 	Timeout                      time.Duration
 	NoResultRetries              int
 	Shared                       bool
@@ -67,12 +71,36 @@ func Dispatch(ctx context.Context, input DispatchRequest) (DispatchResult, error
 	noResults := make(map[string]int)
 	var replacement *state.StageRunnerRestart
 	var source state.RunIdentity
+	var speedErr error
 	defer func() {
 		if replacement != nil {
-			_ = input.Store.AdvanceStageRunnerRestart(source, *replacement, "failed", "Новый запуск не допущен.")
+			reason := "Новый запуск не допущен."
+			if speedErr != nil {
+				reason = speedErr.Error()
+			}
+			_ = input.Store.AdvanceStageRunnerRestart(source, *replacement, "failed", reason)
 		}
 	}()
-	for position := 0; position < len(chain); {
+	position, conflicts := 0, 0
+	prompt, prepared := input.Prompt, false
+	// Перечитывание после CAS не выпускает эпоху и сохраняет результат BeforeInvoke.
+	// Замороженный restart не может подменить потерянное намерение новым выбором.
+	retryAdmission := func(conflict error) error {
+		conflicts++
+		if conflicts >= 3 || replacement != nil {
+			return conflict
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if _, err := input.refreshSelection(ctx); err != nil {
+			return err
+		}
+		chain, position = input.ProviderChain(), 0
+		unavailable, speedErr = nil, nil
+		return nil
+	}
+	for position < len(chain) {
 		provider := chain[position]
 		if input.Ready != nil && !input.Ready[provider] {
 			unavailable = append(unavailable, provider)
@@ -91,12 +119,47 @@ func Dispatch(ctx context.Context, input DispatchRequest) (DispatchResult, error
 		if err := ctx.Err(); err != nil {
 			return last, err
 		}
-		prompt := input.Prompt
-		if input.BeforeInvoke != nil {
+		var admission []state.StageSelectionAdmission
+		if input.ReadSelection != nil || replacement != nil {
+			admission = []state.StageSelectionAdmission{{Selection: input.Selection, Restart: replacement}}
+		}
+		if refusal := checkCandidateSpeed(ctx, input, candidate); refusal != nil {
+			if err := ctx.Err(); err != nil {
+				return last, err
+			}
+			local := input.Selection.ParametersFor == provider &&
+				input.Selection.Speed != nil && !input.SpeedFromProfile
+			if local {
+				if len(admission) != 0 {
+					id := state.StageRunnerIdentity{Task: input.Task, Profile: input.Profile,
+						Attempt: input.Attempt, Node: input.Node, Stage: input.Stage}
+					err := input.Store.CheckStageAdmissionSelection(id, admission[0])
+					if errors.Is(err, state.ErrConflict) {
+						if err := retryAdmission(err); err != nil {
+							return last, err
+						}
+						continue
+					}
+					if err != nil {
+						return last, err
+					}
+				}
+				speedErr = refusal
+				unavailable = append(unavailable, provider)
+				position++
+				continue
+			}
+			candidate.Run.Speed, candidate.Run.SpeedWarning = "standard", "profile_speed_unavailable"
+		}
+		if err := ctx.Err(); err != nil {
+			return last, err
+		}
+		if !prepared && input.BeforeInvoke != nil {
 			prompt, err = input.BeforeInvoke(prompt)
 			if err != nil {
 				return last, err
 			}
+			prepared = true
 		}
 		candidate.Run.context, candidate.Run.RecordRestart = ctx, input.RecordRestart
 		started := false
@@ -107,8 +170,14 @@ func Dispatch(ctx context.Context, input DispatchRequest) (DispatchResult, error
 				return err
 			}
 		}
-		run, refusal := beginEpoch(candidate.Run, input.Task, input.Attempt, input.Stage, input.Role)
+		run, refusal := beginEpoch(candidate.Run, input.Task, input.Attempt, input.Stage, input.Role, admission...)
 		if refusal != nil {
+			if errors.Is(refusal, state.ErrConflict) {
+				if err := retryAdmission(refusal); err != nil {
+					return last, err
+				}
+				continue
+			}
 			return last, refusal
 		}
 		candidate.Run = run
@@ -116,6 +185,8 @@ func Dispatch(ctx context.Context, input DispatchRequest) (DispatchResult, error
 		last = DispatchResult{Outcome: outcome, Run: run.Identity, Provider: provider}
 		if failure != nil && failure.Restart != nil {
 			last.RC = 130
+			// invoke отдаёт намерение только после подтверждённого закрытия дерева.
+			last.OwnedTreeClosed = true
 			replacement, source = failure.Restart, run.Identity
 		}
 		if err := ctx.Err(); err != nil {
@@ -130,6 +201,7 @@ func Dispatch(ctx context.Context, input DispatchRequest) (DispatchResult, error
 				return last, err
 			}
 		}
+		prompt, prepared, conflicts = input.Prompt, false, 0
 		if failure != nil && failure.Restart != nil {
 			if err := input.Store.AdvanceStageRunnerRestart(source, *replacement, "consumed", ""); err != nil {
 				return last, err
@@ -140,12 +212,14 @@ func Dispatch(ctx context.Context, input DispatchRequest) (DispatchResult, error
 				}
 			}
 			input.Selection = replacement.Selection()
+			input.SpeedFromProfile = replacement.SpeedFromProfile
 			ready, err := Preflight(ctx, input, []StageAdmission{{Key: input.Stage, Selection: input.Selection}})
 			if err != nil {
 				return last, fmt.Errorf("перезапуск этапа %s: выбранный исполнитель недоступен", input.Stage)
 			}
 			input.Ready = ready
 			chain, position = input.ProviderChain(), 0
+			unavailable, speedErr = nil, nil
 			clear(noResults)
 			continue
 		}
@@ -177,6 +251,9 @@ func Dispatch(ctx context.Context, input DispatchRequest) (DispatchResult, error
 			}
 		}
 	}
+	if speedErr != nil {
+		return last, fmt.Errorf("%s: %w", preflightFailureMarker(1, unavailable, nil), speedErr)
+	}
 	if last.Provider != "" {
 		last.Classification = "exhausted"
 		return last, nil
@@ -195,6 +272,7 @@ func (input *DispatchRequest) refreshSelection(ctx context.Context) (bool, error
 		return false, err
 	}
 	input.Selection = selected
+	input.SpeedFromProfile = selected.Speed == nil
 	ready, err := Preflight(ctx, *input, []StageAdmission{{Key: input.Stage, Selection: selected}})
 	if err != nil {
 		if ctx.Err() != nil {
@@ -247,6 +325,16 @@ func prepareCandidate(req DispatchRequest, id string) (Candidate, error) {
 	}
 	if external != nil {
 		path = external.Bin
+	} else if req.MetadataScope != nil && values["FACTORY_EXTERNAL_CLI_DESCRIPTOR"] == "" {
+		if entry, ok := req.MetadataScope.Providers[id]; ok {
+			path = entry.Executable
+			if entry.Identity != "" {
+				external = &externalCLI{
+					Bin: path, Identity: entry.Identity, ProviderID: id, ResourceKey: entry.ResourceKey,
+					LeaseDirectory: entry.LeaseDirectory, LeaseCommand: entry.LeaseCommand,
+				}
+			}
+		}
 	}
 	if id == "qwen" && path == "qwen" {
 		path, _ = exec.LookPath(path)
@@ -267,6 +355,7 @@ func prepareCandidate(req DispatchRequest, id string) (Candidate, error) {
 		return Candidate{}, fmt.Errorf("выбранный внешний CLI изменил физический путь")
 	}
 	model, effort := req.InheritedParameters(id)
+	speed := req.InheritedSpeed(id)
 	if req.Selection.ParametersFor == id {
 		if req.Selection.Model != nil {
 			model = *req.Selection.Model
@@ -274,11 +363,14 @@ func prepareCandidate(req DispatchRequest, id string) (Candidate, error) {
 		if req.Selection.Effort != nil {
 			effort = *req.Selection.Effort
 		}
+		if req.Selection.Speed != nil {
+			speed = *req.Selection.Speed
+		}
 	}
 	c := Candidate{Provider: id, Binary: path, Model: model, Effort: effort}
 	c.Run = Run{
 		Store: req.Store, Worktree: req.Worktree, Factory: req.Factory, FactoryHome: req.FactoryHome,
-		Model: model, Effort: effort, Node: req.Node,
+		Model: model, Effort: effort, Speed: speed, Node: req.Node,
 		Binary: path, Environment: external.withEnvironment(req.Environment), External: external,
 		Timeout: req.Timeout, CodexShared: req.CodexShared,
 		AgentControlDir: req.AgentControlDir, ReadAgentRules: req.ReadAgentRules,
@@ -304,6 +396,17 @@ func (req DispatchRequest) InheritedParameters(id string) (model, effort string)
 		effort = "high"
 	}
 	return model, effort
+}
+
+// InheritedSpeed применяет ролевой ключ перед default для выбранного исполнителя.
+// Ошибочное значение поддерживаемого адаптера сохраняется для диагностики.
+func (req DispatchRequest) InheritedSpeed(id string) string {
+	if !SupportsSpeed(id, "standard") {
+		return ""
+	}
+	key := ProviderKey(id)
+	prefixes := []string{"MODEL_" + req.Stage + "_" + key + "_", "MODEL_DEFAULT_" + key + "_"}
+	return firstSetting(req.Config, prefixes, "SPEED")
 }
 
 func wrapperCandidate(req DispatchRequest, c Candidate, env map[string]string) (Candidate, error) {

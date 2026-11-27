@@ -14,6 +14,7 @@ import {
   ProfileConfigError,
   applyProfileVariableChanges,
   applyRunnerOperations,
+  decodeRunnerPatch,
   readProfileVariables,
 } from '../../server/src/lib/profileConfig.ts';
 
@@ -379,6 +380,22 @@ test('RE-B2-08: реальный engine сохраняет пропущенны�
   assert.equal(cleared.MODEL_REVIEW_CODEX_EFFORT, 'low');
   assert.equal(cleared.MODEL_REVIEW_CODEX_FAMILY_FAILOVER, 'backup');
   assert.equal(cleared.CONFIG_REVISION, '8');
+});
+
+test('скорость профиля декодируется до передачи batch движку', () => {
+  const operation = {
+    kind: 'model',
+    role: 'DEFAULT',
+    provider: 'codex',
+    speed: 'ultrafast',
+  };
+  const decode = (change) => decodeRunnerPatch({ operations: [{ ...operation, ...change }] });
+
+  assert.deepEqual(decode({}), [operation]);
+  assert.equal(decode({ speed: '' })[0].speed, '');
+  assert.throws(() => decode({ speed: 'priority' }), { status: 400 });
+  assert.throws(() => decode({ provider: 'claude' }), { status: 400 });
+  assert.throws(() => decode({ provider: 'kimi', speed: 'fast' }), { status: 400 });
 });
 
 test('RE-B2-09: valid+malformed runner batch даёт 400, реальный файл не меняется', async (t) => {

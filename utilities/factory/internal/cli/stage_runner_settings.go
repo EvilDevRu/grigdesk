@@ -19,10 +19,11 @@ import (
 )
 
 type stageSettingsCLI struct {
-	store    state.Store
-	identity state.StageRunnerIdentity
-	request  runner.DispatchRequest
-	config   string
+	store     state.Store
+	identity  state.StageRunnerIdentity
+	request   runner.DispatchRequest
+	config    string
+	speedWire bool
 }
 
 type stageSettingsSelection struct {
@@ -30,12 +31,15 @@ type stageSettingsSelection struct {
 	ParametersFor string  `json:"parametersFor"`
 	Model         *string `json:"model"`
 	Effort        *string `json:"effort"`
+	Speed         *string `json:"speed,omitempty"`
 }
 
 type stageSettingsPair struct {
-	Primary string `json:"primary"`
-	Model   string `json:"model"`
-	Effort  string `json:"effort"`
+	Primary    string `json:"primary"`
+	Model      string `json:"model"`
+	Effort     string `json:"effort"`
+	Speed      string `json:"speed,omitempty"`
+	SpeedIssue string `json:"speedIssue,omitempty"`
 }
 
 type stageSettingsView struct {
@@ -75,10 +79,32 @@ func runTaskRunner(r request, args []string, out, diagnostic io.Writer) int {
 		}
 		return fail(diagnostic, err)
 	}
+	if r.value("--speed-v1") != "1" {
+		result = result.withoutSpeed()
+	}
 	if err := json.NewEncoder(out).Encode(result); err != nil {
 		return 1
 	}
 	return 0
+}
+
+// withoutSpeed сохраняет прежнюю закрытую форму ответа для старого сервера.
+// Копия моделей оставляет полный каталог доступным для проверки и записи.
+func (view stageSettingsView) withoutSpeed() stageSettingsView {
+	view.Selection.Speed = nil
+	view.Effective.Speed, view.Effective.SpeedIssue = "", ""
+	view.Inherited.Speed, view.Inherited.SpeedIssue = "", ""
+	view.Sources.Speed = ""
+	if view.Actual != nil {
+		actual := *view.Actual
+		actual.Speed, actual.SpeedWarning = "", ""
+		view.Actual = &actual
+	}
+	view.Models = append([]runner.StageModel{}, view.Models...)
+	for i := range view.Models {
+		view.Models[i].SpeedModes = nil
+	}
+	return view
 }
 
 // taskRunnerSettings читает политику по закреплённой попытке и снимает metadata.
@@ -94,7 +120,7 @@ func taskRunnerSettings(r request, action string, args []string) (stageSettingsV
 	}
 	var payload stageSettingsApply
 	if action == "apply" {
-		payload, err = parseStageSettingsApply(raw, service.identity)
+		payload, err = parseStageSettingsApply(raw, service.identity, service.speedWire)
 		if err != nil {
 			return stageSettingsView{}, err
 		}
@@ -129,6 +155,7 @@ func stageSettingsContext(
 	var service stageSettingsCLI
 	keys := []string{
 		"--profile", "--attempt", "--node", "--stage", "--routes-dir", "--control-dir", "--state-dir",
+		"--speed-v1",
 	}
 	if action == "options" {
 		keys = append(keys, "--provider")
@@ -140,6 +167,9 @@ func stageSettingsContext(
 		key, value := args[0], args[1]
 		if !slices.Contains(keys, key) || r.options[key] != nil || value == "" || value[0] == '-' {
 			return service, "", "", fmt.Errorf("settings_input: неверная или повторная опция %s", key)
+		}
+		if key == "--speed-v1" && value != "1" {
+			return service, "", "", fmt.Errorf("settings_input: неподдерживаемая версия скорости")
 		}
 		r.options[key] = []string{value}
 		args = args[2:]
@@ -160,7 +190,8 @@ func stageSettingsContext(
 	if attempt.Profile != id.Profile || attempt.RoutesDir != launch.RoutesDir || attempt.Terminal != "" {
 		return service, "", "", stageSettingsConflict("identity_conflict: другой профиль, попытка или routes-dir")
 	}
-	if err := verifyStageSettingsNode(attempt, id); err != nil {
+	filesystem, err := verifyStageSettingsNode(attempt, id)
+	if err != nil {
 		return service, "", "", err
 	}
 	_, _, config := hooks.ProfileFiles(id.Profile)
@@ -175,39 +206,53 @@ func stageSettingsContext(
 	request := runner.DispatchRequest{
 		Stage: id.Stage, Primary: attempt.RunnerPrimaryOverride, Config: settings,
 		FactoryHome: runner.FactoryHome(launch.Environment, executable), Environment: launch.Environment,
+		Store: launch.Store, Filesystem: filesystem,
+	}
+	request.MetadataScope, _ = launch.Store.ReadStageMetadataScope(attempt)
+	if request.MetadataScope != nil {
+		request.Worktree = request.MetadataScope.Checkout
 	}
 	if len(request.ProviderChain()) == 0 {
 		return service, "", "", fmt.Errorf("provider_conflict: нет профильной цепочки")
 	}
-	service = stageSettingsCLI{store: launch.Store, identity: id, request: request, config: config}
+	service = stageSettingsCLI{
+		store: launch.Store, identity: id, request: request, config: config,
+		speedWire: r.value("--speed-v1") == "1",
+	}
 	return service, provider, payload, nil
 }
 
-func verifyStageSettingsNode(attempt state.Attempt, id state.StageRunnerIdentity) error {
+// verifyStageSettingsNode подтверждает точный runKey и файловую политику.
+// Разведке разрешён её закреплённый bootstrap; обычные узлы берутся из route pin.
+func verifyStageSettingsNode(attempt state.Attempt, id state.StageRunnerIdentity) (string, error) {
 	reader, err := route.NewBundleReader(attempt.RoutesDir, attempt.Profile)
 	if err != nil {
-		return err
+		return "", err
 	}
 	if attempt.RouteHash != "" {
 		machine, err := reader.ReadRoute(attempt.RouteID, attempt.RouteHash)
 		if err != nil {
-			return err
+			return "", err
 		}
 		if slices.Contains(machine.AgentStages(id.Node), route.AgentStage{Node: id.Node, Key: id.Stage}) {
-			return nil
+			if filesystem, ok := machine.AgentFilesystem(id.Node); ok {
+				return filesystem, nil
+			}
 		}
 		if id.Node != "scout" {
-			return stageSettingsConflict("identity_conflict: этап отсутствует в закреплённом маршруте")
+			return "", stageSettingsConflict("identity_conflict: этап отсутствует в закреплённом маршруте")
 		}
 	}
 	catalog, err := reader.ReadCatalog(attempt.CatalogHash)
 	if err != nil {
-		return err
+		return "", err
 	}
 	if slices.Contains(catalog.Bootstrap.AgentStages(id.Node), route.AgentStage{Node: id.Node, Key: id.Stage}) {
-		return nil
+		if filesystem, ok := catalog.Bootstrap.AgentFilesystem(id.Node); ok {
+			return filesystem, nil
+		}
 	}
-	return stageSettingsConflict("identity_conflict: этап отсутствует в закреплённом маршруте")
+	return "", stageSettingsConflict("identity_conflict: этап отсутствует в закреплённом маршруте")
 }
 
 // view собирает прежнюю wire-схему, используемую сервером и редактором.
@@ -221,11 +266,22 @@ func (s stageSettingsCLI) view(
 	chain := request.ProviderChain()
 	model, effort := request.InheritedParameters(provider)
 	base := stageSettingsPair{Primary: inherited[0], Model: model, Effort: effort}
+	speed := request.InheritedSpeed(provider)
+	if !runner.SupportsSpeed(provider, speed) {
+		base.SpeedIssue = "invalid_profile"
+		speed = ""
+	}
+	base.Speed = speed
+	speedIssue := base.SpeedIssue
 	selection := stageSettingsSelection{
 		ParametersFor: firstNonempty(saved.Selection.ParametersFor, chain[0]),
 		Model:         saved.Selection.Model, Effort: saved.Selection.Effort,
+		Speed: saved.Selection.Speed,
 	}
 	sources := stageSettingsPair{Primary: "profile", Model: "profile", Effort: "profile"}
+	if runner.SupportsSpeed(provider, "standard") {
+		sources.Speed = "profile"
+	}
 	if request.Primary != "" {
 		sources.Primary = "attempt"
 	}
@@ -240,19 +296,26 @@ func (s stageSettingsCLI) view(
 		if selection.Effort != nil {
 			effort, sources.Effort = *selection.Effort, "node"
 		}
+		if selection.Speed != nil {
+			speed, sources.Speed, speedIssue = *selection.Speed, "node", ""
+		}
 	}
 	models = append([]runner.StageModel{}, models...)
-	fingerprint, _ := json.Marshal([]any{provider, request.Config, models})
+	fingerprint, _ := json.Marshal([]any{provider, request.Config, models, request.MetadataScope.Fingerprint()})
 	hash := sha256.Sum256(fingerprint)
 	view := stageSettingsView{
 		Schema: 1, Identity: s.identity, Revision: saved.Revision, Selection: selection, Sources: sources,
-		Effective: stageSettingsPair{Primary: chain[0], Model: model, Effort: effort},
-		Chain:     chain, Models: models, CatalogRevision: hex.EncodeToString(hash[:]), Receipt: saved.Receipt,
+		Effective: stageSettingsPair{
+			Primary: chain[0], Model: model, Effort: effort, Speed: speed, SpeedIssue: speedIssue,
+		},
+		Chain: chain, Models: models, CatalogRevision: hex.EncodeToString(hash[:]), Receipt: saved.Receipt,
 	}
 	view.Inherited.stageSettingsPair, view.Inherited.Chain = base, inherited
 	return view
 }
 
+// save сверяет полный снимок настроек и старую локальную скорость до записи.
+// Restart дополнительно закрепляет параметры и происхождение скорости новой эпохи.
 func (s stageSettingsCLI) save(
 	payload stageSettingsApply, view stageSettingsView,
 ) (stageSettingsView, error) {
@@ -260,11 +323,14 @@ func (s stageSettingsCLI) save(
 		return stageSettingsView{}, stageSettingsConflict("catalog_stale: каталог моделей или политика изменились")
 	}
 	selection := payload.Selection
+	if !payload.SpeedProvided && selection.ParametersFor == view.Selection.ParametersFor {
+		selection.Speed = view.Selection.Speed
+	}
 	primary := firstNonempty(selection.Primary, view.Inherited.Primary)
 	if selection.ParametersFor != primary {
 		return stageSettingsView{}, stageSettingsConflict("provider_conflict: parametersFor другого исполнителя")
 	}
-	model, effort, err := validateStageSettingsPair(selection, view)
+	model, effort, speed, err := validateStageSettingsPair(selection, view)
 	if err != nil {
 		return stageSettingsView{}, err
 	}
@@ -280,6 +346,7 @@ func (s stageSettingsCLI) save(
 		restart = &state.StageRunnerRestart{
 			Source: *payload.ExpectedRun, RequestID: payload.Receipt.RequestID,
 			Primary: primary, Model: model, Effort: effort, Failover: fallback,
+			Speed: &speed, SpeedFromProfile: selection.Speed == nil,
 		}
 	}
 	validatePolicy := func() error {
@@ -294,7 +361,7 @@ func (s stageSettingsCLI) save(
 	}
 	saved, err := s.store.SaveStageRunnerSettings(
 		s.identity, payload.ExpectedRevision, payload.ExpectedRun, selection, payload.Receipt,
-		restart, validatePolicy,
+		restart, validatePolicy, s.request.MetadataScope.Fingerprint(),
 	)
 	if err != nil {
 		return stageSettingsView{}, err
@@ -304,32 +371,52 @@ func (s stageSettingsCLI) save(
 	return result, err
 }
 
-// validateStageSettingsPair подтверждает пару выбором ровно одной модели из каталога.
-// Возвращённые значения можно зафиксировать для замены живого запуска.
+// validateStageSettingsPair подтверждает модель, усилие и явную скорость.
+// Профильное ускорение допускается как настройка, подтверждаемая перед запуском.
 func validateStageSettingsPair(
 	selection state.StageRunnerSelection, view stageSettingsView,
-) (model, effort string, err error) {
-	model, effort = view.Inherited.Model, view.Inherited.Effort
+) (model, effort, speed string, err error) {
+	model, effort, speed = view.Inherited.Model, view.Inherited.Effort, view.Inherited.Speed
 	if selection.Model != nil {
 		model = *selection.Model
 	}
 	if selection.Effort != nil {
 		effort = *selection.Effort
 	}
+	if selection.Speed != nil {
+		speed = *selection.Speed
+	} else if view.Inherited.SpeedIssue == "invalid_profile" {
+		return model, effort, speed, stageSettingsConflict("speed_unavailable: неизвестный режим в профиле")
+	}
+	checkSpeed := func(modes []string) error {
+		if selection.Speed == nil {
+			return nil
+		}
+		if err := runner.ValidateStageSpeed(selection.ParametersFor, speed, modes); err != nil {
+			return stageSettingsConflict(err.Error())
+		}
+		return nil
+	}
 	if model == "" && selection.Model == nil && selection.Effort == nil {
-		return model, effort, nil
+		return model, effort, speed, checkSpeed(nil)
 	}
 	for _, item := range view.Models {
 		if item.ID == model || slices.Contains(item.Aliases, model) {
 			if !slices.Contains(item.Efforts, effort) {
-				return model, effort, stageSettingsConflict(
+				return model, effort, speed, stageSettingsConflict(
 					fmt.Sprintf("effort_unavailable: %q недоступен для %s", effort, model),
 				)
 			}
-			return model, effort, nil
+			var modes []string
+			if item.ID == model {
+				modes = item.SpeedModes
+			}
+			return model, effort, speed, checkSpeed(modes)
 		}
 	}
-	return model, effort, stageSettingsConflict(fmt.Sprintf("model_unavailable: модель %q недоступна", model))
+	return model, effort, speed, stageSettingsConflict(
+		fmt.Sprintf("model_unavailable: модель %q недоступна", model),
+	)
 }
 
 func stageSettingsConflict(message string) error {

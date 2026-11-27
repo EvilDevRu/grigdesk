@@ -46,4 +46,13 @@ func TestProfileRunnerSettings(t *testing.T) {
 		!bytes.Contains(raw, []byte("CONFIG_REVISION=4\n")) {
 		t.Fatalf("ревизия или комментарий потеряны: %q, %v", raw, err)
 	}
+	check(0, "", "profile", "fixture", "model", "set", "DEFAULT", "codex", "speed=fast")
+	check(0, "DEFAULT/codex: speed=fast\n", "profile", "fixture", "model", "show", "DEFAULT", "codex")
+	check(0, "", "profile", "fixture", "model", "set", "REVIEW", "codex", "speed=standard")
+	check(0, "REVIEW/codex: speed=standard\n", "profile", "fixture", "model", "show", "REVIEW", "codex")
+	check(2, "", "profile", "fixture", "model", "set", "REVIEW", "codex", "speed=priority")
+	check(2, "", "profile", "fixture", "model", "set", "DEFAULT", "claude", "speed=ultrafast")
+	check(2, "", "profile", "fixture", "model", "set", "DEFAULT", "kimi", "speed=fast")
+	check(0, "", "profile", "fixture", "model", "set", "REVIEW", "codex", "speed=")
+	check(0, "REVIEW/codex:\n", "profile", "fixture", "model", "show", "REVIEW", "codex")
 }

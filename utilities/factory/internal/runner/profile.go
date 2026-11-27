@@ -84,6 +84,23 @@ func ProviderKey(s string) string {
 	return strings.ReplaceAll(strings.ToUpper(s), "-", "_")
 }
 
+// SupportsSpeed проверяет, может ли адаптер передать режим скорости в CLI.
+// Поддержка ускорения конкретной моделью проверяется отдельным каталогом.
+// При добавлении режима согласуй runnerOperations, PROFILE_SPEED_MODES и chatSpeed адаптеров.
+func SupportsSpeed(provider, speed string) bool {
+	if speed == "" {
+		return true
+	}
+	switch provider {
+	case "codex":
+		return speed == "standard" || speed == "fast" || speed == "ultrafast"
+	case "claude":
+		return speed == "standard" || speed == "fast"
+	default:
+		return false
+	}
+}
+
 // UpdateProfile под той же блокировкой сравнивает строку ревизии и сохраняет
 // комментарии и порядок ключей. Версии старого CLI понимают получившиеся байты.
 func UpdateProfile(path, revision string, updates map[string]string, create bool) error {

@@ -72,7 +72,12 @@ func (e execution) runTransactionAgent(
 		return cursor, rc, err
 	}
 	request.RecordRestart = e.restartLifecycle(visit)
+	startedAt := time.Now()
 	result, err := e.dispatchAgent(ctx, request)
+	if canCloseSpeedRefusal(result, err) {
+		failure := e.recordClosedAgent(visit, result, err, startedAt)
+		return cursor, 75, errors.Join(err, failure)
+	}
 	if tx != nil && (errors.Is(err, context.Canceled) || (ctx.Err() != nil && result.RC == 130)) {
 		if err := e.recoverStoppedTransaction(ctx, tx, cursor, result); err != nil {
 			return cursor, 75, err

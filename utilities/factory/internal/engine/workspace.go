@@ -11,6 +11,7 @@ import (
 
 	"grigdesk.local/tools/utilities/factory/internal/hooks"
 	"grigdesk.local/tools/utilities/factory/internal/host"
+	"grigdesk.local/tools/utilities/factory/internal/runner"
 	"grigdesk.local/tools/utilities/factory/internal/state"
 )
 
@@ -113,6 +114,17 @@ func (e *execution) prepareCheckout(ctx context.Context, fields map[string]strin
 	}
 	e.workspace.FrontPort, e.workspace.APIPort = fields["FE_PORT"], fields["API_PORT"]
 	e.invoke.Directory = e.workspace.Repositories[0].Worktree
+	problems, err := runner.SaveStageMetadataScope(
+		e.attempt, e.request.Store, e.invoke.Directory, append([]string(nil), e.request.Environment...),
+	)
+	if e.request.Log != nil {
+		for _, problem := range problems {
+			fmt.Fprintln(e.request.Log, "metadata scope:", problem)
+		}
+		if err != nil {
+			fmt.Fprintln(e.request.Log, "metadata scope: publish_failed")
+		}
+	}
 	return 0, nil
 }
 

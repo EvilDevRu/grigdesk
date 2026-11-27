@@ -5,6 +5,10 @@ import test from 'node:test';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { compilePipelineView } from './helpers/pipeline-view.js';
+import {
+  decodeStageRunnerOptions, STAGE_RUNNER_SPEED_ACCEPT,
+} from '../../shared/pipeline/stageRunnerSettings.ts';
+import { ApiError } from '../../web/src/shared/apiClient.ts';
 import { settingsButton, settingsFields, stageSettingsOptions } from './helpers/stage-runner-settings.js';
 
 process.env.NODE_ENV = 'test';
@@ -72,6 +76,61 @@ function makeFixture({
   };
 
   return { factoryTask, graph };
+}
+
+/**
+ * Каталог подтверждает Fast только для точного ID основной модели.
+ * Остальные сценарии могут переопределить унаследованную скорость отдельно.
+ */
+function speedSettings({ speed = 'standard', running = false } = {}) {
+  const options = stageSettingsOptions({ running });
+
+  options.models[0].speedModes = ['standard', 'fast'];
+  options.models[0].aliases = ['opus-latest'];
+  options.models[1].speedModes = ['standard'];
+  options.effective.speed = speed;
+  options.inherited = { ...options.effective, chain: options.chain };
+  options.sources.speed = speed ? 'profile' : 'native';
+
+  return options;
+}
+
+/**
+ * Full-ответ сохраняет каталог текущего провайдера и пересчитывает источник скорости.
+ * Legacy fixture продолжает выдавать прежнюю форму для остальных сценариев.
+ */
+function confirmSelection(previous, payload) {
+  const { selection: submitted } = payload;
+  const full = submitted.parametersFor === previous.selection.parametersFor
+    && previous.models.some((model) => model.speedModes);
+  const next = full ? previous : stageSettingsOptions({ provider: submitted.parametersFor });
+  const base = next.inherited ?? next.effective;
+  const selection = { ...submitted };
+
+  if (full && !Object.hasOwn(selection, 'speed') && previous.selection.speed) {
+    selection.speed = previous.selection.speed;
+  }
+  if (selection.speed === null) {
+    delete selection.speed;
+  }
+
+  return {
+    ...next,
+    actual: previous.actual,
+    effective: {
+      primary: selection.primary || selection.parametersFor,
+      model: selection.model ?? base.model,
+      effort: selection.effort ?? base.effort,
+      ...(full && { speed: selection.speed ?? base.speed }),
+    },
+    sources: {
+      ...next.sources,
+      ...(full && { speed: selection.speed ? 'node' : base.speed ? 'profile' : 'native' }),
+    },
+    selection,
+    revision: previous.revision + 1,
+    receipt: { requestId: payload.requestId, state: payload.mode === 'restart' ? 'pending' : 'saved' },
+  };
 }
 
 /**
@@ -175,20 +234,7 @@ async function mountPipeline(t, {
           return applyHandler(payload);
         }
 
-        const next = stageSettingsOptions({ provider: payload.selection.parametersFor });
-
-        confirmed = {
-          ...next,
-          actual: confirmed.actual,
-          effective: {
-            primary: payload.selection.primary || payload.selection.parametersFor,
-            model: payload.selection.model ?? next.effective.model,
-            effort: payload.selection.effort ?? next.effective.effort,
-          },
-          selection: { ...payload.selection },
-          revision: confirmed.revision + 1,
-          receipt: { requestId: payload.requestId, state: payload.mode === 'restart' ? 'pending' : 'saved' },
-        };
+        confirmed = confirmSelection(confirmed, payload);
 
         return confirmed;
       }
@@ -239,11 +285,16 @@ async function mountPipeline(t, {
     actions: { async load() {} },
   });
 
-  const wrapper = mount(await compilePipelineView('__pipelineRunner'), {
+  const wrapper = mount(await compilePipelineView('__pipelineRunner', {
+    expose: ['runnerDraft', 'load'],
+  }), {
     attachTo: browser.document.querySelector('#mount'),
     global: {
       plugins: [createPinia()],
-      stubs: { teleport: true },
+      stubs: {
+        teleport: true,
+        GraphWorkflowLauncher: true,
+      },
     },
   });
 
@@ -294,8 +345,18 @@ test('selection-saves-immediately', async (t) => {
   const fx = await mountPipeline(t, makeFixture());
 
   await fx.openPlanStage('wait');
-  await fx.wrapper.findAll('.executor-row .ui-selectable-row__primary')[1].trigger('click');
+
+  const tiles = fx.wrapper.findAll('[data-role="pipeline-runner"] button');
+
+  assert.equal(tiles.length, 2);
+  assert.ok(tiles.every((tile) => tile.find('svg[aria-hidden="true"]').exists()));
+  assert.equal(tiles[0].attributes('aria-pressed'), 'true');
+  assert.equal(fx.wrapper.findAll('[data-role="pipeline-runner"] select').length, 0);
+  assert.equal(fx.wrapper.findAll('#stage-executors-panel .executor-fields').length, 1);
+  await tiles[1].trigger('click');
   await fx.flushPromises();
+  assert.equal(tiles[0].attributes('aria-pressed'), 'false');
+  assert.equal(tiles[1].attributes('aria-pressed'), 'true');
   assert.deepEqual(fx.runnerCalls, [], 'выбор исполнителя не вызывает legacy override');
   assert.equal(fx.applyCalls.length, 1, 'клик по исполнителю сразу сохраняет выбор');
   assert.equal(fx.applyCalls[0][1].selection.primary, 'codex');
@@ -303,7 +364,7 @@ test('selection-saves-immediately', async (t) => {
 
   const fields = settingsFields(fx.wrapper);
 
-  assert.ok(fields.length >= 2);
+  assert.equal(fields.length, 2);
   assert.equal(fields[0].element.disabled, false);
   await fields[0].setValue('sol-other');
   await fields[1].setValue('low');
@@ -316,7 +377,7 @@ test('apply-one-tuple-keeps-dialog', async (t) => {
   const fx = await mountPipeline(t, makeFixture());
 
   await fx.openPlanStage('wait');
-  await fx.wrapper.findAll('.executor-row .ui-selectable-row__primary')[1].trigger('click');
+  await fx.wrapper.findAll('[data-role="pipeline-runner"] button')[1].trigger('click');
   await fx.flushPromises();
 
   const fields = settingsFields(fx.wrapper);
@@ -344,6 +405,181 @@ test('apply-one-tuple-keeps-dialog', async (t) => {
   assert.deepEqual(fx.runnerCalls, []);
 });
 
+test('скорость узла сохраняется без изменения модели или усилия', async (t) => {
+  const options = stageSettingsOptions();
+
+  options.models[0].speedModes = ['standard', 'fast'];
+  options.models[1].speedModes = ['standard'];
+  options.inherited = {
+    ...options.effective,
+    speed: 'standard',
+    chain: options.chain,
+  };
+
+  const fx = await mountPipeline(t, { ...makeFixture(), settings: options });
+
+  await fx.openPlanStage('wait');
+
+  const speed = fx.wrapper.find('[data-test="stage-runner-speed"]');
+
+  assert.equal(speed.exists(), true);
+  assert.equal(speed.element.disabled, false);
+  assert.equal(speed.find('option[value="ultrafast"]').exists(), false);
+  await speed.setValue('fast');
+  await fx.flushPromises();
+
+  const applied = fx.applyCalls.at(-1)?.[1];
+
+  assert.equal(applied?.mode, 'next');
+  assert.equal(applied?.selection.speed, 'fast');
+  assert.equal(applied?.selection.model, null);
+  assert.equal(applied?.selection.effort, null);
+});
+
+test('изменение усилия, Fast и возврат к профилю в одном окне', async (t) => {
+  const fixture = makeFixture({ status: 'run', actual: 'claude' });
+  const fx = await mountPipeline(t, { ...fixture, settings: speedSettings({ running: true }) });
+
+  await fx.openPlanStage('run');
+
+  const speed = fx.wrapper.get('select[data-test="stage-runner-speed"]');
+  const panel = fx.wrapper.get('#stage-executors-panel');
+
+  assert.match(panel.text(), /Следующий запуск: Обычная · из профиля/);
+  await settingsFields(fx.wrapper)[1].setValue('high');
+  await fx.flushPromises();
+  assert.equal(Object.hasOwn(fx.applyCalls[0][1].selection, 'speed'), false);
+  await speed.setValue('fast');
+  await fx.flushPromises();
+
+  assert.equal(fx.applyCalls[1][1].selection.speed, 'fast');
+  assert.equal(fx.applyCalls[1][1].selection.model, null);
+  assert.equal(fx.applyCalls[1][1].selection.effort, 'high');
+  assert.match(panel.text(), /Следующий запуск: Fast · на узле/);
+
+  await speed.setValue('\u0001inherit');
+  await fx.flushPromises();
+  assert.equal(fx.applyCalls.at(-1)[1].selection.speed, null);
+  assert.equal(Object.hasOwn(fx.readConfirmed().selection, 'speed'), false);
+  await fx.wrapper.get('[data-context="pipeline-stage-close"]').trigger('click');
+  await fx.openPlanStage('run');
+  assert.equal(fx.wrapper.get('select[data-test="stage-runner-speed"]').element.value, '\u0001inherit');
+  assert.match(fx.wrapper.get('#stage-executors-panel').text(), /Из профиля: Обычная/);
+});
+
+test('нативная скорость и alias без Fast', async (t) => {
+  const fixture = makeFixture({ status: 'run', actual: 'claude' });
+  const settings = speedSettings({ speed: null, running: true });
+
+  settings.selection.model = 'opus-latest';
+
+  const fx = await mountPipeline(t, { ...fixture, settings });
+
+  await fx.openPlanStage('run');
+  assert.equal(fx.wrapper.vm.runnerDraft.model, 'opus-latest');
+
+  const speed = fx.wrapper.get('select[data-test="stage-runner-speed"]');
+
+  assert.equal(speed.find('option[value="fast"]').exists(), false);
+  assert.equal(settingsFields(fx.wrapper)[1].find('option[value="high"]').exists(), true);
+  assert.match(fx.wrapper.get('#stage-executors-panel').text(),
+    /Следующий запуск: Настройки исполнителя · из настроек исполнителя/);
+});
+
+test('сохранённый Fast виден после сужения каталога и исправляется на обычную скорость', async (t) => {
+  const settings = speedSettings();
+
+  settings.models[0].speedModes = ['standard'];
+  settings.selection.speed = 'fast';
+  settings.effective.speed = 'fast';
+  settings.sources.speed = 'node';
+
+  const fx = await mountPipeline(t, { ...makeFixture(), settings });
+
+  await fx.openPlanStage('wait');
+
+  const speed = fx.wrapper.get('select[data-test="stage-runner-speed"]');
+
+  assert.equal(speed.get('option[value="fast"]').element.disabled, true);
+  assert.equal(speed.element.value, 'fast');
+  assert.match(fx.wrapper.get('#stage-executors-panel').text(), /Скорость недоступна для этой модели/);
+  assert.equal(fx.applyCalls.length, 0);
+  await speed.setValue('standard');
+  await fx.flushPromises();
+  assert.equal(fx.applyCalls[0][1].selection.speed, 'standard');
+});
+
+test('ошибка скорости профиля блокирует запись и локализуется при гонке POST', async (t) => {
+  const settings = speedSettings({ speed: null });
+  const invalidProfile = 'В профиле указан неизвестный режим скорости.';
+  const fx = await mountPipeline(t, {
+    ...makeFixture(),
+    settings,
+    applyHandler(payload) {
+      if (payload.selection.speed === 'fast') {
+        throw new ApiError('Каталог временно недоступен', 503, {});
+      }
+
+      settings.inherited.speedIssue = 'invalid_profile';
+
+      throw new ApiError('speed_unavailable: неизвестный режим в профиле', 409, {});
+    },
+  });
+
+  await fx.openPlanStage('wait');
+
+  const speed = fx.wrapper.get('select[data-test="stage-runner-speed"]');
+  const panel = fx.wrapper.get('#stage-executors-panel');
+
+  await speed.setValue('fast');
+  await fx.flushPromises();
+  assert.match(panel.text(), /Каталог временно недоступен/);
+  await speed.setValue('\u0001inherit');
+  await fx.flushPromises();
+
+  const inherited = panel.get('select[data-test="stage-runner-speed"]');
+
+  assert.equal(panel.get('.ui-inline-message').text().includes(invalidProfile), true);
+  assert.match(inherited.text(), /Из профиля: неизвестный режим в профиле/);
+  assert.equal(fx.wrapper.vm.runnerDraft.speed, null);
+  assert.equal(panel.text().includes('Повторить сохранение'), false);
+
+  await settingsFields(fx.wrapper)[1].setValue('high');
+  await fx.flushPromises();
+  assert.equal(panel.get('.runner-hint[role="alert"]').text().includes(invalidProfile), true);
+  assert.equal(fx.applyCalls.length, 2);
+});
+
+test('гонка каталога возвращает подсказку о скорости и допускает новый выбор', async (t) => {
+  const settings = speedSettings();
+  const fx = await mountPipeline(t, {
+    ...makeFixture(),
+    settings,
+    applyHandler(payload) {
+      if (payload.selection.speed === 'fast') {
+        settings.models[0].speedModes = ['standard'];
+
+        throw new ApiError('speed_unavailable: fast', 409, {});
+      }
+
+      return confirmSelection(settings, payload);
+    },
+  });
+
+  await fx.openPlanStage('wait');
+
+  const speed = fx.wrapper.get('select[data-test="stage-runner-speed"]');
+
+  await speed.setValue('fast');
+  await fx.flushPromises();
+  assert.match(fx.wrapper.get('#stage-executors-panel').text(), /Скорость недоступна для этой модели/);
+  assert.equal(speed.get('option[value="fast"]').element.disabled, true);
+  await speed.setValue('standard');
+  await fx.flushPromises();
+  assert.equal(fx.applyCalls.length, 2);
+  assert.equal(fx.applyCalls[1][1].selection.speed, 'standard');
+});
+
 test('late-provider-catalog-does-not-save-new-selection-twice', async (t) => {
   const pending = Promise.withResolvers();
   const fx = await mountPipeline(t, {
@@ -359,7 +595,7 @@ test('late-provider-catalog-does-not-save-new-selection-twice', async (t) => {
 
   await fx.openPlanStage('wait');
 
-  const picks = fx.wrapper.findAll('.executor-row .ui-selectable-row__primary');
+  const picks = fx.wrapper.findAll('[data-role="pipeline-runner"] button');
 
   await picks[1].trigger('click');
   await picks[2].trigger('click');
@@ -403,12 +639,82 @@ test('auto-save-failure-keeps-selection-and-retries', async (t) => {
   assert.equal(fx.wrapper.get('#stage-executors-panel').text().includes('Повторить сохранение'), false);
 });
 
+test('конфликт ревизии при повторе сохранения использует новую ревизию и requestId', async (t) => {
+  let settings = speedSettings();
+  const fx = await mountPipeline(t, {
+    ...makeFixture(),
+    optionsHandler: () => settings,
+    applyHandler(payload) {
+      if (payload.expectedRevision === 0) {
+        settings = { ...settings, revision: 1 };
+
+        throw new ApiError('revision_conflict: настройки уже изменены', 409, {});
+      }
+
+      settings = confirmSelection(settings, payload);
+
+      return settings;
+    },
+  });
+
+  await fx.openPlanStage('wait');
+  await fx.wrapper.get('select[data-test="stage-runner-speed"]').setValue('fast');
+  await fx.flushPromises();
+  await settingsButton(fx.wrapper, /Повторить сохранение/).trigger('click');
+  await fx.flushPromises();
+
+  const [first, second] = fx.applyCalls.map(([, payload]) => payload);
+
+  assert.equal(fx.applyCalls.length, 2);
+  assert.equal(first.expectedRevision, 0);
+  assert.equal(second.expectedRevision, 1);
+  assert.notEqual(first.requestId, second.requestId);
+  assert.equal(second.selection.speed, 'fast');
+});
+
+test('переоткрытие окна до ответа POST сохраняет requestId для повтора', async (t) => {
+  const initial = speedSettings();
+  const response = Promise.withResolvers();
+  let first = true;
+  const fx = await mountPipeline(t, {
+    ...makeFixture(),
+    settings: initial,
+    /**
+     * Первый запрос остаётся в работе до переоткрытия окна.
+     * Повтор того же payload получает подтверждение записи.
+     */
+    applyHandler(payload) {
+      if (first) {
+        first = false;
+
+        return response.promise;
+      }
+
+      return confirmSelection(initial, payload);
+    },
+  });
+
+  await fx.openPlanStage('wait');
+  await fx.wrapper.get('select[data-test="stage-runner-speed"]').setValue('fast');
+  await fx.wrapper.get('[data-context="pipeline-stage-close"]').trigger('click');
+  await fx.openPlanStage('wait');
+
+  assert.equal(fx.wrapper.vm.runnerDraft.speed, 'fast');
+  response.reject(new Error('Ответ сохранения потерян'));
+  await fx.flushPromises();
+  await settingsButton(fx.wrapper, /Повторить сохранение/).trigger('click');
+  await fx.flushPromises();
+
+  assert.equal(fx.applyCalls.length, 2);
+  assert.deepEqual(fx.applyCalls[1][1], fx.applyCalls[0][1]);
+});
+
 test('карточка текущего исполнителя запроса не шлёт', async (t) => {
   const { wrapper, runnerCalls, openPlanStage } = await mountPipeline(t, makeFixture());
 
   await openPlanStage('wait');
 
-  await wrapper.findAll('.executor-row .ui-selectable-row__primary')[0].trigger('click');
+  await wrapper.findAll('[data-role="pipeline-runner"] button')[0].trigger('click');
   assert.deepEqual(runnerCalls, []);
 });
 
@@ -615,6 +921,318 @@ test('active-next-preserves-fact', async (t) => {
   assert.equal(fx.wrapper.find('.smodal').exists(), true);
 });
 
+test('Fast следующего запуска скрывает прогноз и сохраняет факт обычной скорости', async (t) => {
+  const fixture = makeFixture({ status: 'run', actual: 'claude' });
+  const settings = speedSettings({ speed: 'ultrafast', running: true });
+
+  settings.actual.speed = 'standard';
+  settings.actual.speedWarning = 'profile_speed_unavailable';
+
+  const fx = await mountPipeline(t, { ...fixture, settings });
+
+  await fx.openPlanStage('run');
+
+  const panel = fx.wrapper.get('#stage-executors-panel');
+  const warning = 'Режим скорости из профиля недоступен. Узел запущен на обычной скорости.';
+
+  assert.match(panel.text(), /Запрошенная скорость · Обычная/);
+  assert.equal(panel.text().includes(warning), true);
+  assert.match(panel.text(), /Профиль просит Ultrafast, но эта модель его не подтверждает/);
+  await fx.wrapper.get('select[data-test="stage-runner-speed"]').setValue('fast');
+  await fx.flushPromises();
+  assert.match(panel.text(), /Следующий запуск: Fast · на узле/);
+  assert.equal(panel.text().includes('Профиль просит Ultrafast'), false);
+  assert.equal(panel.text().includes(warning), true);
+  assert.deepEqual(fx.applyCalls[0][1].expectedRun, settings.actual.run);
+});
+
+/**
+ * Граф объявляет новую эпоху до ответа каталога.
+ * Старый выбор скорости остаётся в sidecar этого же узла.
+ */
+function observePlanRun(fixture, run) {
+  fixture.graph.statuses.plan = 'run';
+  fixture.graph.nodeMeta.plan.runner.actual = 'claude';
+  fixture.graph.nodeMeta.plan.runner.attempts = [{
+    ...run,
+    runner: 'claude',
+    result: null,
+  }];
+}
+
+test('после смены эпохи ошибку каталога сопровождает факт из show', async (t) => {
+  const fixture = makeFixture({ status: 'run', actual: 'claude' });
+  const settings = speedSettings({ running: true });
+  const nextRun = { id: 'run-next', epoch: 2 };
+  let current = settings;
+  let strictUnavailable = false;
+
+  settings.actual.speed = 'fast';
+  settings.selection.speed = 'fast';
+  observePlanRun(fixture, settings.actual.run);
+
+  const fx = await mountPipeline(t, {
+    ...fixture,
+    optionsHandler(url) {
+      const hasProvider = new URL(url, 'http://fixture').searchParams.has('provider');
+
+      if (strictUnavailable && hasProvider) {
+        throw new ApiError('Каталог недоступен', 503, {});
+      }
+
+      return current;
+    },
+  });
+
+  await fx.openPlanStage('run');
+  assert.match(fx.wrapper.get('#stage-executors-panel').text(), /Запрошенная скорость · Fast/);
+
+  strictUnavailable = true;
+  current = { ...settings, models: [] };
+  observePlanRun(fixture, nextRun);
+  await fx.wrapper.vm.load();
+  await fx.flushPromises();
+
+  const panel = fx.wrapper.get('#stage-executors-panel');
+
+  assert.equal(panel.text().includes('Запрошенная скорость'), false, 'show старой эпохи не применяется');
+  current = {
+    ...current,
+    actual: {
+      ...settings.actual,
+      run: nextRun,
+      speed: 'standard',
+      speedWarning: 'profile_speed_unavailable',
+    },
+  };
+  await settingsButton(fx.wrapper, /Повторить загрузку каталога/).trigger('click');
+  await fx.flushPromises();
+
+  assert.match(panel.text(), /Запрошенная скорость · Обычная/);
+  assert.match(panel.text(), /Режим скорости из профиля недоступен\. Узел запущен на обычной скорости\./);
+  assert.match(panel.text(), /Каталог недоступен/);
+  assert.equal(settingsButton(fx.wrapper, /Повторить загрузку каталога/).element.disabled, false);
+  assert.equal(fx.wrapper.get('select[data-test="stage-runner-speed"]').element.disabled, true);
+  assert.equal(fx.applyCalls.length, 0);
+});
+
+test('ответ сохранения не возвращает предупреждение завершившейся эпохи', async (t) => {
+  const fixture = makeFixture({ status: 'run', actual: 'claude' });
+  const settings = speedSettings({ running: true });
+  const response = Promise.withResolvers();
+  let unavailable = false;
+
+  settings.actual.speed = 'standard';
+  settings.actual.speedWarning = 'profile_speed_unavailable';
+  observePlanRun(fixture, settings.actual.run);
+
+  const fx = await mountPipeline(t, {
+    ...fixture,
+    settings,
+    /**
+     * После смены эпохи строгий каталог недоступен.
+     * Tolerant чтение пока не видит новый actual.
+     */
+    optionsHandler(url) {
+      if (!unavailable) {
+        return settings;
+      }
+      if (new URL(url, 'http://fixture').searchParams.has('provider')) {
+        throw new ApiError('Каталог недоступен', 503, {});
+      }
+
+      return {
+        ...settings,
+        actual: null,
+        models: [],
+      };
+    },
+    applyHandler() {
+      return response.promise;
+    },
+  });
+
+  await fx.openPlanStage('run');
+
+  const panel = fx.wrapper.get('#stage-executors-panel');
+  const speed = fx.wrapper.get('select[data-test="stage-runner-speed"]');
+
+  assert.match(panel.text(), /Запрошенная скорость · Обычная/);
+  await speed.setValue('fast');
+  assert.equal(fx.applyCalls.length, 1);
+
+  unavailable = true;
+  observePlanRun(fixture, { id: 'run-next', epoch: 2 });
+  await fx.wrapper.vm.load();
+  await fx.flushPromises();
+  assert.doesNotMatch(panel.text(), /Запрошенная скорость/);
+
+  response.resolve(confirmSelection(settings, fx.applyCalls[0][1]));
+  await fx.flushPromises();
+
+  assert.match(panel.text(), /Следующий запуск: Fast/);
+  assert.match(panel.text(), /Каталог недоступен/);
+  assert.doesNotMatch(panel.text(), /Запрошенная скорость|Узел запущен на обычной скорости/);
+  assert.equal(speed.element.disabled, true);
+});
+
+test('запоздалый show не переносит предупреждение в окно другого узла', async (t) => {
+  const fixture = makeFixture({ status: 'run', actual: 'claude' });
+  const settings = speedSettings({ running: true });
+  const nextRun = { id: 'run-next', epoch: 2 };
+  const show = Promise.withResolvers();
+  const requested = Promise.withResolvers();
+  let strictUnavailable = false;
+
+  fixture.graph.nodes.scout = [2, 'Разведка'];
+  fixture.graph.pos.scout = 2;
+  fixture.graph.keys.scout = 'SCOUT';
+  fixture.graph.runnerKeys.scout = 'SCOUT';
+  fixture.graph.statuses.scout = 'wait';
+  fixture.graph.nodeMeta.scout = { runner: structuredClone(fixture.graph.nodeMeta.plan.runner) };
+  observePlanRun(fixture, settings.actual.run);
+
+  const fx = await mountPipeline(t, {
+    ...fixture,
+    /**
+     * Задержка относится только к show первого узла.
+     * Каталог соседнего узла отвечает сразу и без старого actual.
+     */
+    optionsHandler(url) {
+      const query = new URL(url, 'http://fixture').searchParams;
+
+      if (query.get('node') === 'scout') {
+        return stageSettingsOptions({ node: 'scout', stage: 'SCOUT' });
+      }
+      if (!strictUnavailable) {
+        return settings;
+      }
+      if (query.has('provider')) {
+        throw new ApiError('Каталог недоступен', 503, {});
+      }
+
+      requested.resolve();
+
+      return show.promise;
+    },
+  });
+
+  await fx.openPlanStage('run');
+  strictUnavailable = true;
+  observePlanRun(fixture, nextRun);
+  await fx.wrapper.vm.load();
+  await requested.promise;
+  await fx.openStage({
+    id: 'scout',
+    label: 'Разведка',
+    subtitle: '',
+    status: 'wait',
+  });
+  await fx.wrapper.get('#stage-executors-tab').trigger('click');
+  show.resolve({
+    ...settings,
+    actual: {
+      ...settings.actual,
+      run: nextRun,
+      speed: 'standard',
+      speedWarning: 'profile_speed_unavailable',
+    },
+  });
+  await fx.flushPromises();
+
+  const panel = fx.wrapper.get('#stage-executors-panel');
+
+  assert.equal(panel.text().includes('Режим скорости из профиля недоступен'), false);
+  assert.equal(panel.text().includes('Запрошенная скорость'), false);
+  assert.equal(fx.optionCalls.some((url) => url.includes('node=scout') && url.includes('provider=')), true);
+  assert.equal(fx.applyCalls.length, 0);
+});
+
+test('receipt с пустым каталогом сохраняет выбор и повторяет только GET', async (t) => {
+  const settings = speedSettings({ running: true });
+  let applied = false;
+  const fx = await mountPipeline(t, {
+    ...makeFixture({ status: 'run', actual: 'claude' }),
+    settings,
+    optionsHandler(url) {
+      if (applied && new URL(url, 'http://fixture').searchParams.has('provider')) {
+        throw new ApiError('Каталог недоступен', 503, {});
+      }
+
+      return settings;
+    },
+    applyHandler(payload) {
+      applied = true;
+
+      return { ...confirmSelection(settings, payload), models: [] };
+    },
+  });
+
+  await fx.openPlanStage('run');
+
+  const initialReads = fx.optionCalls.length;
+  const speed = fx.wrapper.get('select[data-test="stage-runner-speed"]');
+
+  await speed.setValue('fast');
+  await fx.flushPromises();
+  assert.equal(fx.optionCalls.length, initialReads + 2);
+  assert.equal(fx.wrapper.vm.runnerDraft.speed, 'fast');
+  assert.equal(speed.element.disabled, true);
+  await settingsButton(fx.wrapper, /Повторить загрузку каталога/).trigger('click');
+  await fx.flushPromises();
+  assert.deepEqual(fx.applyCalls.map(([, payload]) => payload.mode), ['next']);
+});
+
+test('повтор каталога после потери ответа POST узнаёт receipt без новой записи', async (t) => {
+  const fixture = makeFixture({ status: 'run', actual: 'claude' });
+  const initial = speedSettings({ running: true });
+  const nextRun = { id: 'run-next', epoch: 2 };
+  let current = initial;
+  let strictUnavailable = false;
+
+  observePlanRun(fixture, initial.actual.run);
+
+  const fx = await mountPipeline(t, {
+    ...fixture,
+    optionsHandler(url) {
+      if (strictUnavailable && new URL(url, 'http://fixture').searchParams.has('provider')) {
+        throw new ApiError('Каталог недоступен', 503, {});
+      }
+
+      return current;
+    },
+    /**
+     * Запись успевает завершиться, затем клиент теряет ответ.
+     * В недоступном строгом каталоге квитанцию ещё можно прочитать через show.
+     */
+    applyHandler(payload) {
+      current = confirmSelection(current, payload);
+      current.actual = { ...initial.actual, run: nextRun };
+      strictUnavailable = true;
+
+      throw new Error('Ответ сохранения потерян');
+    },
+  });
+
+  await fx.openPlanStage('run');
+  await fx.wrapper.get('select[data-test="stage-runner-speed"]').setValue('fast');
+  await fx.flushPromises();
+
+  observePlanRun(fixture, nextRun);
+  await fx.wrapper.vm.load();
+  await fx.flushPromises();
+
+  assert.equal(current.receipt.requestId, fx.applyCalls[0][1].requestId);
+  assert.equal(fx.wrapper.vm.runnerDraft.speed, 'fast');
+  strictUnavailable = false;
+  await settingsButton(fx.wrapper, /Повторить загрузку каталога/).trigger('click');
+  await fx.flushPromises();
+
+  assert.equal(fx.applyCalls.length, 1);
+  assert.equal(fx.wrapper.get('select[data-test="stage-runner-speed"]').element.disabled, false);
+  assert.match(fx.wrapper.get('#stage-executors-panel').text(), /Следующий запуск: Fast · на узле/);
+});
+
 test('остановленный run: черновик сохраняется для следующего resume', async (t) => {
   const { wrapper, runnerCalls, openPlanStage } = await mountPipeline(
     t,
@@ -634,7 +1252,7 @@ test('остановленный run: черновик сохраняется д
   assert.match(block.text(), /Прогон остановлен/);
   assert.match(block.text(), /Продолжить прогон/);
 
-  await wrapper.findAll('.executor-row .ui-selectable-row__primary')[1].trigger('click');
+  await wrapper.findAll('[data-role="pipeline-runner"] button')[1].trigger('click');
   assert.deepEqual(runnerCalls, []);
   assert.equal(wrapper.get('#stage-executors-panel').text().includes('Применить'), false);
 });
@@ -683,6 +1301,74 @@ test('tasks.setStageRunner шлёт POST /api/tasks/:id/runner/override (пус�
   delete globalThis.__pipelineRunnerStoreApi;
 });
 
+test('store запрашивает полный каталог и различает пропуск скорости и явный null', async (t) => {
+  const requests = [];
+  const full = speedSettings();
+  const legacy = stageSettingsOptions();
+  const accept = { headers: { Accept: 'application/json; grigdesk-stage-speed=1' } };
+
+  globalThis.__pipelineRunnerStoreApi = {
+    async get(url, options) {
+      requests.push(['GET', url, options]);
+
+      return decodeStageRunnerOptions(options?.headers?.Accept === STAGE_RUNNER_SPEED_ACCEPT ? full : legacy);
+    },
+    async post(url, body, options) {
+      requests.push(['POST', url, body, options]);
+
+      return decodeStageRunnerOptions(options?.headers?.Accept === STAGE_RUNNER_SPEED_ACCEPT ? full : legacy);
+    },
+  };
+  t.after(() => {
+    delete globalThis.__pipelineRunnerStoreApi;
+  });
+
+  const [{ createPinia, setActivePinia }, { useTasksStore }] = await Promise.all([
+    import('../../web/node_modules/pinia/dist/pinia.mjs'),
+    loadProductModule('src/stores/tasks.ts', {
+      '../shared/apiClient.ts': [
+        'export const api = globalThis.__pipelineRunnerStoreApi;',
+        `export { ApiError } from ${JSON.stringify(webFile('src/shared/apiClient.ts'))};`,
+      ].join('\n'),
+      './board.ts': 'export const useBoardStore = () => ({load: async () => {}});',
+    }),
+  ]);
+
+  setActivePinia(createPinia());
+
+  const store = useTasksStore();
+  const { task, ...identity } = full.identity;
+  const options = await store.getStageRunnerOptions(task, identity);
+  const payload = {
+    identity: full.identity,
+    expectedRevision: options.revision,
+    expectedRun: null,
+    catalogRevision: options.catalogRevision,
+    requestId: 'request-speed-1',
+    mode: 'next',
+    selection: { ...full.selection, effort: 'high' },
+  };
+  const reset = {
+    ...payload,
+    requestId: 'request-speed-2',
+    selection: { ...payload.selection, speed: null },
+  };
+  const first = await store.applyStageRunnerSettings(task, payload);
+  const second = await store.applyStageRunnerSettings(task, reset);
+
+  for (const result of [options, first, second]) {
+    assert.deepEqual(result, full);
+  }
+
+  assert.deepEqual(requests, [
+    ['GET', `/api/tasks/${task}/runner/options?${new URLSearchParams(identity)}`, accept],
+    ['POST', `/api/tasks/${task}/runner/settings`, payload, accept],
+    ['POST', `/api/tasks/${task}/runner/settings`, reset, accept],
+  ]);
+  assert.equal(Object.hasOwn(requests[1][2].selection, 'speed'), false);
+  assert.equal(requests[2][2].selection.speed, null);
+});
+
 // К2/К6: тот же provider, изменение только effort, отмена и явное подтверждение.
 test('same-provider-effort-restart', async (t) => {
   const fx = await mountPipeline(t, makeFixture({ status: 'run', actual: 'claude' }));
@@ -724,9 +1410,13 @@ test('same-provider-effort-restart', async (t) => {
 test('restart-refreshes-run-before-next-apply', async (t) => {
   const initial = stageSettingsOptions({ running: true });
   const nextRun = { id: 'run-restarted', epoch: 2 };
+  const fixture = makeFixture({ status: 'run', actual: 'claude' });
   let current = structuredClone(initial);
+
+  observePlanRun(fixture, initial.actual.run);
+
   const fx = await mountPipeline(t, {
-    ...makeFixture({ status: 'run', actual: 'claude' }),
+    ...fixture,
     optionsHandler: () => current,
     applyHandler: (payload) => {
       const accepted = {
@@ -738,8 +1428,12 @@ test('restart-refreshes-run-before-next-apply', async (t) => {
 
       current = {
         ...structuredClone(accepted),
-        actual: { ...initial.actual, run: nextRun },
+        actual: payload.mode === 'restart' ? { ...initial.actual, run: nextRun } : current.actual,
       };
+
+      if (payload.mode === 'restart') {
+        observePlanRun(fixture, nextRun);
+      }
 
       return accepted;
     },
@@ -869,10 +1563,10 @@ test('provider-catalog-failure-clears-previous-models', async (t) => {
   await fx.openPlanStage('wait');
   assert.ok(settingsFields(fx.wrapper)[0].findAll('option')
     .some((item) => item.element.value === 'opus-other'));
-  await fx.wrapper.findAll('.executor-row .ui-selectable-row__primary')[1].trigger('click');
+  await fx.wrapper.findAll('[data-role="pipeline-runner"] button')[1].trigger('click');
   await fx.flushPromises();
 
-  const fields = fx.wrapper.findAll('.executor-row')[1].findAll('.executor-fields select');
+  const fields = settingsFields(fx.wrapper);
 
   assert.equal(fields[0].element.disabled, true);
   assert.equal(fields[0].findAll('option').some((item) => item.element.value === 'opus-other'), false);
@@ -886,6 +1580,45 @@ test('provider-catalog-failure-clears-previous-models', async (t) => {
   assert.ok(fields[0].findAll('option').some((item) => item.element.value === 'sol-other'));
   assert.equal(fx.applyCalls.length, 1, 'успешный повтор завершает выбор исполнителя');
   assert.equal(fx.applyCalls[0][1].selection.primary, 'codex');
+});
+
+test('неприменимый каталог другого исполнителя сохраняет сводку следующего запуска', async (t) => {
+  const settings = speedSettings({ running: true });
+  const codex = stageSettingsOptions({ provider: 'codex' });
+
+  codex.actual = settings.actual;
+  codex.chain = settings.chain;
+  codex.selection = settings.selection;
+  codex.sources.speed = 'profile';
+  codex.effective.primary = settings.effective.primary;
+  codex.effective.model = 'missing-model';
+  codex.effective.speed = 'ultrafast';
+  codex.inherited = { ...codex.effective, chain: codex.chain };
+  codex.models[0].speedModes = ['standard', 'ultrafast'];
+
+  const fx = await mountPipeline(t, {
+    ...makeFixture({ status: 'run', actual: 'claude' }),
+    settings,
+    optionsHandler(url) {
+      const provider = new URL(url, 'http://fixture').searchParams.get('provider');
+
+      return provider === 'codex' ? codex : settings;
+    },
+  });
+
+  await fx.openPlanStage('run');
+
+  const panel = fx.wrapper.get('#stage-executors-panel');
+
+  assert.match(panel.text(), /Следующий запуск: Обычная · из профиля/);
+  await fx.wrapper.findAll('[data-role="pipeline-runner"] button')[1].trigger('click');
+  await fx.flushPromises();
+
+  assert.equal(fx.wrapper.vm.runnerDraft.parametersFor, 'codex');
+  assert.match(panel.text(), /model_unavailable/);
+  assert.match(panel.text(), /Следующий запуск: Обычная · из профиля/);
+  assert.doesNotMatch(panel.text(), /Следующий запуск: Ultrafast/);
+  assert.deepEqual(fx.applyCalls, []);
 });
 
 test('saved-provider-bootstrap-does-not-depend-on-base-catalog', async (t) => {

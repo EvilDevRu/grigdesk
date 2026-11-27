@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict';
-import { readFile, writeFile } from 'node:fs/promises';
+import { spawnSync } from 'node:child_process';
+import { readFile, unlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import test from 'node:test';
+import { fileURLToPath } from 'node:url';
 
-import { cliJson, settingsFixture } from '../helpers/stageRunnerSettingsFixture.mjs';
+import { cliJson, settingsFixture, writeStageMetadataScope } from '../helpers/stageRunnerSettingsFixture.mjs';
 import { codexModelFixture } from '../helpers/factoryStageModelMetadata.mjs';
 import { runtimeInfoFixture } from '../helpers/deepseekMetadataFixture.mts';
 import { writeDeepSeekBinaryStub } from '../helpers/deepseekBinaryStub.mts';
@@ -41,6 +43,28 @@ test('metadata-unavailable-does-not-reuse-chat-or-seed', async (t) => {
   const registry = await readFile(path.join(fx.env.GRIGDESK_HOME, 'models.json'), 'utf8');
 
   assert.equal(registry, 'sentinel-owner-registry');
+});
+
+test('helper отвергает лишнее поле descriptor до получения reader lease', async (t) => {
+  const fx = await codexModelFixture(t);
+  const helper = fileURLToPath(new URL('../../server/scripts/factoryRunnerModels.mts', import.meta.url));
+  const descriptor = {
+    executable: fx.binary,
+    executableIdentity: 'a'.repeat(64),
+    resourceKey: 'b'.repeat(64),
+    providerId: 'codex',
+    leaseDirectory: path.join(fx.root, 'lease'),
+    unexpected: true,
+  };
+  const response = spawnSync(process.execPath, [helper, 'codex', '--native', fx.binary,
+    JSON.stringify(descriptor)], {
+    env: fx.env,
+    encoding: 'utf8',
+    timeout: 10_000,
+  });
+
+  assert.equal(response.status, 4, response.stderr);
+  assert.match(response.stderr, /лишнее поле descriptor CLI/);
 });
 
 test('metadata-revision-changes-with-model-capabilities', async (t) => {
@@ -124,4 +148,158 @@ test('glm-options-use-factory-catalog-and-runtime-admission', async (t) => {
 
   assert.equal(rejected.status, 69);
   assert.match(rejected.stderr, /metadata_unavailable/);
+});
+
+test('скорость фабрики подтверждается отдельно для каждой модели Codex', async (t) => {
+  const fx = await codexModelFixture(t);
+  const [sol, terra] = structuredClone(fx.native);
+  const env = Object.fromEntries(['PATH', 'HOME', 'CODEX_HOME', 'GRIGDESK_HOME', 'TMPDIR', 'LANG']
+    .filter((key) => fx.env[key] !== undefined).map((key) => [key, fx.env[key]]));
+  const scope = await writeStageMetadataScope(fx, { codex: { executable: fx.binary } }, env);
+
+  sol.serviceTiers = [{ id: 'priority' }];
+  terra.serviceTiers = [{ id: 'experimental-label', name: 'Fast' }, { id: 'ultrafast' }];
+  await writeFile(fx.metadataFile, JSON.stringify({ data: [sol, terra], nextCursor: null }));
+
+  const speed = ['--speed-v1', '1'];
+  const legacy = cliJson(fx.cli('options', ['--provider', 'codex']));
+
+  assert.equal(Object.hasOwn(legacy.models[0], 'speedModes'), false);
+
+  const before = cliJson(fx.cli('options', ['--provider', 'codex', ...speed]));
+
+  assert.deepEqual(before.models.find((item) => item.id === sol.id)?.speedModes, ['standard', 'fast']);
+  assert.deepEqual(before.models.find((item) => item.id === terra.id)?.speedModes, ['standard', 'ultrafast']);
+
+  sol.serviceTiers = [];
+  await writeFile(fx.metadataFile, JSON.stringify({ data: [sol, terra], nextCursor: null }));
+
+  const after = cliJson(fx.cli('options', ['--provider', 'codex', ...speed]));
+
+  assert.deepEqual(after.models.find((item) => item.id === sol.id)?.speedModes, ['standard']);
+  assert.notEqual(after.catalogRevision, before.catalogRevision);
+
+  await unlink(scope);
+
+  const unscoped = cliJson(fx.cli('options', ['--provider', 'codex', ...speed]));
+
+  assert.deepEqual(unscoped.models.find((item) => item.id === terra.id)?.speedModes, ['standard']);
+  assert.notEqual(unscoped.catalogRevision, after.catalogRevision);
+
+  const methods = await fx.methods();
+
+  assert.equal(methods.some((method) => /^(thread|turn)\//.test(method)), false);
+});
+
+test('настройка скорости сохраняется с CAS и явным сбросом в профиль', async (t) => {
+  const fx = await codexModelFixture(t);
+  const [first, ...rest] = structuredClone(fx.native);
+  const env = Object.fromEntries(['PATH', 'HOME', 'CODEX_HOME', 'GRIGDESK_HOME', 'TMPDIR', 'LANG']
+    .filter((key) => fx.env[key] !== undefined).map((key) => [key, fx.env[key]]));
+
+  await writeStageMetadataScope(fx, { codex: { executable: fx.binary } }, env);
+  first.serviceTiers = [{ id: 'priority' }];
+  await writeFile(fx.metadataFile, JSON.stringify({ data: [first, ...rest], nextCursor: null }));
+
+  const speed = ['--speed-v1', '1'];
+  const options = () => cliJson(fx.cli('options', ['--provider', 'codex', ...speed]));
+  const legacyView = cliJson(fx.cli('options', ['--provider', 'codex']));
+
+  assert.equal(Object.hasOwn(legacyView.sources, 'speed'), false);
+  assert.equal(Object.hasOwn(legacyView.inherited, 'speed'), false);
+  assert.equal(Object.hasOwn(legacyView.models[0], 'speedModes'), false);
+  assert.equal(Object.hasOwn(legacyView.selection, 'speed'), false);
+  assert.equal(Object.hasOwn(legacyView.actual ?? {}, 'speed'), false);
+
+  const base = options();
+
+  assert.equal(base.sources.speed, 'profile');
+
+  const payload = {
+    identity: base.identity,
+    expectedRevision: base.revision,
+    expectedRun: null,
+    catalogRevision: base.catalogRevision,
+    requestId: 'speed-first',
+    mode: 'next',
+    selection: { ...base.selection, speed: 'fast' },
+  };
+  const apply = (input) => fx.cli('apply', ['--payload', JSON.stringify(input), ...speed]);
+  const unflagged = fx.cli('apply', ['--payload', JSON.stringify(payload)]);
+
+  assert.notEqual(unflagged.status, 0);
+  assert.match(unflagged.stderr, /settings_input/u);
+
+  const saved = cliJson(apply(payload));
+
+  assert.equal(saved.revision, base.revision + 1);
+  assert.equal(saved.selection.speed, 'fast');
+  assert.equal(saved.effective.speed, 'fast');
+  assert.equal(cliJson(fx.cli('show', speed)).selection.speed, 'fast');
+  assert.equal(cliJson(apply(payload)).revision, saved.revision);
+  assert.match(apply({ ...payload, selection: { ...payload.selection, speed: 'standard' } }).stderr,
+    /request_conflict/u);
+
+  const { speed: savedSpeed, ...legacy } = payload.selection;
+  const byLegacy = cliJson(apply({
+    ...payload,
+    expectedRevision: saved.revision,
+    requestId: 'speed-legacy',
+    selection: legacy,
+  }));
+
+  assert.equal(byLegacy.selection.speed, savedSpeed);
+
+  const rejected = apply({
+    ...payload,
+    expectedRevision: byLegacy.revision,
+    requestId: 'speed-rejected',
+    selection: { ...payload.selection, speed: 'ultrafast' },
+  });
+
+  assert.notEqual(rejected.status, 0);
+  assert.match(rejected.stderr, /speed_unavailable/u);
+  assert.equal(cliJson(fx.cli('show', speed)).revision, byLegacy.revision);
+
+  const reset = cliJson(apply({
+    ...payload,
+    expectedRevision: byLegacy.revision,
+    requestId: 'speed-reset',
+    selection: { ...payload.selection, speed: null },
+  }));
+
+  assert.equal(reset.selection.speed ?? null, null);
+  assert.equal(reset.effective.speed ?? null, null);
+
+  const raw = await readFile(path.join(fx.controlDir, 'protocol-v2', 'tasks', `t${fx.task}`,
+    'attempts', fx.attempt, 'runner-settings', 'plan.json'), 'utf8');
+
+  assert.equal(raw.includes('"speed"'), false);
+
+  const kept = cliJson(apply({
+    ...payload,
+    expectedRevision: reset.revision,
+    requestId: 'speed-kept',
+  }));
+  const oldServer = fx.cli('apply', ['--payload', JSON.stringify({
+    ...payload,
+    expectedRevision: kept.revision,
+    requestId: 'speed-old-server',
+    selection: {
+      ...legacy,
+      model: 'gpt-9.1-sol',
+      effort: 'low',
+    },
+  })]);
+
+  assert.equal(oldServer.status, 0, oldServer.stderr);
+  assert.equal(Object.hasOwn(JSON.parse(oldServer.stdout).selection, 'speed'), false);
+  assert.equal(cliJson(fx.cli('show', speed)).selection.speed, 'fast');
+
+  await writeFile(fx.config, (await readFile(fx.config, 'utf8')) + 'MODEL_DEFAULT_CODEX_SPEED=standard\n');
+
+  const fromProfile = cliJson(fx.cli('options', ['--provider', 'codex', ...speed]));
+
+  assert.equal(fromProfile.inherited.speed, 'standard');
+  assert.equal(fromProfile.sources.speed, 'node');
 });

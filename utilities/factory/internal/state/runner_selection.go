@@ -3,6 +3,7 @@ package state
 import (
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"regexp"
 	"slices"
 	"strings"
@@ -15,7 +16,58 @@ var runnerProvider = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,63}$`)
 type StageRunnerSelection struct {
 	Primary, ParametersFor string
 	Model, Effort          *string
+	Speed                  *string
 	Failover               []string
+}
+
+// StageSelectionAdmission связывает новую эпоху со снимком редактора или restart.
+// Для restart сверяется однократно потреблённое намерение этой же попытки.
+type StageSelectionAdmission struct {
+	Selection StageRunnerSelection
+	Restart   *StageRunnerRestart
+}
+
+// CheckStageAdmissionSelection проверяет снимок до отказа или смены кандидата.
+// Проверка сериализована с сохранением настроек и сама не выдаёт эпоху.
+func (s Store) CheckStageAdmissionSelection(id StageRunnerIdentity, expected StageSelectionAdmission) error {
+	if !id.valid() {
+		return ErrConflict
+	}
+	task, err := s.openTask(id.Task, false)
+	if err != nil {
+		return err
+	}
+	defer task.close()
+	attempt, err := task.readAttempt(id.Task, id.Attempt)
+	if err != nil {
+		return err
+	}
+	if attempt.Profile != id.Profile || attempt.Terminal != "" {
+		return ErrConflict
+	}
+	return task.checkStageAdmissionSelection(id, expected)
+}
+
+// checkStageAdmissionSelection работает под уже открытой блокировкой задачи.
+// Выдача эпохи и отрицательное решение используют одно сравнение.
+func (t *taskState) checkStageAdmissionSelection(
+	id StageRunnerIdentity, expected StageSelectionAdmission,
+) error {
+	current, err := t.readStageRunnerSettings(id)
+	if err != nil {
+		return err
+	}
+	if expected.Restart == nil {
+		if reflect.DeepEqual(current.Selection, expected.Selection) {
+			return nil
+		}
+	} else if current.Restart != nil && current.Receipt != nil && current.Receipt.State == "consumed" &&
+		current.Restart.Source == expected.Restart.Source &&
+		current.Restart.RequestID == expected.Restart.RequestID &&
+		reflect.DeepEqual(current.Restart.Selection(), expected.Selection) {
+		return nil
+	}
+	return fmt.Errorf("%w: settings_conflict: выбор исполнителя изменился до запуска", ErrConflict)
 }
 
 // ReadStageRunnerSelection читает параметры ранее сохранённого точного узла.
@@ -53,7 +105,11 @@ func decodeStageRunnerSelection(
 		}
 	}
 	selection := objectField(row, "selection")
-	if !exactFields(selection, "primary", "parametersFor", "model", "effort") {
+	keys := []string{"primary", "parametersFor", "model", "effort"}
+	if _, present := selection["speed"]; present {
+		keys = append(keys, "speed")
+	}
+	if !exactFields(selection, keys...) {
 		return result, conflict
 	}
 	result.ParametersFor = stringField(selection, "parametersFor")
@@ -74,6 +130,10 @@ func decodeStageRunnerSelection(
 	if result.Effort, err = nullableRunnerText(selection["effort"]); err != nil {
 		return result, conflict
 	}
+	result.Speed, err = nullableRunnerText(selection["speed"])
+	if err != nil || (result.Speed != nil && !ValidRunnerSpeed(*result.Speed)) {
+		return result, conflict
+	}
 	if row["failover"] != nil {
 		chain, ok := row["failover"].([]any)
 		if !ok || result.Primary == "" {
@@ -89,6 +149,12 @@ func decodeStageRunnerSelection(
 		}
 	}
 	return result, nil
+}
+
+// ValidRunnerSpeed принимает публичный enum при чтении запроса или защищённой записи.
+// Наследование кодируется отдельно и не является значением скорости.
+func ValidRunnerSpeed(value string) bool {
+	return value == "standard" || value == "fast" || value == "ultrafast"
 }
 
 func nullableRunnerText(value any) (*string, error) {

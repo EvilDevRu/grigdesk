@@ -11,6 +11,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"syscall"
 	"testing"
@@ -244,5 +245,70 @@ func TestCaptureTreeRefusesOwnSession(t *testing.T) {
 	}
 	if owner.Leader.PPID != os.Getpid() || owner.Leader.Session != owner.Leader.PID {
 		t.Fatalf("лидер подтверждён с PPID владельца и своей сессией: %+v", owner.Leader)
+	}
+}
+
+// TestRunProcessOwnedDeadlineClosesTree доказывает, что дедлайн owned-пробы
+// останавливает всю сессию: зависший лидер и его потомок не переживают тайм-аут,
+// а результат прямо сообщает о подтверждённом закрытии дерева.
+func TestRunProcessOwnedDeadlineClosesTree(t *testing.T) {
+	var observed TreeOwner
+	ctx, cancel := context.WithTimeout(t.Context(), 300*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	result := RunProcess(ctx, Process{
+		Path: "/bin/sh", Args: []string{"-c", "sleep 60 & wait"}, Owned: true,
+		RecordOwner: func(owner TreeOwner) error {
+			observed = owner
+			return nil
+		},
+	})
+	if result.RC != 124 || !result.OwnedTreeClosed || result.Err == nil {
+		t.Fatalf("дедлайн не закрыл сессию: rc=%d closed=%t err=%v", result.RC, result.OwnedTreeClosed, result.Err)
+	}
+	closed, err := TreeExitConfirmed(observed)
+	if err != nil || !closed {
+		t.Fatalf("после дедлайна в сессии остались процессы: closed=%t err=%v", closed, err)
+	}
+	if elapsed := time.Since(start); elapsed > 10*time.Second {
+		t.Fatalf("дедлайн завершил пробу поздно: %s", elapsed)
+	}
+}
+
+// TestRunProcessOwnedCancelClosesTree доказывает то же для отмены контекста:
+// код возврата 130, дерево закрыто, читатель lease не остаётся в живой сессии.
+func TestRunProcessOwnedCancelClosesTree(t *testing.T) {
+	var observed TreeOwner
+	marker := filepath.Join(t.TempDir(), "started")
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	done := make(chan ProcessResult, 1)
+	go func() {
+		done <- RunProcess(ctx, Process{
+			Path: "/bin/sh", Args: []string{"-c", "touch " + marker + "; sleep 60 & wait"}, Owned: true,
+			RecordOwner: func(owner TreeOwner) error {
+				observed = owner
+				return nil
+			},
+		})
+	}()
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		if _, err := os.Stat(marker); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("фикстура не достигла запуска")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	cancel()
+	result := <-done
+	if result.RC != 130 || !result.OwnedTreeClosed || result.Err == nil {
+		t.Fatalf("отмена не закрыла сессию: rc=%d closed=%t err=%v", result.RC, result.OwnedTreeClosed, result.Err)
+	}
+	closed, err := TreeExitConfirmed(observed)
+	if err != nil || !closed {
+		t.Fatalf("после отмены в сессии остались процессы: closed=%t err=%v", closed, err)
 	}
 }

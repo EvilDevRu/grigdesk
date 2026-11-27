@@ -17,10 +17,18 @@ type StageRunnerEpoch struct {
 }
 
 type StageRunnerActual struct {
-	Run      StageRunnerEpoch `json:"run"`
-	Provider string           `json:"provider"`
-	Model    string           `json:"model"`
-	Effort   string           `json:"effort"`
+	Run          StageRunnerEpoch `json:"run"`
+	Provider     string           `json:"provider"`
+	Model        string           `json:"model"`
+	Effort       string           `json:"effort"`
+	Speed        string           `json:"speed,omitempty"`
+	SpeedWarning string           `json:"speedWarning,omitempty"`
+}
+
+func (actual StageRunnerActual) validSpeed() bool {
+	return (actual.Speed == "" || ValidRunnerSpeed(actual.Speed)) &&
+		(actual.SpeedWarning == "" ||
+			actual.SpeedWarning == "profile_speed_unavailable" && actual.Speed == "standard")
 }
 
 // Valid проверяет допустимость id и эпохи до использования в сравнении CAS.
@@ -41,7 +49,7 @@ type stageRunnerProcess struct {
 // PublishStageRunnerProcess записывает параметры от владельца до выдачи permit.
 // Проекция логов провайдера не участвует в выборе actual и проверке эпохи.
 func (s Store) PublishStageRunnerProcess(
-	id RunIdentity, node, provider, model, effort string, owner host.ProcessIdentity,
+	id RunIdentity, node, provider, model, effort, speed, speedWarning string, owner host.ProcessIdentity,
 ) (func() error, error) {
 	if !runnerNode.MatchString(node) || !runnerProvider.MatchString(provider) ||
 		owner.PID <= 1 || owner.Session != owner.PID || owner.Group != owner.PID ||
@@ -60,6 +68,10 @@ func (s Store) PublishStageRunnerProcess(
 	entry := stageRunnerProcess{Schema: 1, ID: id, Node: node, Owner: owner}
 	entry.Actual.Run.ID, entry.Actual.Run.Epoch = id.ID, id.Epoch
 	entry.Actual.Provider, entry.Actual.Model, entry.Actual.Effort = provider, model, effort
+	entry.Actual.Speed, entry.Actual.SpeedWarning = speed, speedWarning
+	if !entry.Actual.validSpeed() {
+		return nil, fmt.Errorf("неверные параметры скорости запуска узла")
+	}
 	raw, err := json.Marshal(entry)
 	if err != nil || len(raw) > runRecordLimit {
 		return nil, fmt.Errorf("неверные параметры запуска узла")
@@ -122,6 +134,7 @@ func (s Store) readStageRunnerActual(task *taskState, id StageRunnerIdentity) (*
 	if !jsontext.Value(raw).IsValid() || json.Unmarshal(raw, &entry) != nil ||
 		entry.Schema != 1 || entry.ID.Task != id.Task || !entry.ID.Valid() ||
 		!runnerNode.MatchString(entry.Node) || !runnerProvider.MatchString(entry.Actual.Provider) ||
+		!entry.Actual.validSpeed() ||
 		entry.ID.ID != entry.Actual.Run.ID || entry.ID.Epoch != entry.Actual.Run.Epoch {
 		return nil, fmt.Errorf("settings_corrupt: неверная запись процесса")
 	}

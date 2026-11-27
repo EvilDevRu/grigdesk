@@ -2,6 +2,7 @@ import claude from './executors/claude.ts';
 import codex from './executors/codex.ts';
 import qwen from './executors/qwen.ts';
 import { externalCliAdapter } from './providerInstall/externalCliAdapter.ts';
+import { chatSpeedModes, type ChatSpeed } from '../../../shared/chat/chatSpeed.ts';
 import { isRecord } from '../../../shared/lib/objects.ts';
 import { config } from '../config.ts';
 import { GLM_FACTORY_MODELS } from './glm/factoryCatalog.ts';
@@ -18,6 +19,7 @@ export interface FactoryModelOption {
   label: string;
   efforts: string[];
   aliases: string[];
+  speedModes?: ChatSpeed[];
 }
 
 /**
@@ -45,6 +47,7 @@ export async function collectFactoryRunnerModels(
         label: String(entry.name || id),
         efforts: efforts.map(String),
         aliases: [],
+        speedModes: chatSpeedModes(codex.chatSpeed, entry),
       }] : [];
     });
   } else if (provider === 'claude') {
@@ -64,6 +67,7 @@ export async function collectFactoryRunnerModels(
         label: String(model.name || model.id),
         efforts: levels.length ? [...levels] : [''],
         aliases: Array.isArray(model.aliases) ? model.aliases.map(String) : [],
+        speedModes: chatSpeedModes(claude.chatSpeed, entry),
       }];
     });
   } else if (provider === 'qwen') {
@@ -71,7 +75,7 @@ export async function collectFactoryRunnerModels(
     const entries = await adapter.catalog!({
       ...config,
       rootDir: process.env.GRIGDESK_QWEN_CONFIG_ROOT || process.cwd(),
-      qwenBin: cli || process.env.GRIGDESK_QWEN_BIN || config.qwenBin,
+      qwenBin: cli || config.qwenBin,
     });
 
     const available = Array.isArray(entries) ? entries.filter(isRecord) : [];

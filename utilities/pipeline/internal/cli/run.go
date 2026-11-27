@@ -187,6 +187,8 @@ type pipelineClient struct {
 	output     io.Writer
 }
 
+const stageRunnerSpeedAccept = "application/json; grigdesk-stage-speed=1"
+
 // invoke обрабатывает один успешный ответ, включая форму частичного выполнения.
 // Журнал арбитра передаётся байтами, остальным командам нужен валидный JSON.
 func (client pipelineClient) invoke(
@@ -197,6 +199,9 @@ func (client pipelineClient) invoke(
 		Path:   spec.endpoint(values),
 		Body:   body,
 		JSON:   body != nil,
+	}
+	if name == "runner-options" || name == "runner-set" {
+		query.Accept = stageRunnerSpeedAccept
 	}
 	raw, err := client.request(ctx, client.connection, query)
 	if err != nil {

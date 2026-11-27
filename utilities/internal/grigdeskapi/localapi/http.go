@@ -24,6 +24,7 @@ const (
 type RequestSpec struct {
 	Method string
 	Path   string
+	Accept string
 	Body   []byte
 	JSON   bool
 }
@@ -47,6 +48,9 @@ func Request(
 
 	headers := make(http.Header)
 	headers.Set("X-GrigDesk-Token", connection.Token)
+	if spec.Accept != "" {
+		headers.Set("Accept", spec.Accept)
+	}
 	if spec.JSON {
 		headers.Set("Content-Type", "application/json")
 	}

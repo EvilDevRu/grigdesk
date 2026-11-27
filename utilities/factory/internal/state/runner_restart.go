@@ -10,17 +10,22 @@ import (
 const stageRestartTime = "2006-01-02T15:04:05.000Z"
 
 type StageRunnerRestart struct {
-	At        string           `json:"at"`
-	Source    StageRunnerEpoch `json:"source"`
-	RequestID string           `json:"requestId"`
-	Primary   string           `json:"primary"`
-	Model     string           `json:"model"`
-	Effort    string           `json:"effort"`
-	Failover  []string         `json:"failover"`
+	At               string           `json:"at"`
+	Source           StageRunnerEpoch `json:"source"`
+	RequestID        string           `json:"requestId"`
+	Primary          string           `json:"primary"`
+	Model            string           `json:"model"`
+	Effort           string           `json:"effort"`
+	Speed            *string          `json:"speed,omitempty"`
+	SpeedFromProfile bool             `json:"speedFromProfile,omitempty"`
+	Failover         []string         `json:"failover"`
 }
 
 func (request StageRunnerRestart) valid() bool {
 	if !request.Source.Valid() || request.RequestID == "" || !runnerProvider.MatchString(request.Primary) {
+		return false
+	}
+	if request.Speed != nil && *request.Speed != "" && !ValidRunnerSpeed(*request.Speed) {
 		return false
 	}
 	when, err := time.Parse(stageRestartTime, request.At)
@@ -42,7 +47,7 @@ func (request StageRunnerRestart) valid() bool {
 func (request StageRunnerRestart) Selection() StageRunnerSelection {
 	return StageRunnerSelection{
 		Primary: request.Primary, ParametersFor: request.Primary,
-		Model: &request.Model, Effort: &request.Effort, Failover: request.Failover,
+		Model: &request.Model, Effort: &request.Effort, Speed: request.Speed, Failover: request.Failover,
 	}
 }
 

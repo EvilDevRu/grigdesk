@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 
+import { isChatSpeed, type ChatSpeed } from '../../../shared/chat/chatSpeed.ts';
 import { isRecord } from '../../../shared/lib/objects.ts';
 import { withPathLock } from './pathLock.ts';
 import { loadRunnerConfig } from './runnerState.ts';
@@ -344,10 +345,11 @@ export type RunnerConfigOperation =
     version?: string;
     variant?: string;
     effort?: string;
+    speed?: ChatSpeed | '';
     exact?: string;
   };
 
-const MODEL_FIELDS = ['family', 'familyFailover', 'version', 'variant', 'effort', 'exact'] as const;
+const MODEL_FIELDS = ['family', 'familyFailover', 'version', 'variant', 'effort', 'speed', 'exact'] as const;
 const PROVIDER_ID = /^[a-z][a-z0-9_-]{0,63}$/;
 const ROLE_ID = /^[A-Z][A-Z0-9_]{0,63}$/;
 
@@ -457,6 +459,14 @@ function runnerOperations(input: unknown): RunnerConfigOperation[] {
         || fields.some((field) => typeof value[field] !== 'string'
           || (value[field] as string).length > 512
           || !/^[A-Za-z0-9._,:/@=+-]*$/.test(value[field] as string))) {
+        throw new ProfileConfigError('bad_request', 400);
+      }
+
+      // Режимы согласованы с SupportsSpeed в Go, PROFILE_SPEED_MODES и chatSpeed адаптеров.
+      if (Object.hasOwn(value, 'speed') && value.speed !== ''
+        && (typeof value.speed !== 'string' || !isChatSpeed(value.speed)
+          || (value.provider !== 'codex' && value.provider !== 'claude')
+          || (value.provider === 'claude' && value.speed === 'ultrafast'))) {
         throw new ProfileConfigError('bad_request', 400);
       }
 

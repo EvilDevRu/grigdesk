@@ -1,3 +1,4 @@
+import { isChatSpeed, type ChatSpeed } from '../../../../shared/chat/chatSpeed.ts';
 import type {
   ModelConfigOperationView,
   ProfileConfigFile,
@@ -6,7 +7,7 @@ import type {
   RunnerConfigOperationView,
 } from '../../shared/profileConfigApi.ts';
 
-type ModelField = 'family' | 'familyFailover' | 'version' | 'variant' | 'effort' | 'exact';
+type ModelField = 'family' | 'familyFailover' | 'version' | 'variant' | 'effort' | 'speed' | 'exact';
 
 export interface ConfigFormRow {
   id: string;
@@ -15,6 +16,7 @@ export interface ConfigFormRow {
   editable: boolean;
   reason: 'variable' | 'file' | 'runner' | null;
   file?: ProfileConfigFile;
+  speedModes?: readonly ChatSpeed[];
 }
 
 interface RunnerGroup {
@@ -57,8 +59,26 @@ const MODEL_FIELDS: Array<[string, ModelField]> = [
   ['VERSION', 'version'],
   ['VARIANT', 'variant'],
   ['EFFORT', 'effort'],
+  ['SPEED', 'speed'],
   ['EXACT', 'exact'],
 ];
+
+// Режимы согласованы с SupportsSpeed в Go, runnerOperations и chatSpeed адаптеров.
+const PROFILE_SPEED_MODES: Readonly<Partial<Record<string, readonly ChatSpeed[]>>> = {
+  codex: ['standard', 'fast', 'ultrafast'],
+  claude: ['standard', 'fast'],
+};
+
+const profileSpeedModes = (provider: string) => Object.hasOwn(PROFILE_SPEED_MODES, provider)
+  ? PROFILE_SPEED_MODES[provider] : undefined;
+
+/**
+ * Пропущенная синтетическая скорость и пустое наследование совпадают.
+ * Остальные отсутствующие строки сохраняют исходную семантику редактирования.
+ */
+export function matchesConfigRowValue(row: ConfigFormRow, value: string): boolean {
+  return row.value === value || (row.speedModes !== undefined && row.value === null && value === '');
+}
 
 /**
  * Выделяет проектную пару или роль из полного ключа. Суффикс отделяется
@@ -148,8 +168,9 @@ export function configFormModel(config: ProfileConfigView): ConfigFormModel {
   }
 
   const providers = new Set<string>();
+  const runnerEntries = Object.entries(config.runners);
 
-  for (const [key, value] of Object.entries(config.runners)) {
+  for (const [key, value] of runnerEntries) {
     if (key === 'PROJECT_RUNNER_PRIMARY' || key === 'PROJECT_RUNNER_FAILOVER'
       || /^STAGE_[A-Z][A-Z0-9_]*_(PRIMARY|FAILOVER)$/.test(key)) {
       for (const provider of value.split(',')) {
@@ -162,8 +183,28 @@ export function configFormModel(config: ProfileConfigView): ConfigFormModel {
 
   const writable = new Set<string>();
   const modelGroups = new Map<string, ModelGroup>();
+  const speedByKey = new Map<string, readonly ChatSpeed[]>();
+  const knownProviders = [...new Set([...providers, ...Object.keys(PROFILE_SPEED_MODES)])];
 
-  for (const [key, value] of Object.entries(config.runners)) {
+  /**
+   * Строка скорости и существующие модельные поля принадлежат одной операции.
+   * Порядок остальных полей и модельные адреса сохраняются.
+   */
+  const groupFor = (role: string, provider: string): ModelGroup => {
+    const id = `${role}/${provider}`;
+    const group: ModelGroup = modelGroups.get(id) ?? {
+      kind: 'model',
+      role,
+      provider,
+      fields: [],
+    };
+
+    modelGroups.set(id, group);
+
+    return group;
+  };
+
+  for (const [key, value] of runnerEntries) {
     const runner = runnerGroup(key);
 
     if (runner && PROVIDER.test(value)) {
@@ -175,32 +216,67 @@ export function configFormModel(config: ProfileConfigView): ConfigFormModel {
       }
     }
 
-    const address = modelAddress(key, [...providers]);
+    const address = modelAddress(key, knownProviders);
 
     if (address) {
-      const groupId = `${address.role}/${address.provider}`;
-      const group: ModelGroup = modelGroups.get(groupId) ?? {
-        kind: 'model',
-        role: address.role,
-        provider: address.provider,
-        fields: [],
-      };
+      const group = groupFor(address.role, address.provider);
+      const modes = address.field === 'speed' ? profileSpeedModes(address.provider) : undefined;
 
       group.fields.push({ key, field: address.field });
-      modelGroups.set(groupId, group);
       writable.add(key);
+
+      if (modes) {
+        speedByKey.set(key, modes);
+      }
     }
   }
 
-  groups.push(...modelGroups.values());
+  for (const [key, value] of runnerEntries) {
+    const runner = runnerGroup(key.replace(/_FAILOVER$/u, '_PRIMARY'));
 
-  for (const [key, value] of Object.entries(config.runners)) {
+    if (runner && (key === runner.primary || key === runner.failover)) {
+      for (const provider of value.split(',')) {
+        if (profileSpeedModes(provider)) {
+          groupFor(runner.role ?? 'DEFAULT', provider);
+        }
+      }
+    }
+  }
+
+  for (const group of modelGroups.values()) {
+    const modes = profileSpeedModes(group.provider);
+    const providerKey = group.provider.toUpperCase().replaceAll('-', '_');
+    const key = `MODEL_${group.role}_${providerKey}_SPEED`;
+    const address = modelAddress(key, knownProviders);
+
+    if (!modes || address?.provider !== group.provider || address.role !== group.role
+      || Object.hasOwn(config.runners, key)) {
+      continue;
+    }
+
+    group.fields.push({ key, field: 'speed' });
+    rows.push({
+      id: `r:${key}`,
+      name: key,
+      value: null,
+      editable: true,
+      reason: null,
+      speedModes: modes,
+    });
+  }
+
+  groups.push(...[...modelGroups.values()].filter((group) => group.fields.length));
+
+  for (const [key, value] of runnerEntries) {
+    const speedModes = speedByKey.get(key);
+
     rows.push({
       id: `r:${key}`,
       name: key,
       value,
       editable: writable.has(key),
       reason: writable.has(key) ? null : 'runner',
+      ...(speedModes ? { speedModes } : {}),
     });
   }
 
@@ -215,10 +291,10 @@ export function reconcileConfigEdits(
   config: ProfileConfigView,
   edits: Record<string, string>,
 ): Record<string, string> {
-  const actual = new Map(configFormModel(config).rows.map((row) => [row.id, row.value]));
+  const actual = new Map(configFormModel(config).rows.map((row) => [row.id, row]));
 
   return Object.fromEntries(Object.entries(edits)
-    .filter(([key, desired]) => !actual.has(key) || actual.get(key) !== desired));
+    .filter(([key, desired]) => !actual.has(key) || !matchesConfigRowValue(actual.get(key)!, desired)));
 }
 
 /**
@@ -290,11 +366,32 @@ export function configSavePlan(
       };
 
       for (const item of group.fields) {
-        operation[item.field] = value(item.key);
+        if (item.field === 'speed') {
+          const id = `r:${item.key}`;
+
+          if (!changed.has(id)) {
+            continue;
+          }
+
+          const speed = value(item.key);
+
+          if (speed !== '' && (!isChatSpeed(speed) || !speed || !byId.get(id)?.speedModes?.includes(speed))) {
+            plan.blocked.push(id);
+
+            continue;
+          }
+
+          operation.speed = speed;
+        } else {
+          operation[item.field] = value(item.key);
+        }
+
         summarize(item.key);
       }
 
-      plan.operations.push(operation);
+      if (Object.keys(operation).length > 3) {
+        plan.operations.push(operation);
+      }
     }
   }
 
