@@ -106,6 +106,11 @@ If refreshing history before sending fails, the reason appears beside the compos
 Answers and actions remain in the transcript. Unsent text is saved as a draft.
 Questions prepared from help open a separate conversation and wait for you to send them.
 
+During a turn, an ellipsis next to a tool call indicates that its result is pending.
+When the result arrives, a check mark indicates success, or a cross appears with an error message.
+For Bash, the exit code appears beside the cross when available. Expand the row to see
+the command output.
+
 New answer blocks preserve earlier replies and steering messages in their order.
 In a long turn, the hidden-step count stays at the start of the feed. Steering
 messages keep their place among visible actions. While the turn history syncs,

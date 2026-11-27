@@ -69,10 +69,11 @@
               <span v-if="r.res" class="mark" :class="{ bad: !r.res!.ok }">
                 {{ r.res.ok ? '✓' : '✕' }}
               </span>
-              <span v-if="r.res?.ok === false" class="ttl step-failure">
-                {{ failureLine(r.res) }}
-              </span>
               <span v-else-if="live" class="mark run">…</span>
+              <span v-if="r.res?.ok === false" class="ttl step-failure"
+                    :class="{ 'command-failure': r.name === 'Bash' }">
+                {{ failureLine(r.res, r.name) }}
+              </span>
             </span>
           </UiDisclosureButton>
           <div v-if="expanded[r.rowKey]" :id="`${baseId}-${r.rowKey}`" class="body-wrap">
@@ -115,7 +116,8 @@
               </div>
             </div>
             <pre v-if="r.preview" class="body">{{ r.preview }}</pre>
-            <pre v-if="resTextOf(r)" class="body res" :class="{ bad: !r.res!.ok }">{{ resTextOf(r) }}</pre>
+            <pre v-if="resTextOf(r)" class="body res"
+                 :class="{ bad: !r.res!.ok && r.name !== 'Bash' }">{{ resTextOf(r) }}</pre>
           </div>
         </template>
 
@@ -136,14 +138,15 @@
               <span class="ttl">{{ t('core.chatDeystvieVytesnenoIzLenty') }}</span>
               <span v-if="r.lines" class="stat">{{ r.lines }} {{ t('core.chatStr') }}</span>
               <span class="mark" :class="{ bad: !r.ok }">{{ r.ok ? '✓' : '✕' }}</span>
-              <span v-if="r.ok === false" class="ttl step-failure">{{ failureLine(r) }}</span>
+              <span v-if="r.ok === false" class="ttl step-failure"
+                    :class="{ 'command-failure': r.name === 'Bash' }">{{ failureLine(r) }}</span>
             </span>
           </UiDisclosureButton>
           <pre
             v-if="expanded[r.rowKey] && r.text"
             :id="`${baseId}-${r.rowKey}`"
             class="body res"
-            :class="{ bad: !r.ok }"
+            :class="{ bad: !r.ok && r.name !== 'Bash' }"
           >{{ r.text }}</pre>
         </template>
 
@@ -172,7 +175,19 @@ import { chatWorkdirImageHref } from './chatImages.ts';
 import { foldChatSteps, nestChatStepRows } from './chatStepRows.ts';
 import type { StepRow } from './chatStepRows.ts';
 
-function failureLine(step: ChatStep) {
+/**
+ * В строке Bash показываем статус всей команды отдельно от объединённого вывода.
+ * Сохранённые шаги без кода получают общую подпись, подробности доступны в раскрытии.
+ */
+function failureLine(step: ChatStep, name = step.name) {
+  if (name === 'Bash') {
+    const code = step.exitCode;
+
+    return typeof code === 'number' && code !== 0
+      ? t('core.chatCommandExitCode', { code })
+      : t('core.chatCommandFailed');
+  }
+
   return step.text?.trim().split('\n', 1)[0]?.slice(0, 180) || t('core.chatToolFailed');
 }
 
@@ -562,5 +577,6 @@ function toolLabel(name: string | undefined) {
 .section .step > .note { padding-left: 27px; }
 .note.warn { color: var(--warn, #e0a33a); }
 .head .step-failure { color: var(--danger, #e46b73); }
+.head .command-failure { flex-shrink: 0; max-width: 55%; }
 .note.start b { color: var(--ink-mid); font-weight: 500; }
 </style>

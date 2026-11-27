@@ -157,6 +157,7 @@ export interface ChatStep extends Record<string, unknown> {
   imagePath?: string;
   lines?: number;
   ok?: boolean;
+  exitCode?: number;
   sub?: string | boolean;
   parent?: string;
   diff?: { old?: string; new?: string };

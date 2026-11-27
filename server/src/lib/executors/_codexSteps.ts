@@ -169,9 +169,9 @@ function shellPathAfter(source: string, from: number): { path: string; end: numb
     return { path, end: from + quoted[0].length };
   }
 
-  const bare = /^([^\s;|&<>]+)/.exec(rest);
+  const path = /^([^\s;|&<>]+)/.exec(rest)?.[1];
 
-  return bare ? { path: bare[1], end: from + bare[1].length } : null;
+  return path ? { path, end: from + path.length } : null;
 }
 
 /**
@@ -260,12 +260,29 @@ export function shellWriteFiles(command: string): string[] {
   return files;
 }
 
+function exitCodeOf(item: CodexItem | null | undefined): number | undefined {
+  const code = typeof item?.exitCode === 'number' ? item.exitCode : item?.exit_code;
+
+  return typeof code === 'number' ? code : undefined;
+}
+
+/**
+ * Явный исход инструмента имеет приоритет над кодом процесса и статусом события.
+ * Код команды читается одинаково для оценки исхода и записи в ленту.
+ */
 function itemOk(item: CodexItem | null | undefined): boolean {
-  if (item?.error) return false;
-  if (item?.success === false) return false;
-  if (item?.success === true) return true;
-  if (typeof item?.exitCode === 'number') return item.exitCode === 0;
-  if (typeof item?.exit_code === 'number') return item.exit_code === 0;
+  if (item?.error) {
+    return false;
+  }
+  if (typeof item?.success === 'boolean') {
+    return item.success;
+  }
+
+  const exitCode = exitCodeOf(item);
+  if (exitCode !== undefined) {
+    return exitCode === 0;
+  }
+
   return !['failed', 'error', 'declined', 'cancelled', 'canceled']
     .includes(String(item?.status || '').toLowerCase());
 }
@@ -732,8 +749,9 @@ export function createCodexStepNormalizer({
       return;
     }
 
+    const isCommand = item.type === 'commandExecution' || item.type === 'command_execution';
     let completed = item;
-    if ((item.type === 'commandExecution' || item.type === 'command_execution') && id) {
+    if (isCommand && id) {
       const streamed = commandOutputs.get(id) || '';
       if (!resultOf(item) && streamed) completed = { ...item, aggregatedOutput: streamed };
       commandOutputs.delete(id);
@@ -747,8 +765,12 @@ export function createCodexStepNormalizer({
     const text = resultOf(completed);
     const ok = itemOk(completed);
     out.push({
-      k: 'res', id: tool.id, ok,
-      text: cut(text, ok ? 400 : 600), lines: lineCount(text),
+      k: 'res',
+      id: tool.id,
+      ok,
+      text: cut(text, ok ? 400 : 600),
+      lines: lineCount(text),
+      ...(isCommand ? { name: 'Bash', exitCode: exitCodeOf(completed) } : {}),
     });
   }
 

@@ -289,6 +289,8 @@
   "chatAccessFailures": "Tool failures in loaded history",
   "chatAccessReadFailed": "Could not read the capabilities available in this chat",
   "chatToolFailed": "The tool returned an error",
+  "chatCommandExitCode": "Exit code {code}",
+  "chatCommandFailed": "The command failed",
   "chatGoalNew": "Set a goal",
   "chatGoalResume": "Resume goal",
   "chatGoalRound": "Goal · round {round} of {total}",

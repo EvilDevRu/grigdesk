@@ -638,6 +638,43 @@ test('Codex ограничивает один multi-file tool двадцатью
   assert.deepEqual(sink.steps, sent, 'SSE и сохранённая история видят один и тот же bounded step');
 });
 
+test('Codex передаёт код завершения Bash отдельным полем результата', () => {
+  const normalize = createCodexStepNormalizer();
+  const sink = createStepSink(null, { now: () => 149 });
+  const output = '# GrigDesk — общие правила\n\nСодержимое файла';
+
+  sink.emitAll(normalize({
+    method: 'item/completed',
+    params: {
+      item: {
+        type: 'commandExecution',
+        id: 'app-server-command',
+        status: 'failed',
+        command: 'cat CLAUDE.md; rg --files -g AGENTS.md docs',
+        aggregatedOutput: output,
+        exitCode: 1,
+      },
+    },
+  }));
+  sink.emitAll(normalize({
+    type: 'item.completed',
+    item: { type: 'command_execution', id: 'legacy-command', command: 'pwd', exit_code: 0 },
+  }));
+  sink.emitAll(normalize({
+    method: 'item/completed',
+    params: { item: { type: 'commandExecution', id: 'no-code', status: 'failed', exitCode: null } },
+  }));
+
+  const results = JSON.parse(JSON.stringify(sink.steps)).filter((step) => step.k === 'res');
+
+  assert.deepEqual(results.map(({ name, ok, exitCode }) => [name, ok, exitCode]), [
+    ['Bash', false, 1],
+    ['Bash', true, 0],
+    ['Bash', false, undefined],
+  ]);
+  assert.equal(results[0].text, output);
+});
+
 test('Codex: запись файлов через shell называется в свёрнутой строке Bash', () => {
   // Ultrafast-модели пишут код не через apply_patch, а через `cat > P <<'EOF'` внутри
   // `/bin/bash -lc`. Для app-server это обычный commandExecution без диффа: строка

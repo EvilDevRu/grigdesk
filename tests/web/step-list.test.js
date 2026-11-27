@@ -189,6 +189,62 @@ test('StepList обновляет строку вызова, а не завод�
   assert.equal(wrapper.find('.mark').text(), '✓');
 });
 
+test('StepList заменяет ожидание результатом сразу, пока ход агента продолжается', async (t) => {
+  const steps = [
+    { k: 'tool', id: 'success', name: 'grigdesk_browser', title: 'Снимок страницы' },
+    { k: 'tool', id: 'failure', name: 'grigdesk_browser', title: 'Нажатие' },
+    { k: 'tool', id: 'pending', name: 'grigdesk_browser', title: 'Прокрутка' },
+  ];
+  const wrapper = await mountStepList(t, steps);
+  const rows = wrapper.findAll('.step.tool');
+
+  assert.equal(rows[0].find('.mark.run').text(), '…');
+
+  await wrapper.setProps({
+    steps: [
+      ...steps,
+      { k: 'res', id: 'success', ok: true, text: 'Готово' },
+      { k: 'res', id: 'failure', ok: false, text: 'Элемент исчез' },
+    ],
+  });
+
+  for (const [index, symbol] of ['✓', '✕', '…'].entries()) {
+    assert.deepEqual(rows[index].findAll('.mark').map((mark) => mark.text()), [symbol]);
+  }
+  assert.equal(rows[1].find('.step-failure').text(), 'Элемент исчез');
+
+  await wrapper.setProps({ live: false });
+  await wrapper.find('.summary-disclosure').trigger('click');
+
+  assert.deepEqual(wrapper.findAll('.mark').map((mark) => mark.text()), ['✓', '✕']);
+});
+
+test('StepList показывает статус Bash в строке и сохраняет вывод в раскрытии', async (t) => {
+  const output = '# GrigDesk — общие правила\n\nСодержимое файла';
+  const wrapper = await mountStepList(t, [
+    { k: 'tool', id: 'new-command', name: 'Bash', title: 'cat CLAUDE.md' },
+    { k: 'res', id: 'new-command', name: 'Bash', ok: false, exitCode: 1, text: output },
+    { k: 'tool', id: 'old-command', name: 'Bash', title: 'cat CLAUDE.md' },
+    { k: 'res', id: 'old-command', ok: false, text: output },
+    { k: 'res', id: 'evicted-command', name: 'Bash', ok: false, exitCode: 127, text: 'command not found' },
+  ], { live: false });
+
+  await wrapper.get('.summary-disclosure').trigger('click');
+  const rows = wrapper.findAll('.step');
+
+  assert.deepEqual(rows.map((row) => row.get('.step-failure').text()), [
+    'Код завершения 1',
+    'Команда завершилась с ошибкой',
+    'Код завершения 127',
+  ]);
+  for (const [index, row] of rows.entries()) {
+    assert.deepEqual(row.findAll('.mark').map((mark) => mark.text()), ['✕']);
+    await row.get('.step-disclosure').trigger('click');
+    assert.equal(row.get('.body.res').text(), index === 2 ? 'command not found' : output);
+    assert.equal(row.get('.body.res').classes('bad'), false);
+  }
+});
+
 test('StepList показывает итог, чей вызов вытеснен из ленты', async (t) => {
   // Окно ленты выбрасывает начало длинного хода вместе со строкой инструмента.
   // Осиротевший результат раньше рисовался пустой строкой без разметки.

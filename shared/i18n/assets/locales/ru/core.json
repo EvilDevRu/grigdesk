@@ -289,6 +289,8 @@
   "chatAccessFailures": "Ошибки инструментов в загруженной истории",
   "chatAccessReadFailed": "Не удалось получить доступные возможности чата",
   "chatToolFailed": "Инструмент вернул ошибку",
+  "chatCommandExitCode": "Код завершения {code}",
+  "chatCommandFailed": "Команда завершилась с ошибкой",
   "chatGoalNew": "Поставить цель",
   "chatGoalResume": "Продолжить цель",
   "chatGoalRound": "Цель · раунд {round} из {total}",
