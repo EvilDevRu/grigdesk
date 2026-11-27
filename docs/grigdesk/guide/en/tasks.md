@@ -62,6 +62,11 @@ reset and Evaluate all. The latter queues unevaluated tasks on the default board
 The right column switches between monitoring and assignments with independent search.
 Phones use tabs or horizontal swipes. The wide-screen loading summary does not duplicate My tasks.
 
+The clock icon in the top bar shows the number of active task timers. It stays visible at `0`
+and displays a dash until the count is available. A line separates it from the pipeline counter
+when both indicators are visible. On narrower screens, task timers are in System Status.
+On phones, find them under Sections.
+
 Old `grigdesk:<id>` links show Task not found and never open an external task with the same number.
 Close that card and choose the current external task.
 Triage takes the first 8,000 description characters and last 15 comments of up to 1,500 characters each.

@@ -383,13 +383,29 @@ test('PHONE-TOPBAR: настоящая оболочка переносит ко�
   assert.equal(browser.document.activeElement.classList.contains('tools-grid'), true);
   assert.equal(Boolean(moved.querySelector('[data-shell-status-trigger]')), false);
   assert.equal(Boolean(moved.querySelector('[data-context="provider-status"]')), false);
+  assert.equal(Boolean(moved.querySelector('[data-context="board-timers-topbar"]')), true);
   dialog.querySelector('button[aria-label="Закрыть"]').click();
   await flushPromises();
   assert.equal(phoneCommand.closest('#phone-actions-parking') !== null, true);
 
   browser.happyDOM.setWindowSize({ width: 1280, height: 900 });
+  pinia._s.get('board').data = { tasks: [], today: { hours: 0 } };
   await flushPromises();
-  assert.equal(wrapper.get('.topbar').find('[data-context="pipeline-topbar"]').exists(), true);
+
+  const status = wrapper.get('.topbar .status');
+  const timers = status.get('.board-timers-topbar');
+  const pipeline = status.get('.pipeline-topbar-wrap');
+  const separator = timers.element.nextElementSibling;
+
+  assert.equal(timers.get('.board-timers-topbar-count').text(), '0');
+  assert.equal(separator?.classList.contains('sep'), true);
+  assert.equal(separator?.nextElementSibling === pipeline.element, true);
+
+  notifyWatch.running = [];
+  await flushPromises();
+  assert.equal(status.find('.pipeline-topbar-wrap').exists(), false);
+  assert.equal(timers.get('.board-timers-topbar-count').text(), '0');
+  assert.equal(timers.element.nextElementSibling?.nextElementSibling?.classList.contains('provbox'), true);
 
   for (const width of [1280, 800]) {
     browser.happyDOM.setWindowSize({ width, height: 900 });

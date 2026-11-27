@@ -1,23 +1,22 @@
 <template>
-  <span v-if="tasks.length || staleNotice || error" class="board-timers-topbar">
+  <span class="board-timers-topbar">
     <UiTopbarPanel :title="t('core.taskTimers')">
       <template #trigger>
         <UiButton
           data-context="board-timers-topbar"
           variant="ghost"
-          :aria-label="!tasks.length
-            ? staleNotice || error : t('core.taskTimersActiveWorkedToday', { activeCount, workedToday })"
+          :aria-label="timerLabel"
         >
           <svg class="board-timers-topbar-icon" viewBox="0 0 24 24" aria-hidden="true">
             <path d="M12 7.5v4.5l3 2 M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18z" />
           </svg>
-          <span class="board-timers-topbar-count mono">{{ tasks.length ? activeCount : '—' }}</span>
+          <span class="board-timers-topbar-count mono">{{ countKnown ? activeCount : '—' }}</span>
           <span class="topbar-status-label">{{ t('core.taskTimers') }}</span>
         </UiButton>
       </template>
 
       <template #meta>
-        <span v-if="tasks.length" class="board-timers-popover-summary">
+        <span v-if="countKnown" class="board-timers-popover-summary">
           {{ t('core.active') }}
           <span class="board-timers-popover-active mono">{{ activeCount }}</span>
           <span aria-hidden="true">·</span>
@@ -27,7 +26,7 @@
       </template>
       <template #default="{ close }">
         <section class="board-timers-popover" :aria-label="t('core.taskTimers')">
-          <ul class="board-timers-popover-list">
+          <ul v-if="tasks.length" class="board-timers-popover-list">
             <li
               v-for="task in tasks"
               :key="taskReferenceKey(task)"
@@ -126,7 +125,7 @@ import { t } from '../../ui.ts';
 
 import type { PropType } from 'vue';
 import type { BoardTask } from '../../shared/boardContracts.ts';
-import { computed, onUnmounted, ref } from 'vue';
+import { computed, ref, watch } from 'vue';
 
 import { hoursToHM, liveTimerSec, secToHMS } from '../../shared/format.ts';
 import { UiButton, UiIconButton, UiInlineMessage, UiTopbarPanel, vTooltip } from '../../ui';
@@ -136,6 +135,7 @@ const props = defineProps({
     type: Array as PropType<BoardTask[]>,
     default: () => [],
   },
+  hasSnapshot: Boolean,
   busyTaskId: {
     type: [String, Number],
     default: null,
@@ -162,11 +162,28 @@ const emit = defineEmits(['openTask', 'openBoard', 'toggleTimer', 'retry']);
 const now = ref(Date.now());
 const activeCount = computed(() => props.tasks.filter((task) => task.timerRunning).length);
 const workedToday = computed(() => hoursToHM(props.workedTodayHours));
-const ticker = setInterval(() => {
-  now.value = Date.now();
-}, 1000);
+const countKnown = computed(() => props.tasks.length > 0
+  || (props.hasSnapshot && !props.staleNotice && !props.error));
+const timerLabel = computed(() => countKnown.value
+  ? t('core.taskTimersActiveWorkedToday', { activeCount: activeCount.value, workedToday: workedToday.value })
+  : props.staleNotice || props.error || t('core.taskTimers'));
 
-(ticker as typeof ticker & { unref?: () => void }).unref?.();
+// Постоянному индикатору секундное обновление нужно только при работающем таймере.
+// После паузы строки продолжают показывать сохранённое время без опроса часов.
+watch(() => activeCount.value > 0, (running, _previous, onCleanup) => {
+  if (!running) {
+    return;
+  }
+
+  now.value = Date.now();
+
+  const ticker = setInterval(() => {
+    now.value = Date.now();
+  }, 1000);
+
+  (ticker as typeof ticker & { unref?: () => void }).unref?.();
+  onCleanup(() => clearInterval(ticker));
+}, { immediate: true });
 
 const elapsed = (task: BoardTask) => secToHMS(liveTimerSec(task, now.value));
 const isTimerBusy = (task: BoardTask) => (task.source
@@ -186,8 +203,6 @@ function openBoard(close: (reason: 'action') => void) {
   close('action');
   emit('openBoard');
 }
-
-onUnmounted(() => clearInterval(ticker));
 </script>
 
 <style scoped>

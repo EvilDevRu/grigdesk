@@ -77,9 +77,6 @@ test('AppShell использует public UI controls и общую повер�
     assert.match(source, /@open-pipeline="openPipeline"/u);
     assert.doesNotMatch(source, /<router-link[^>]*data-context="pipeline-topbar"/u);
     assert.match(source, /total: notifyWatch\.topbarItems\.length/u);
-    assert.match(source, /v-if="!phoneLayout && topbarTimerTasks\.length && pipelineTopbar\.total"/u);
-    assert.match(source, /<PipelineTopbarPopover\s+v-if="!phoneLayout && pipelineTopbar\.total"/u);
-    assert.match(source, /v-if="topbarTimerTasks\.length \|\| \(!phoneLayout && pipelineTopbar\.total\)"/u);
     assert.match(source, /useTasksStore/u);
     assert.match(source, new RegExp(
       'await taskStore\\.timer\\(task\\.id, action,\\s*'

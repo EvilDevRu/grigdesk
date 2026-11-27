@@ -144,8 +144,8 @@
       <div class="status">
         <PhoneShellPortal :phone="phoneLayout" :menu-open="phoneMenuOpen">
         <BoardTimerPopover
-          v-if="topbarTimerTasks.length || boardStaleNotice || timerActionError"
           :tasks="topbarTimerTasks"
+          :has-snapshot="!!boardStore.data"
           :stale-notice="boardStaleNotice"
           :refreshing="boardStore.loading"
           :worked-today-hours="workedTodayHours"
@@ -157,23 +157,16 @@
           @toggle-timer="toggleBoardTimer"
         />
         </PhoneShellPortal>
-        <span
-          v-if="!phoneLayout && topbarTimerTasks.length && pipelineTopbar.total"
-          class="sep"
-          aria-hidden="true"
-        ></span>
-        <PipelineTopbarPopover
-          v-if="!phoneLayout && pipelineTopbar.total"
-          :items="notifyWatch.topbarItems"
-          :error="notifyWatch.error || ''"
-          :icon="ICONS.pipeline!"
-          @open-pipeline="openPipeline"
-        />
-        <span
-          v-if="topbarTimerTasks.length || (!phoneLayout && pipelineTopbar.total)"
-          class="sep"
-          aria-hidden="true"
-        ></span>
+        <template v-if="!phoneLayout && pipelineTopbar.total">
+          <span class="sep" aria-hidden="true"></span>
+          <PipelineTopbarPopover
+            :items="notifyWatch.topbarItems"
+            :error="notifyWatch.error || ''"
+            :icon="ICONS.pipeline!"
+            @open-pipeline="openPipeline"
+          />
+        </template>
+        <span v-if="!phoneLayout" class="sep" aria-hidden="true"></span>
         <PhoneShellPortal :phone="phoneLayout" :menu-open="phoneMenuOpen">
           <AttentionAlerts v-if="workspaceStarted" />
         </PhoneShellPortal>

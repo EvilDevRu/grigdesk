@@ -138,7 +138,7 @@ test('BOARD-TIMERS-05: поповер показывает подпись уст
   assert.match(notice.textContent ?? '', /не обновлялись 3 мин/u);
 });
 
-test('BOARD-TIMERS-06: общий отказ виден без строк, восстановление скрывает панель', async (t) => {
+test('BOARD-TIMERS-06: индикатор остаётся при загрузке, отказе и пустой доске', async (t) => {
   const [{ nextTick }, { mount }, BoardTimerPopover] = await Promise.all([
     import('../../web/node_modules/vue/index.mjs'),
     import('../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs'),
@@ -146,16 +146,17 @@ test('BOARD-TIMERS-06: общий отказ виден без строк, во�
   ]);
   const wrapper = mount(BoardTimerPopover, {
     attachTo: browser.document.querySelector('#mount'),
-    props: { tasks: [], staleNotice: 'Данные не обновлялись 5 мин — учёт может быть неточным.' },
   });
 
   t.after(() => wrapper.unmount());
 
-  assert.equal(wrapper.find('[data-context="board-timers-topbar"]').exists(), true);
-
   const trigger = wrapper.get('[data-context="board-timers-topbar"]');
+  const count = trigger.get('.board-timers-topbar-count');
 
-  assert.equal(trigger.get('.board-timers-topbar-count').text(), '—');
+  assert.equal(count.text(), '—');
+  assert.equal(trigger.attributes('aria-label'), 'Таймеры задач');
+  await wrapper.setProps({ staleNotice: 'Данные не обновлялись 5 мин — учёт может быть неточным.' });
+  assert.equal(count.text(), '—');
   assert.match(trigger.attributes('aria-label'), /не обновлялись 5 мин/u);
   await trigger.trigger('mouseenter');
   await nextTick();
@@ -163,9 +164,16 @@ test('BOARD-TIMERS-06: общий отказ виден без строк, во�
     /не обновлялись 5 мин/u);
   assert.equal(browser.document.querySelectorAll('[data-context="topbar-timer-task"]').length, 0);
   assert.equal(browser.document.querySelectorAll('.board-timers-popover-summary').length, 0);
-  await wrapper.setProps({ staleNotice: '' });
-  await nextTick();
-  assert.equal(wrapper.find('[data-context="board-timers-topbar"]').exists(), false);
+  await wrapper.setProps({
+    staleNotice: '',
+    hasSnapshot: true,
+    workedTodayHours: 1.5,
+  });
+  assert.equal(count.text(), '0');
+  assert.match(trigger.attributes('aria-label'), /активных 0, сегодня отработано 1ч 30мин/u);
+  assert.equal(trigger.attributes('aria-expanded'), 'true');
+  assert.equal(browser.document.querySelector('.board-timers-popover-today')?.textContent, '1ч 30мин');
+  assert.equal(browser.document.querySelectorAll('.board-timers-popover-stale').length, 0);
 });
 
 test('POP-RETRY: повтор не закрывает панель и недоступен во время чтения', async (t) => {
