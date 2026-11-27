@@ -441,11 +441,14 @@
                :tabindex="m.kind === 'in-turn' ? -1 : undefined"
                :style="m.role === 'assistant' ? group.brandStyle : null">
             <div v-if="m.attachments?.length" class="m-atts">
-              <a v-for="a in m.attachments" :key="a.file" :href="api.url(a.url || '')" target="_blank" rel="noopener"
-                 @click="onAttachmentClick($event, a)">
-                <img v-if="isImg(a)" :src="api.url(a.url || '')" :alt="a.name" v-tooltip="a.name" />
-                <span v-else class="m-file">📄 {{ a.name }}</span>
-              </a>
+              <template v-for="a in m.attachments" :key="a.file">
+                <ChatAttachmentThumbnail v-if="isImg(a)" :key="a.url"
+                                         :src="api.url(a.url || '')" :name="a.name"
+                                         @click="onAttachmentClick($event, a)" />
+                <a v-else :href="api.url(a.url || '')" target="_blank" rel="noopener">
+                  <span class="m-file">📄 {{ a.name }}</span>
+                </a>
+              </template>
             </div>
             <!-- Подпись агента: ответ визуально отличим от системных плашек и твоих пузырей.
                  Знак и цвет — исполнителя ИМЕННО ЭТОГО хода, а не вшитый Claude: ИИ меняют
@@ -897,6 +900,7 @@ import { useTrackersStore } from '../../stores/trackers.ts';
 import { useProvidersStore } from '../../stores/providers.ts';
 import EffortSlider from './EffortSlider.vue';
 import StepList from './StepList.vue';
+import ChatAttachmentThumbnail from './ChatAttachmentThumbnail.vue';
 import ChatInTurnReply from './ChatInTurnReply.vue';
 import { inTurnComposerState, inTurnDeliveryText } from './chatInTurn.ts';
 import { createChatTimelineProjector, groupChatTimeline } from './chatTimeline.ts';
@@ -3493,8 +3497,6 @@ html[data-ui-touch] .touch-keyboard-hint { display: inline; }
   font-size: 12px; color: var(--ink-mid); margin-bottom: 4px; }
 .m-atts { display: flex; gap: 8px; flex-wrap: wrap; }
 .msg.user .m-atts { justify-content: flex-end; }
-.m-atts img { max-width: 220px; max-height: 160px; border-radius: 10px; border: 1px solid var(--line); display: block;
-  cursor: zoom-in; }
 .m-file { font-size: 12.5px; color: var(--ink-mid); border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; display: inline-block; }
 .m-atts a { text-decoration: none; }
 
@@ -3627,13 +3629,12 @@ html[data-ui-touch] .touch-keyboard-hint { display: inline; }
   .back { display: grid; }
 }
 
-/* Узкие сообщения сохраняют прежние размеры текста и предел ширины вложений. */
+/* На узком экране текст сообщения занимает большую долю ленты. */
 @media (max-width: 759px) {
   .cs-top { justify-content: flex-start; }
   /* Иначе длинный текст режется в узкий столбик */
   .msg.user { max-width: 92%; }
   .msg .text { font-size: 14px; }
-  .m-atts img { max-width: 62vw; }
 }
 
 /* При чтении на телефоне шапка занимает один ряд. Настройки раскрываются явно,

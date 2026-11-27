@@ -22,6 +22,7 @@ function uiFacadeStub(prefix) {
     ['UiSelect', 'src/components/primitives/UiSelect.vue'],
     ['UiSearchInput', 'src/components/composites/UiSearchInput.vue'],
     ['UiSelectableRow', 'src/components/composites/UiSelectableRow.vue'],
+    ['UiSkeleton', 'src/components/feedback/UiSkeleton.vue'],
     ['UiSpinner', 'src/components/primitives/UiSpinner.vue'],
     ['UiTextarea', 'src/components/primitives/UiTextarea.vue'],
     ['UiTooltip', 'src/components/overlays/UiTooltip.vue'],
@@ -34,7 +35,7 @@ function uiFacadeStub(prefix) {
 
   return [
     ...imports,
-    'export { t, messageRef, resolveUiText } from "./src/services/locale.ts";',
+    'export { t, uiLocale, messageRef, resolveUiText } from "./src/services/locale.ts";',
     'export { vTooltip } from "./src/services/tooltipDirective.ts";',
     'export { showToast } from "./src/services/toasts.ts";',
     `export { ${names} };`,
@@ -102,7 +103,10 @@ export function compileChatSession(prefix, {
         'export const useRouter = () =>',
         `  globalThis.${prefix}Router || { push() {} };`,
       ].join('\n'),
-      '../../shared/apiClient.ts': `export const api = globalThis.${prefix}Api;`,
+      '../../shared/apiClient.ts': [
+        `export const api = globalThis.${prefix}Api;`,
+        'export { failureText } from "./src/shared/apiClient.ts";',
+      ].join('\n'),
       '../../features/speech/provider.ts': speechProviderStub(prefix),
       '../../stores/chat.ts': [
         `export const CONTEXT_WINDOW = globalThis.${prefix}ContextWindow || 200000;`,

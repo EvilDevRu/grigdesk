@@ -212,3 +212,48 @@ test('крестик на чипе убирает вложение из черн
   assert.deepEqual(find('a').draftAttachments, []);
   assert.equal(wrapper.findAll('.pend .chip').length, 0);
 });
+
+test('в истории картинка заменяет скелетон на месте, а обычный файл сразу доступен по ссылке', async (t) => {
+  const { open, find } = await harness(t);
+  const missing = {
+    ...SHOT,
+    file: 'missing.png',
+    url: '/api/chat/attachment/missing.png',
+  };
+  const file = {
+    file: 'note.txt',
+    name: 'note.txt',
+    url: '/api/chat/attachment/note.txt',
+    mime: 'text/plain',
+  };
+
+  find('a').messages.push({
+    role: 'user',
+    text: 'Вложения',
+    attachments: [SHOT, missing, file],
+  });
+
+  const wrapper = await open('a');
+  const [thumbnail, failed] = wrapper.findAll('.m-atts .attachment-thumbnail');
+  const link = wrapper.get('.m-atts a:has(.m-file)');
+
+  assert.equal(wrapper.findAll('.m-atts [data-ui-skeleton]').length, 2);
+  assert.equal(thumbnail.attributes('aria-description'), 'Загрузка изображения…');
+  assert.equal(link.attributes('href'), file.url);
+  assert.equal(link.find('[data-ui-skeleton]').exists(), false);
+
+  const frame = thumbnail.element;
+
+  await thumbnail.get('img').trigger('load');
+
+  assert.equal(wrapper.findAll('.m-atts [data-ui-skeleton]').length, 1);
+  assert.equal(wrapper.get('.attachment-thumbnail').element, frame);
+  assert.equal(thumbnail.get('img').classes('is-ready'), true);
+  assert.equal(thumbnail.attributes('aria-description'), undefined);
+
+  await failed.get('img').trigger('error');
+
+  assert.equal(wrapper.findAll('.m-atts [data-ui-skeleton]').length, 0);
+  assert.equal(failed.text(), 'Изображение недоступно');
+  assert.equal(failed.get('img').classes('is-ready'), false);
+});

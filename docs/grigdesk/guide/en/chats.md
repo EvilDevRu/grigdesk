@@ -50,6 +50,9 @@ A dev environment is for testing interface changes or your explicit request. If 
 the agent uses the built-in browser within its granted access; missing access remains a separate limitation.
 
 Touch controls retain their full hit areas for model, mode and task selection, including compact landscape headers.
+While an image attachment loads, its frame shows “Loading image…”. The thumbnail appears in the same frame,
+so the messages stay in place.
+
 Click an image to view it fullscreen. Pinch to zoom and drag with one finger. Double-tap zooms into a point;
 repeat to fit the image. “1:1” shows original size or returns a zoomed image to fit.
 The header, arrows and counter stay in place. Arrows select the next image; desktop supports dragging and wheel zoom.

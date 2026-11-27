@@ -2080,6 +2080,7 @@
   "chatStr": "p.",
   "chatIzobrazhenieNedostupno": "Image unavailable",
   "chatIzobrazhenie": "Image",
+  "chatAttachmentImageLoading": "Loading image…",
   "chatItog": "Result",
   "chatDeystvieVytesnenoIzLenty": "action displaced from the feed",
   "chatStartModel": "start · model",

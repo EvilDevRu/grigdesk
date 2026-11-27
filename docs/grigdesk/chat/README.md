@@ -121,7 +121,7 @@
 - [Измерение схем Mermaid и повтор пустого результата](mermaid-layout.md)
 - [«Требуют вмешательства»: чипы, чтобы вопрос не проехал мимо](intervention-badges.md)
 - [Автопрокрутка, переход к уточнению и сохранение позиции при подгрузке истории](auto-scroll.md)
-- [Вложения (фото) и диктовка](attachments-and-dictation.md)
+- [Вложения, каркасы картинок в истории и диктовка](attachments-and-dictation.md)
 - [Просмотр неотправленных изображений и галерея текущего черновика](draft-image-preview.md)
 - [Типизированные границы старых ответов: MIME, revision папки и сетевые ошибки](typed-legacy-responses.md)
 - [Всплывашка разрешений (аналог permission prompt Claude Code)](permission-prompt.md)

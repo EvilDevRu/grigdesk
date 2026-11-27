@@ -2100,6 +2100,7 @@
   "chatStr": "стр.",
   "chatIzobrazhenieNedostupno": "Изображение недоступно",
   "chatIzobrazhenie": "Изображение",
+  "chatAttachmentImageLoading": "Загрузка изображения…",
   "chatItog": "Итог",
   "chatDeystvieVytesnenoIzLenty": "действие вытеснено из ленты",
   "chatStartModel": "старт · модель",
